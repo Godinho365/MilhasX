@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
-  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, PlaneTakeoff, FilePlus2, Languages, Palette,
+  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Palette, Plane, ChevronDown,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -33,14 +33,18 @@ const NAV: { group: string; items: { href: string; label: string; icon: Icon }[]
     { href: "/app/credit-cards", label: "Cartões de Crédito", icon: CreditCard },
   ] },
   { group: "Ferramentas", items: [
-    { href: "/app/crm", label: "CRM", icon: KanbanSquare },
-    { href: "/app/buscador", label: "Buscador", icon: PlaneTakeoff },
-    { href: "/app/tradutor", label: "Tradutor de milhas", icon: Languages },
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/sales", label: "Vendas", icon: ReceiptText },
     { href: "/app/management", label: "Fornecedores", icon: Contact },
   ] },
 ];
+
+// Grupo recolhível "Voos" (como no Quero Milhas) e o CRM logo abaixo, fora de "Ferramentas"
+const FLIGHTS = [
+  { href: "/app/buscador", label: "Buscador" },
+  { href: "/app/tradutor", label: "Tradutor de milhas" },
+];
+const FLIGHTS_KEY = "mm:nav-voos";
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", purchases: "Compras", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const SIM_LABELS: Record<string, string> = { "purchase/bonificada": "Compra Bonificada", purchase: "Compra Bonificada", "purchase/store-comparison": "Pontos vs Cashback", "purchase/pontos": "Compra de Pontos", transfer: "Transferência", flight: "Passagem Aérea", hotel: "Hospedagem", sale: "Venda", "supplier-ranking": "Melhor fornecedor" };
@@ -163,6 +167,21 @@ export function Shell(props: {
     window.location.href = "/login";
   }
 
+  const inFlights = FLIGHTS.some((f) => active(f.href));
+  const [flightsOpen, setFlightsOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(FLIGHTS_KEY) === "0" && !inFlights) setFlightsOpen(false);
+    } catch {}
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleFlights = () => {
+    const next = !flightsOpen;
+    setFlightsOpen(next);
+    try {
+      window.localStorage.setItem(FLIGHTS_KEY, next ? "1" : "0");
+    } catch {}
+  };
+
   const navLink = (href: string, label: string, Icon: Icon, badge?: number, external?: boolean) => {
     const cls = `relative flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.5px] font-semibold transition-colors ${!external && active(href) ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`;
     const inner = (
@@ -190,6 +209,38 @@ export function Shell(props: {
   // Fixadas primeiro ("Fixar na barra lateral"); sem fixadas, as de maior saldo
   const pinnedAccounts = visibleAccounts.filter((a) => a.pinned);
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
+  const flightsBlock = (
+    <div key="voos" className="space-y-0.5">
+      <button
+        type="button"
+        onClick={toggleFlights}
+        aria-expanded={flightsOpen}
+        aria-controls="nav-voos"
+        className={`flex w-full items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.5px] font-semibold transition-colors ${inFlights && !flightsOpen ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}
+      >
+        <Plane className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
+        <span className="truncate">Voos</span>
+        <ChevronDown className={`ml-auto h-4 w-4 text-zinc-400 transition-transform ${flightsOpen ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      {flightsOpen && (
+        <div id="nav-voos" className="space-y-0.5">
+          {FLIGHTS.map((f) => (
+            <Link
+              key={f.href}
+              href={f.href}
+              aria-current={active(f.href) ? "page" : undefined}
+              className={`relative block rounded-[10px] py-2 pl-[42px] pr-2.5 text-[13.5px] font-medium transition-colors ${active(f.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
+            >
+              {active(f.href) && <span className="absolute -left-3 top-1.5 h-6 w-[3px] rounded-r bg-accent-light" aria-hidden />}
+              {f.label}
+            </Link>
+          ))}
+        </div>
+      )}
+      {navLink("/app/crm", "CRM", KanbanSquare)}
+    </div>
+  );
+
   const sidebar = (
     <div className="flex h-full flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-5">
@@ -205,7 +256,7 @@ export function Shell(props: {
             <p className="kicker mb-1.5 px-2.5">{g.group}</p>
             <div className="space-y-0.5">{g.items.map((it) => navLink(it.href, it.label, it.icon))}</div>
           </div>
-        ))}
+        )).flatMap((el, i) => (i === 1 ? [el, flightsBlock] : [el]))}
         <div>
           <div className="mb-2 flex items-center px-2.5">
             <p className="kicker">Programas</p>
