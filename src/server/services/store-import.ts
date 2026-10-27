@@ -20,7 +20,7 @@ export type ImportedOffer = {
   partnerLink?: string | null;
 };
 
-const USER_AGENT = "MilheiroBot/1.0 (catalogo de lojas parceiras; leitura no maximo 1x por hora)";
+const USER_AGENT = "MilhasXBot/1.0 (catalogo de lojas parceiras; leitura no maximo 1x por hora)";
 const MIN_INTERVAL_MS = 10 * 60_000;
 
 /* ---------------- Esfera ---------------- */

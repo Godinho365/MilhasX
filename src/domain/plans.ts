@@ -1,4 +1,4 @@
-// Planos do Milheiro. Não há cobrança real: a troca de plano é um pedido que a administração ativa.
+// Planos do MilhasX. Não há cobrança real: a troca de plano é um pedido que a administração ativa.
 export type PlanCode = "PESSOAL" | "PRO" | "GESTOR";
 export type PlanInterval = "MENSAL" | "ANUAL";
 
@@ -67,7 +67,7 @@ export const NOTIFY_CATEGORIES = [
   ["points", "Alertas de pontuação", "Quando uma loja atingir os pontos do seu alerta"],
   ["offers", "Alertas de ofertas", "Promoções de transferência e compra de pontos"],
   ["entries", "Lançamentos", "Recorrências geradas e pontos a receber"],
-  ["marketing", "Marketing", "Novidades e dicas do Milheiro"],
+  ["marketing", "Marketing", "Novidades e dicas do MilhasX"],
   ["system", "Sistema", "Avisos importantes sobre a sua conta"],
   ["billing", "Assinatura", "Teste, plano e renovação"],
 ] as const;

@@ -63,7 +63,7 @@ describe("gravação", () => {
     });
     const r = await importFromSource(null, "esfera");
     expect(r.total).toBe(6);
-    expect(calls[0]).toMatch(/^https:\/\/apigw\.esfera\.com\.vc\/.* MilheiroBot/);
+    expect(calls[0]).toMatch(/^https:\/\/apigw\.esfera\.com\.vc\/.* MilhasXBot/);
     await expect(importFromSource(null, "esfera")).rejects.toThrow(/10 minutos/);
 
     const c = new Client();

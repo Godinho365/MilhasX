@@ -85,7 +85,7 @@ export const LEAD_BUCKETS = [
   { key: "121+", label: "Mais de 120 dias", max: Infinity },
 ] as const;
 
-// Programa do buscador → código do programa no Milheiro (para o valor de mercado do milheiro)
+// Programa do buscador → código do programa no MilhasX (para o valor de mercado do milheiro)
 const PROGRAM_CODE: Record<string, string> = { smiles: "SMILES", latam: "LATAM", azul: "AZUL", "azul-mundo": "AZUL" };
 
 const median = (xs: number[]) => {

@@ -48,6 +48,6 @@ export async function selectedHolderValue(userId: string) {
   return (await selectedHolderId(userId)) ?? "";
 }
 
-export const appName = () => process.env.APP_NAME || "Milheiro";
+export const appName = () => process.env.APP_NAME || "MilhasX";
 /** Marca da página pública das agências (a "Central de Atendimento"), como a simbora.la do Quero Milhas. */
 export const publicBrand = () => process.env.PUBLIC_BRAND || "MilhasX";

@@ -1,11 +1,11 @@
-# Comparativo de interface — referência × Milheiro
+# Comparativo de interface — referência × MilhasX
 
 Análise crítica feita em 23/10/2026, comparando o app de referência (conta de cliente) com a
-versão 1 do Milheiro, em desktop (800px de painel) e celular (375px).
+versão 1 do MilhasX, em desktop (800px de painel) e celular (375px).
 
 ## Onde a v1 estava pior
 
-| # | Item | Referência | Milheiro v1 | Ação |
+| # | Item | Referência | MilhasX v1 | Ação |
 |---|---|---|---|---|
 | 1 | Tipografia | Inter | Fonte do sistema | Inter auto-hospedada (`@fontsource-variable/inter`) |
 | 2 | Paleta | Neutra quase preta (zinc), bordas cinza discretas | Azul-marinho | Tokens neutros; azul só como destaque |

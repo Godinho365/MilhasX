@@ -91,7 +91,7 @@ no máximo 5 pedidos por hora por IP. As visitas da página contam para a conver
 ## Buscador (`/app/buscador`)
 
 Preenche uma vez e **abre o site de cada programa já com a busca feita** — uma aba por programa, com 2
-segundos entre elas (como no Quero Milhas). O Milheiro **não lê** esses sites: quem pesquisa é o usuário,
+segundos entre elas (como no Quero Milhas). O MilhasX **não lê** esses sites: quem pesquisa é o usuário,
 no próprio navegador. Por isso funciona mesmo com Smiles, LATAM e Azul, que bloqueiam robôs.
 
 - Milhas, nacionais: Smiles, LATAM Pass, Azul Fidelidade.

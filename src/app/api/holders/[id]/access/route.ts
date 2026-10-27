@@ -9,7 +9,7 @@ export const GET = route(async (req, { params }) => {
 // Envia ao e-mail autorizado um link de uso único para a página do titular
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);
-  const r = await sendHolderAccess(u.id, (await params).id!, process.env.APP_NAME || "Milheiro");
+  const r = await sendHolderAccess(u.id, (await params).id!, process.env.APP_NAME || "MilhasX");
   return json({ ok: true, ...r });
 });
 

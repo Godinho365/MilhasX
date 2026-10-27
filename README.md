@@ -1,4 +1,4 @@
-# Milheiro — gestão de milhas e pontos
+# MilhasX — gestão de milhas e pontos
 
 Aplicação independente para controlar carteiras de pontos e milhas por titular: custo médio
 do milheiro, extrato, transferências bonificadas, vendas, alertas, simuladores, relatórios e

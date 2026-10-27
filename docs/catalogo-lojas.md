@@ -1,6 +1,6 @@
 # Catálogo de lojas: o coletor
 
-O Milheiro mantém o catálogo de lojas do mesmo jeito que a referência: um **coletor** lê a paridade de
+O MilhasX mantém o catálogo de lojas do mesmo jeito que a referência: um **coletor** lê a paridade de
 cada parceiro nas fontes dos próprios programas e guarda
 
 - a **oferta atual** de cada loja em cada programa: pontos por real (ou por dólar), “até”, pontos para
@@ -19,7 +19,7 @@ Smiles 2), leitura de hora em hora (todas às :45) por API ou por página, hist�
 do dia, e 199 lojas ligadas ao Comparemania. Não dá para saber como o coletor deles lê os sites que
 bloqueiam robôs (acordo com o programa ou acesso que não é bloqueado).
 
-## Fontes do Milheiro
+## Fontes do MilhasX
 
 | Programa | Como entra | Por quê |
 |---|---|---|
@@ -29,7 +29,7 @@ bloqueiam robôs (acordo com o programa ou acesso que não é bloqueado).
 | Qualquer loja | Cadastro manual | Também para cashback de portais |
 
 Não contornamos bloqueios (fingir ser um navegador, burlar proteção contra robôs). A leitura se
-identifica como `MilheiroBot/1.0` e há intervalo mínimo de 10 minutos por fonte.
+identifica como `MilhasXBot/1.0` e há intervalo mínimo de 10 minutos por fonte.
 
 Cada leitura só mexe nas ofertas da **mesma fonte e programa**: cria as novas, atualiza as que mudaram
 e remove as que saíram (o histórico fica). Ofertas manuais e de outras fontes não são tocadas. Se a

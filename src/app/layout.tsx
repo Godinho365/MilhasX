@@ -7,7 +7,7 @@ import { FeedbackHost } from "@/components/feedback";
 import { RenderStamp } from "@/components/render-stamp";
 
 export const metadata: Metadata = {
-  title: process.env.APP_NAME || "Milheiro",
+  title: process.env.APP_NAME || "MilhasX",
   description: "Gestão de milhas e pontos: carteiras, custo do milheiro, extrato, compras e vendas.",
   // Endereço absoluto das imagens de prévia de link (Open Graph)
   metadataBase: process.env.APP_URL ? new URL(process.env.APP_URL) : undefined,

@@ -57,7 +57,7 @@ export async function startCheckout(userId: string, plan: PlanCode, interval: Pl
   const pre = await mp<Preapproval>("/preapproval", {
     method: "POST",
     body: {
-      reason: `${process.env.APP_NAME || "Milheiro"} ${PLANS[plan].name} (${interval === "ANUAL" ? "anual" : "mensal"})`,
+      reason: `${process.env.APP_NAME || "MilhasX"} ${PLANS[plan].name} (${interval === "ANUAL" ? "anual" : "mensal"})`,
       external_reference: sub.id,
       payer_email: payerEmail,
       auto_recurring: { frequency: months, frequency_type: "months", transaction_amount: amountCents / 100, currency_id: "BRL" },

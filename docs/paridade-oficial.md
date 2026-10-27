@@ -1,11 +1,11 @@
 # Paridade com o app de referência — auditoria de 24/10/2026, atualizada em 25/10/2026
 
 Comparação tela por tela entre o app de referência (conta de cliente, plano de teste "Gestor") e o
-Milheiro local. A referência foi só lida: nenhum dado foi salvo lá. Durante a varredura ela passou a
+MilhasX local. A referência foi só lida: nenhum dado foi salvo lá. Durante a varredura ela passou a
 responder **429 (muitas requisições)**, então as páginas foram visitadas com pausas, e algumas
 telas foram lidas pelo texto, sem captura.
 
-Legenda: ✅ igual · 🟡 parcial (estrutura igual, faltam detalhes) · ❌ falta · ➕ só no Milheiro
+Legenda: ✅ igual · 🟡 parcial (estrutura igual, faltam detalhes) · ❌ falta · ➕ só no MilhasX
 
 ## Resumo (atualizado em 25/10/2026)
 
@@ -51,19 +51,19 @@ Legenda: ✅ igual · 🟡 parcial (estrutura igual, faltam detalhes) · ❌ fal
 | Bens e Direitos | — (só filtro de programa) | Posição em 31/12 de cada ano e posição atual: Saldo, CPM e Custo de Aquisição por conta, com total e aviso para conferir com o contador |
 
 Diferenças que ficaram, de propósito:
-- **Evolução do CPM**: a referência diz usar **FIFO**; o Milheiro usa **custo médio ponderado** (ver “Decisão de regra pendente”).
-- **Top beneficiários**: a referência não mostrou dados; no Milheiro são os clientes da venda (a receita é dividida entre eles).
+- **Evolução do CPM**: a referência diz usar **FIFO**; o MilhasX usa **custo médio ponderado** (ver “Decisão de regra pendente”).
+- **Top beneficiários**: a referência não mostrou dados; no MilhasX são os clientes da venda (a receita é dividida entre eles).
 - **Origem dos pontos de compra**: “acompanhamento” são as compras da aba Compras; “lançamento direto” são os créditos “Compra em parceiro” lançados no extrato.
 
 ## Decisão de regra pendente
 
 O guia da referência “Entendendo o CPM” cita **FIFO** (os pontos mais antigos saem primeiro). O
-Milheiro usa **custo médio ponderado**. Nos valores conferidos até aqui (transferências, CPM por conta)
+MilhasX usa **custo médio ponderado**. Nos valores conferidos até aqui (transferências, CPM por conta)
 os números batem com a referência, mas se a referência for FIFO puro, débitos e vendas podem
 divergir em carteiras com compras a preços diferentes. Antes de mudar, é preciso confirmar com um
 caso real na referência (uma conta com duas compras a CPMs diferentes e um débito parcial).
 
-## O que o Milheiro tem a mais
+## O que o MilhasX tem a mais
 
 Exportar CSV no extrato e em cada relatório, relatório Bens e Direitos com custo em 31/12,
 economia por resgate, sino de notificações, credenciais de acesso criptografadas na página da conta,
