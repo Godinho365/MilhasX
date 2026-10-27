@@ -11,7 +11,7 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { feeCpmCents, simulateMonth } from "@/domain/cards";
 
 type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; pointsIncluded: boolean; status: "OPEN" | "CLOSED" | "RECEIVED" };
-type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; received: number; invoices: Invoice[] };
+type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; accountCpmCents: number | null; accountBalance: number; openFeeCents: number; received: number; invoices: Invoice[] };
 const money = (c: number | null | undefined) => (c ? (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "");
 
 const STATUS: Record<Invoice["status"], { label: string; cls: string }> = {
@@ -226,6 +226,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
                               <span className="block truncate font-semibold">{c.name}</span>
                               <span className="flex items-center gap-1.5 truncate text-xs text-muted"><ProgramDot color={c.color} />{c.program} · {c.holder}{c.brand && ` · ${c.brand}`}</span>
                               {c.balancePoints > 0 && <span className="block text-xs font-medium text-accent-light">{fmtPts(c.balancePoints)} pts acumulados no cartão</span>}
+                              <span className="block text-xs text-muted">Saldo {fmtPts(c.accountBalance)} pts · CPM atual {c.accountCpmCents != null ? `${fmtBRL(c.accountCpmCents)}/mil` : "R$ 0,00 (orgânico)"}{c.openFeeCents > 0 && ` (com ${fmtBRL(c.openFeeCents)} de anuidade do mês)`}</span>
                             </span>
                           </span>
                         </td>
@@ -279,7 +280,7 @@ function FeeSummary({ c }: { c: Card }) {
       <span className="block">{fmtBRL(c.annualFeeCents)}/ano · {fmtBRL(Math.round(c.annualFeeCents / 12))}/mês</span>
       {c.feeWaiverCents ? <span className="block text-muted">Isenta gastando {fmtBRL(c.feeWaiverCents)}/mês</span> : <span className="block text-muted">Sem isenção</span>}
       {last ? (
-        <span className="block font-medium">{last.feeCents > 0 ? `CPM ${fmtBRL(feeCpmCents(last.feeCents, last.expectedPoints))} na última fatura` : "Última fatura isenta"}</span>
+        <span className="block font-medium">{last.feeCents <= 0 ? "Última fatura isenta" : last.pointsIncluded ? `${fmtBRL(last.feeCents)} de anuidade no CPM do saldo` : `CPM ${fmtBRL(feeCpmCents(last.feeCents, last.expectedPoints))} na última fatura`}</span>
       ) : sim && sim.cpmCents > 0 ? (
         <span className="block font-medium">CPM até {fmtBRL(sim.cpmCents)} sem isentar</span>
       ) : null}

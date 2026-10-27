@@ -147,6 +147,18 @@ describe("cartões e faturas", () => {
     expect((await prisma.account.findUniqueOrThrow({ where: { id: accA } })).balance).toBe(0);
   });
 
+  it("fatura já incluída no saldo que não isenta: a anuidade do mês vira custo do saldo do cartão", async () => {
+    // Nubank: R$ 1.068/ano (R$ 89/mês), isenta com R$ 8.000; 1.698 pts acumulados; fatura de R$ 250 já no saldo
+    const c = (await a.call(cards.POST, "POST", "/c", { accountId: accA, name: "Ultravioleta", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 27, dueDay: 3, annualFeeCents: 106800, feeWaiverCents: 800000 })).data.item;
+    await a.call(cardBalance.PUT, "PUT", "/x", { points: 1698, date: "2026-10-27" }, { id: c.id });
+    const inv = (await a.call(invoices.POST, "POST", "/i", { closingDate: "2026-11-27", dueDate: "2026-12-03", amountCents: 25000, pointsIncluded: true }, { id: c.id })).data.item;
+    expect(inv.feeCents).toBe(8900);
+    await a.call(invoiceClose.POST, "POST", "/x", undefined, { id: inv.id });
+    const acc = await prisma.account.findUniqueOrThrow({ where: { id: accA } });
+    expect(acc).toMatchObject({ balance: 1698, costCents: 8900 }); // CPM R$ 52,41
+    expect(Math.round((acc.costCents * 1000) / acc.balance)).toBe(5241);
+  });
+
   it("não cria cartão em conta de outro usuário", async () => {
     expect((await b.call(cards.POST, "POST", "/c", { accountId: accA, name: "X", pointsPerDollar: 100, dollarRateCents: 550, closingDay: 1, dueDay: 8 })).status).toBe(404);
   });

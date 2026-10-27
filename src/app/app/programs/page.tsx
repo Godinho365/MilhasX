@@ -2,13 +2,20 @@ import { requirePageUser } from "@/server/session";
 import { listHolders, walletSummary } from "@/server/services/wallet";
 import { listPrograms } from "@/server/services/admin";
 import { PageHeader } from "@/components/stat";
+import { prisma } from "@/server/db";
 import { Segmented } from "@/components/ui";
 import { ProgramsClient } from "./client";
 
 export default async function ProgramsPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
   const user = await requirePageUser();
   const view = (await searchParams).view === "titulares" ? "titulares" : "programas";
-  const [holders, summary, programs] = await Promise.all([listHolders(user.id), walletSummary(user.id), listPrograms(false)]);
+  const [holders, summary, programs, cards] = await Promise.all([
+    listHolders(user.id), walletSummary(user.id), listPrograms(false),
+    prisma.creditCard.findMany({ where: { userId: user.id }, select: { accountId: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
+  // Cartões cadastrados em cada conta (titular × programa), para o ícone na lista
+  const cardsByAccount: Record<string, string[]> = {};
+  for (const c of cards) (cardsByAccount[c.accountId] ??= []).push(c.name);
   return (
     <>
       <PageHeader title="Programas" subtitle="Suas contas em cada programa de fidelidade, por titular" />
@@ -29,7 +36,7 @@ export default async function ProgramsPage({ searchParams }: { searchParams: Pro
           notes: h.notes,
         }))}
         programs={programs.map((p) => ({ id: p.id, name: p.name, color: p.color }))}
-        accounts={summary.accounts.map((a) => ({ ...a }))}
+        accounts={summary.accounts.map((a) => ({ ...a, cards: cardsByAccount[a.id] ?? [] }))}
         byProgram={summary.programs.map((p) => ({ ...p, color: programs.find((x) => x.id === p.id)?.color ?? "#60a5fa", logo: summary.accounts.find((a) => a.programId === p.id)?.programLogo ?? null, holders: summary.accounts.filter((a) => a.programId === p.id).length }))}
       />
     </>

@@ -1,5 +1,6 @@
 // Fornecedores, cartões e faturas, promoções, guias, novidades, foto de perfil e painel de vendas.
 import { expectedCardPoints, invoiceFeeCents } from "@/domain/cards";
+import type { CostType } from "@/domain/costs";
 import type { GuideKind, GuideLevel, PromotionKind, Prisma } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { assertFeature } from "./plan-limits";
@@ -192,6 +193,13 @@ export async function closeInvoice(userId: string, invoiceId: string) {
       costs: inv.feeCents > 0 ? [{ type: "ANUIDADE", amountCents: inv.feeCents, cardId: inv.cardId }] : undefined,
     });
     entryId = entry.id;
+  } else if (inv.pointsIncluded && inv.feeCents > 0 && inv.card.balanceEntryId) {
+    // Os pontos já estão no saldo acumulado: a parcela da anuidade do mês entra como custo desse saldo
+    const bal = await prisma.entry.findUnique({ where: { id: inv.card.balanceEntryId }, include: { costs: true } });
+    if (bal) {
+      const costs = bal.costs.map((c) => ({ type: c.type as CostType, amountCents: c.amountCents, cardId: c.cardId }));
+      await updateEntry(userId, bal.id, { costs: [...costs, { type: "ANUIDADE", amountCents: inv.feeCents, cardId: inv.cardId }] });
+    }
   }
   return prisma.cardInvoice.update({ where: { id: inv.id }, data: { status: "CLOSED", entryId } });
 }

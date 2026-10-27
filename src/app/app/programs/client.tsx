@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useEffect, useState } from "react";
-import { Plus, Trash2, UserPlus, WalletCards, FileText, MoreHorizontal, Eye, Pencil, Pin, PinOff, Archive, ArchiveRestore, Search, Filter } from "lucide-react";
+import { Plus, Trash2, UserPlus, WalletCards, FileText, MoreHorizontal, Eye, Pencil, Pin, PinOff, Archive, ArchiveRestore, Search, Filter, CreditCard } from "lucide-react";
 import { fmtDate } from "@/lib/format";
 import { Switch } from "@/components/form-parts";
 import { TagsInput } from "../purchases/purchases";
@@ -15,7 +15,7 @@ import { Modal, Field, Alert, Empty, SegmentedButtons } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { HoldersTab, HolderDialog, type HolderFull } from "./holders";
 
-type Acc = { id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; updatedAt: string };
+type Acc = { cards?: string[]; id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; updatedAt: string };
 type P = { id: string; name: string; balance: number; costCents: number; cpmCents: number | null; color: string; logo?: string | null; holders: number };
 
 export function ProgramsClient(props: { view: "programas" | "titulares"; holders: HolderFull[]; programs: { id: string; name: string; color: string }[]; accounts: Acc[]; byProgram: P[] }) {
@@ -130,6 +130,7 @@ export function ProgramsClient(props: { view: "programas" | "titulares"; holders
                             <td>
                               <span className="flex items-center gap-2">
                                 <Link href={`/app/programs/${a.id}`} className="flex min-w-0 items-center gap-2 font-medium hover:underline"><ProgramLogo programId={a.programId} name={a.programName} color={a.programColor} version={a.programLogo} size={24} /><span className="truncate">{a.nickname ?? a.programName}</span></Link>
+                                {!!a.cards?.length && <Link href="/app/credit-cards?tab=cartoes" className="flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent-light" title={`Cartão: ${a.cards.join(", ")}`} aria-label={`Cartão cadastrado: ${a.cards.join(", ")}`}><CreditCard className="h-3 w-3" />{a.cards.length > 1 ? a.cards.length : ""}</Link>}
                                 {a.archived && <span className="rounded-full bg-panel2 px-2 py-0.5 text-[11px] text-muted">Arquivada</span>}
                                 {a.tags.map((t) => <span key={t} className="hidden rounded-full bg-panel2 px-2 py-0.5 text-[11px] text-zinc-300 lg:inline">{t}</span>)}
                               </span>
