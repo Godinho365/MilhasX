@@ -205,6 +205,15 @@ export function Shell(props: {
   // Novo lançamento: na página de uma conta, só as contas do mesmo titular (já com a conta escolhida);
   // fora dela, as do titular escolhido no seletor
   const pageAccount = path.startsWith("/app/programs/") ? props.accounts.find((a) => a.id === path.split("/")[3]) : undefined;
+  // Trocar o titular na página de uma conta leva à mesma conta (programa) do novo titular;
+  // se ele não tiver esse programa, à lista de programas. "Todos os titulares" fica onde está.
+  const holderRedirect = (v: string) => {
+    if (!pageAccount) return null;
+    const target = v === "self" ? props.holders.find((h) => h.isSelf)?.id : v || undefined;
+    if (!target || target === pageAccount.holderId) return null;
+    const same = props.accounts.find((a) => a.holderId === target && a.programId === pageAccount.programId);
+    return same ? `/app/programs/${same.id}` : "/app/programs";
+  };
   const formAccounts = pageAccount ? props.accounts.filter((a) => a.holderId === pageAccount.holderId) : visibleAccounts.length ? visibleAccounts : props.accounts;
   // Fixadas primeiro ("Fixar na barra lateral"); sem fixadas, as de maior saldo
   const pinnedAccounts = visibleAccounts.filter((a) => a.pinned);
@@ -355,14 +364,15 @@ export function Shell(props: {
           )}
           <AssistantButton />
           {path === "/app" && <DashboardViewPicker value={props.dashboardView} />}
-          <HolderPicker holders={props.holders} value={props.holderId} />
+          <HolderPicker holders={props.holders} value={props.holderId} redirectFor={holderRedirect} />
           <Link href="/app/notifications" className="btn-subtle relative h-9 w-9 rounded-full px-0" aria-label={`Notificações (${props.unread} não lidas)`}>
             <Bell className="h-[18px] w-[18px]" />
             {props.unread > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />}
           </Link>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28">{props.children}</main>
+      {/* O Kanban do CRM usa a largura toda da tela; as outras páginas ficam centralizadas */}
+      <main className={`mx-auto ${path.startsWith("/app/crm") ? "max-w-[1800px]" : "max-w-6xl"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
 
       {/* Barra inferior no celular */}
       <nav aria-label="Navegação rápida" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">

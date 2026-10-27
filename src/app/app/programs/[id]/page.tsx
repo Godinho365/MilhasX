@@ -80,7 +80,6 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           {d.recent.length === 0 ? <p className="rounded-xl bg-panel2 py-10 text-center text-sm text-muted">Nenhum lançamento nesta conta.</p> : (
             <ul className="space-y-2">
               {d.recent.map((e) => {
-                const organic = e.points > 0 ? e.costCents === 0 : true;
                 return (
                   <li key={e.id} className="flex items-center gap-3 rounded-xl bg-panel2/70 px-4 py-3">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.program.color }} aria-hidden />
@@ -94,7 +93,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
                     </div>
                     <div className="shrink-0 text-right">
                       <p className={`text-sm font-semibold tabular-nums ${e.points > 0 ? "text-ok" : "text-bad"}`}>{fmtSignedPts(e.points)}</p>
-                      <p className="text-xs tabular-nums text-muted">{e.points > 0 && !organic ? money(e.costCents) : "Orgânico"}</p>
+                      <p className="text-xs tabular-nums text-muted">{e.costCents !== 0 ? money(Math.abs(e.costCents)) : e.points > 0 ? "Orgânico" : "—"}</p>
                     </div>
                   </li>
                 );

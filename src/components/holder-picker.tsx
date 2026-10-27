@@ -9,7 +9,7 @@ import { toast } from "./feedback";
 export type HolderOpt = { id: string; name: string; isSelf: boolean };
 
 /** Seletor global de titular: "Visualizar" (todos / minhas contas) e a lista de titulares. */
-export function HolderPicker({ holders, value }: { holders: HolderOpt[]; value: string }) {
+export function HolderPicker({ holders, value, redirectFor }: { holders: HolderOpt[]; value: string; redirectFor?: (value: string) => string | null }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
@@ -44,8 +44,11 @@ export function HolderPicker({ holders, value }: { holders: HolderOpt[]; value: 
     start(async () => {
       const r = await selectHolder(v);
       if (!r.ok) return toast(r.erro, "error");
-      // Recarrega por completo: todas as telas dependem do titular e não podem ficar com dado em cache
-      window.location.reload();
+      // Recarrega por completo: todas as telas dependem do titular e não podem ficar com dado em cache.
+      // Na página de uma conta, vai direto para a mesma conta (programa) do novo titular.
+      const to = redirectFor?.(v);
+      if (to) window.location.href = to;
+      else window.location.reload();
     });
   }
 

@@ -1,5 +1,5 @@
 "use client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useState } from "react";
 import { CreditCard, Plus, Trash2, FileCheck2, CircleAlert, ReceiptText, Pencil } from "lucide-react";
@@ -32,9 +32,15 @@ type InvoiceFilter = "all" | "OPEN" | "CLOSED" | "RECEIVED";
 
 export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]; accounts: { id: string; label: string }[]; actions: { cardId: string; card: string; invoiceId: string; dueDate: string; amountCents: number }[]; stats: Stats }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("resumo");
+  // A aba fica no endereço (?tab=) para sobreviver a um recarregamento depois de salvar
+  const params = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => (["resumo", "faturas", "cartoes"] as const).find((t) => t === params.get("tab")) ?? "resumo");
   const [invFilter, setInvFilter] = useState<InvoiceFilter>("all");
-  const go = (t: Tab, filter: InvoiceFilter = "all") => { setTab(t); setInvFilter(filter); };
+  const go = (t: Tab, filter: InvoiceFilter = "all") => {
+    setTab(t);
+    setInvFilter(filter);
+    window.history.replaceState(null, "", t === "resumo" ? window.location.pathname : `?tab=${t}`);
+  };
   const [cardModal, setCardModal] = useState(false);
   const [editing, setEditing] = useState<Card | null>(null);
   const [invoiceFor, setInvoiceFor] = useState<Card | null>(null);

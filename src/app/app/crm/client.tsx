@@ -16,6 +16,17 @@ import { ClientPages } from "./client-pages";
 
 type Customer = { id: string; name: string; phone: string | null; email: string | null };
 const PRIORITY_CLS = { LOW: "bg-panel2 text-muted", MEDIUM: "bg-blue-500/15 text-blue-300", HIGH: "bg-red-500/15 text-red-300" } as const;
+const PRIORITY_DOT = { LOW: "bg-zinc-500", MEDIUM: "bg-blue-400", HIGH: "bg-red-400" } as const;
+// Cor de cada etapa do Kanban (barra no topo da coluna e ponto no título)
+const STAGE_COLOR: Record<OrderStageKey, string> = {
+  NEW: "#60a5fa", QUOTING: "#f59e0b", QUOTE_SENT: "#a78bfa", NEGOTIATION: "#fb923c", ISSUED: "#22c55e", TRAVELING: "#38bdf8", DONE: "#94a3b8",
+};
+const CABIN_SHORT: Record<string, string> = { ECONOMY: "Econômica", PREMIUM: "Premium", BUSINESS: "Executiva", FIRST: "Primeira" };
+const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
+const ago = (iso: string) => {
+  const d = Math.floor((Date.now() - Date.parse(iso)) / 86400_000);
+  return d <= 0 ? "hoje" : d === 1 ? "há 1 dia" : `há ${d} dias`;
+};
 
 /* ---------------- Novo / editar pedido ---------------- */
 
@@ -92,23 +103,43 @@ export function OrderDialog({ order, customers, onClose }: { order: OrderView | 
 /* ---------------- Kanban ---------------- */
 
 function Card({ o, onOpen, onDragStart }: { o: OrderView; onOpen: () => void; onDragStart: (e: React.DragEvent) => void }) {
+  const pax = o.adults + o.children + o.infants;
+  const first = o.segments[0]?.date;
+  const wa = whatsappLink(o.customerPhone, `Olá, ${o.customerName.split(/\s+/)[0]}!`);
   return (
-    <li draggable onDragStart={onDragStart} className="cursor-grab rounded-xl border border-line bg-panel p-3 shadow-sm active:cursor-grabbing" aria-label={`Pedido ${o.number} de ${o.customerName}`}>
-      <button type="button" onClick={onOpen} className="w-full text-left">
-        <div className="flex items-start gap-2">
-          <p className="min-w-0 flex-1 truncate font-semibold">{o.customerName}</p>
-          <span className={`shrink-0 rounded px-1.5 text-[11px] font-medium ${PRIORITY_CLS[o.priority as keyof typeof PRIORITY_CLS] ?? ""}`}>{PRIORITY_LABELS[o.priority as keyof typeof PRIORITY_LABELS]}</span>
+    <li draggable onDragStart={onDragStart} className="group relative cursor-grab rounded-xl border border-line bg-panel shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-600 hover:shadow-md active:cursor-grabbing" aria-label={`Pedido ${o.number} de ${o.customerName}`}>
+      <button type="button" onClick={onOpen} className="w-full p-3 text-left">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-bold text-accent-light" aria-hidden>{initials(o.customerName)}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold leading-tight">{o.customerName}</span>
+            <span className="block text-[11px] text-muted" title={`Pedido feito em ${fmtDate(o.createdAt)}`}>#{o.number} · {ago(o.createdAt)}</span>
+          </span>
+          <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY_CLS[o.priority as keyof typeof PRIORITY_CLS] ?? ""}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOT[o.priority as keyof typeof PRIORITY_DOT] ?? ""}`} aria-hidden />{PRIORITY_LABELS[o.priority as keyof typeof PRIORITY_LABELS]}
+          </span>
         </div>
-        <p className="mt-1 text-xs text-muted">Pedido feito em: {fmtDate(o.createdAt)}</p>
-        <p className="mt-1 text-xs text-muted">{TRIP_LABELS[o.tripType]}</p>
-        <p className="mt-1 flex items-center gap-1.5 text-sm font-medium"><Plane className="h-3.5 w-3.5 text-muted" />{o.route}</p>
-        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted">
-          {o.source === "PUBLIC" && <span className="rounded bg-green-500/15 px-1.5 text-green-300">Página pública</span>}
-          {o.budgetCents ? <span>{fmtBRL(o.budgetCents)}</span> : null}
+        <div className="mt-3 rounded-lg bg-panel2/60 px-2.5 py-2">
+          <p className="flex items-center gap-1.5 text-sm font-semibold"><Plane className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="truncate">{o.route}</span></p>
+          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted">
+            <span>{TRIP_LABELS[o.tripType]}</span>
+            <span className="flex items-center gap-1"><Users className="h-3 w-3" />{pax} {pax === 1 ? "passageiro" : "passageiros"}</span>
+            <span>{CABIN_SHORT[o.cabin] ?? o.cabin}</span>
+          </p>
+        </div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+          {o.source === "PUBLIC" && <span className="rounded-full bg-green-500/15 px-2 py-0.5 font-medium text-green-300">Página pública</span>}
+          {o.budgetCents ? <span className="rounded-full bg-panel2 px-2 py-0.5 font-medium text-zinc-300">{fmtBRL(o.budgetCents)}</span> : null}
+          {o.quotes > 0 && <span className="rounded-full bg-panel2 px-2 py-0.5">{o.quotes} {o.quotes === 1 ? "cotação" : "cotações"}</span>}
           {o.attachments > 0 && <span className="flex items-center gap-0.5"><Paperclip className="h-3 w-3" />{o.attachments}</span>}
-          {o.quotes > 0 && <span>{o.quotes} {o.quotes === 1 ? "cotação" : "cotações"}</span>}
+          {!first && <span className="text-amber-300">sem data</span>}
         </div>
       </button>
+      {wa && (
+        <a href={wa} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="absolute right-2 top-11 hidden h-7 w-7 items-center justify-center rounded-full border border-line bg-panel text-green-400 shadow-sm hover:bg-panel2 group-hover:flex" aria-label={`WhatsApp de ${o.customerName}`} title="Abrir WhatsApp">
+          <MessageCircle className="h-3.5 w-3.5" />
+        </a>
+      )}
     </li>
   );
 }
@@ -119,6 +150,8 @@ export function Kanban({ orders, customers }: { orders: OrderView[]; customers: 
   const [over, setOver] = useState<OrderStageKey | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [prio, setPrio] = useState<"ALL" | "LOW" | "MEDIUM" | "HIGH">("ALL");
   const dragged = useRef<string | null>(null);
   useEffect(() => setList(orders), [orders]);
   useEffect(() => {
@@ -144,21 +177,43 @@ export function Kanban({ orders, customers }: { orders: OrderView[]; customers: 
     dragged.current = null;
     if (id) move(id, stage, list.filter((o) => o.stage === stage && o.id !== id).length);
   }
+  const q = query.trim().toLowerCase();
+  const shown = list.filter((o) => (prio === "ALL" || o.priority === prio) && (!q || o.customerName.toLowerCase().includes(q) || o.route.toLowerCase().includes(q) || String(o.number) === q.replace("#", "")));
+  const budget = shown.reduce((t, o) => t + (o.budgetCents ?? 0), 0);
   return (
     <>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input className="input pl-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar cliente, rota ou nº do pedido" aria-label="Buscar pedidos" />
+        </label>
+        <div className="inline-flex gap-1 rounded-xl border border-line bg-panel p-1" role="group" aria-label="Prioridade">
+          {([["ALL", "Todas"], ["HIGH", "Alta"], ["MEDIUM", "Média"], ["LOW", "Baixa"]] as const).map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={prio === k} onClick={() => setPrio(k)} className={`rounded-lg px-2.5 py-1 text-xs font-medium ${prio === k ? "bg-panel2 text-white shadow-sm" : "text-muted hover:text-zinc-100"}`}>{l}</button>
+          ))}
+        </div>
+        <p className="ml-auto text-xs text-muted">{shown.length} {shown.length === 1 ? "pedido ativo" : "pedidos ativos"}{budget > 0 ? ` · ${fmtBRL(budget)} em orçamentos` : ""}</p>
+      </div>
       <div className="-mx-3 overflow-x-auto px-3 pb-3 sm:-mx-5 sm:px-5">
         <div className="flex min-w-max gap-3">
           {ORDER_STAGES.map((stage) => {
-            const items = list.filter((o) => o.stage === stage);
+            const items = shown.filter((o) => o.stage === stage);
+            const total = items.reduce((t, o) => t + (o.budgetCents ?? 0), 0);
             return (
               <section key={stage} aria-label={STAGE_LABELS[stage]} onDragOver={(e) => { e.preventDefault(); setOver(stage); }} onDragLeave={() => setOver((s) => (s === stage ? null : s))} onDrop={(e) => drop(e, stage)}
-                className={`flex w-72 shrink-0 flex-col rounded-2xl border p-2 ${over === stage ? "border-accent-light bg-accent-soft/40" : "border-line bg-panel2/40"}`}>
-                <h2 className="flex items-center justify-between px-2 py-1.5 text-sm font-semibold">{STAGE_LABELS[stage]}<span className="rounded-full bg-panel px-2 text-xs text-muted">{items.length}</span></h2>
-                <ul className="flex-1 space-y-2 p-1" role="list">
+                className={`flex w-[300px] shrink-0 flex-col overflow-hidden rounded-2xl border transition-colors ${over === stage ? "border-accent-light bg-accent-soft/40" : "border-line bg-panel2/40"}`}>
+                <div className="h-1 shrink-0" style={{ backgroundColor: STAGE_COLOR[stage] }} aria-hidden />
+                <h2 className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm font-semibold">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: STAGE_COLOR[stage] }} aria-hidden />
+                  <span className="flex-1 truncate">{STAGE_LABELS[stage]}</span>
+                  <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-medium tabular-nums text-muted">{items.length}</span>
+                </h2>
+                <p className="px-3 pb-2 text-[11px] text-muted">{total > 0 ? `${fmtBRL(total)} em orçamentos` : "\u00a0"}</p>
+                <ul className="max-h-[calc(100vh-320px)] min-h-[120px] flex-1 space-y-2 overflow-y-auto px-2 pb-2" role="list">
                   {items.map((o) => <Card key={o.id} o={o} onOpen={() => setOpen(o.id)} onDragStart={(e) => { dragged.current = o.id; e.dataTransfer.setData("text/plain", o.id); }} />)}
-                  {items.length === 0 && <li className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-muted">Nenhum pedido aqui ainda.</li>}
+                  {items.length === 0 && <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-line text-center text-xs text-muted">{q || prio !== "ALL" ? "Nenhum pedido com esse filtro." : "Arraste pedidos para cá"}</li>}
                 </ul>
-                {stage === "NEW" && <button type="button" className="btn-subtle mt-1 h-9 w-full text-sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Adicionar pedido</button>}
+                {stage === "NEW" && <button type="button" className="mx-2 mb-2 flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-sm text-muted transition-colors hover:border-zinc-500 hover:text-zinc-100" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Adicionar pedido</button>}
               </section>
             );
           })}
