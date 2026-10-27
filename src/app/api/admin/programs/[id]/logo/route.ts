@@ -1,12 +1,10 @@
-import { route, json, requireAdmin } from "@/server/http";
-import { DomainError } from "@/server/db";
+import { route, json, requireAdmin, readBodyLimited } from "@/server/http";
 import { setProgramLogo, removeProgramLogo } from "@/server/services/admin";
 
 // Corpo da requisição = bytes da imagem (até 256 KB). O tipo é validado pelo conteúdo.
 export const PUT = route(async (req, { params }) => {
   const admin = await requireAdmin(req);
-  if (Number(req.headers.get("content-length") || 0) > 256 * 1024) throw new DomainError(413, "Imagem maior que 256 KB");
-  await setProgramLogo(admin.id, (await params).id!, Buffer.from(await req.arrayBuffer()));
+  await setProgramLogo(admin.id, (await params).id!, await readBodyLimited(req, 256 * 1024, "Imagem maior que 256 KB"));
   return json({ ok: true });
 });
 

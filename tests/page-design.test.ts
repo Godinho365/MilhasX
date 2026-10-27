@@ -107,6 +107,21 @@ describe("personalização da página", () => {
     expect((await getBanner(c)).status).toBe(404);
   });
 
+  it("upload sem Content-Length (chunked) acima do limite é cortado com 413", async () => {
+    await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...base });
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        if (sent > 3 * 1024 * 1024) return ctl.close();
+        sent += 64 * 1024;
+        ctl.enqueue(new Uint8Array(64 * 1024));
+      },
+    });
+    const res = await banner.PUT(new Request("http://localhost:3100/api/sales-profile/banner", { method: "PUT", headers: { cookie: c.cookie }, body, duplex: "half" } as RequestInit), { params: Promise.resolve({}) });
+    expect(res.status).toBe(413);
+    expect(sent).toBeLessThan(2 * 1024 * 1024); // parou de ler logo depois do limite
+  });
+
   it("recusa personalização grande demais", async () => {
     const r = await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...base, design: { lixo: "x".repeat(25_000) } });
     expect(r.status).toBe(400);

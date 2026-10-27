@@ -1,4 +1,4 @@
-import { route, json, requireUser } from "@/server/http";
+import { route, json, requireUser, readBodyLimited } from "@/server/http";
 import { DomainError } from "@/server/db";
 import { listAttachments, addAttachment, MAX_BYTES } from "@/server/services/holder-files";
 
@@ -15,6 +15,6 @@ export const POST = route(async (req, { params }) => {
   try {
     name = decodeURIComponent(req.headers.get("x-file-name") || "arquivo");
   } catch {}
-  const item = await addAttachment(u.id, (await params).id!, name, Buffer.from(await req.arrayBuffer()));
+  const item = await addAttachment(u.id, (await params).id!, name, await readBodyLimited(req, 10 * 1024 * 1024, "Arquivo maior que 10 MB"));
   return json({ ok: true, item }, 201);
 });

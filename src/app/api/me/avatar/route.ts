@@ -1,4 +1,4 @@
-import { route, json, requireUser } from "@/server/http";
+import { route, json, requireUser, readBodyLimited } from "@/server/http";
 import { DomainError } from "@/server/db";
 import { getAvatar, setAvatar, removeAvatar } from "@/server/services/extras";
 
@@ -12,9 +12,7 @@ export const GET = route(async (req) => {
 // Corpo da requisição = bytes da imagem (até 512 KB). O tipo é validado pelo conteúdo.
 export const PUT = route(async (req) => {
   const u = await requireUser(req);
-  const len = Number(req.headers.get("content-length") || 0);
-  if (len > 512 * 1024) throw new DomainError(413, "Imagem maior que 512 KB");
-  const buf = Buffer.from(await req.arrayBuffer());
+  const buf = await readBodyLimited(req, 512 * 1024, "Imagem maior que 512 KB");
   await setAvatar(u.id, buf);
   return json({ ok: true });
 });

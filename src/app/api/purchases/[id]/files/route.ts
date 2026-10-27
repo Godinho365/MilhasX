@@ -1,4 +1,4 @@
-import { route, json, requireUser } from "@/server/http";
+import { route, json, requireUser, readBodyLimited } from "@/server/http";
 import { DomainError } from "@/server/db";
 import { listPurchaseFiles, addPurchaseFile, PURCHASE_MAX_TOTAL } from "@/server/services/accounts";
 
@@ -13,5 +13,5 @@ export const POST = route(async (req, { params }) => {
   try {
     name = decodeURIComponent(req.headers.get("x-file-name") || "arquivo");
   } catch {}
-  return json({ ok: true, item: await addPurchaseFile(u.id, (await params).id!, name, Buffer.from(await req.arrayBuffer())) }, 201);
+  return json({ ok: true, item: await addPurchaseFile(u.id, (await params).id!, name, await readBodyLimited(req, 10 * 1024 * 1024, "Arquivo maior que 10 MB")) }, 201);
 });

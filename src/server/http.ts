@@ -48,6 +48,29 @@ export async function requireAdmin(req: Request): Promise<SessionUser> {
   return user;
 }
 
+/**
+ * Lê o corpo binário (upload) parando com 413 assim que passar de `max` bytes: não confia no
+ * Content-Length (um envio "chunked" não tem) e nunca guarda mais que o limite na memória.
+ */
+export async function readBodyLimited(req: Request, max: number, tooBig: string): Promise<Buffer> {
+  if (Number(req.headers.get("content-length") || 0) > max) throw new DomainError(413, tooBig);
+  if (!req.body) return Buffer.alloc(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      throw new DomainError(413, tooBig);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
+}
+
 export async function parseBody<T>(req: Request, schema: ZodType<T, ZodTypeDef, unknown>): Promise<T> {
   let body: unknown;
   try {
