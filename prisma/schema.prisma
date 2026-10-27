@@ -131,6 +131,7 @@ model User {
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
   milesLeads          MilesLead[]
+  contractSignatures  ContractSignature[]
 }
 
 enum Plan {
@@ -154,6 +155,10 @@ model SalesProfile {
   acceptsLeads  Boolean @default(true) // formulário "Interesse em gestão de milhas"
   headline      String? // frase de abertura da Central de Atendimento
   views         Int     @default(0)
+  design        Json? // personalização da página (domain/page-design.ts)
+  banner          Bytes?
+  bannerMime      String?
+  bannerUpdatedAt DateTime?
   updatedAt   DateTime @updatedAt
 }
 
@@ -860,6 +865,9 @@ model TravelOrder {
   source        String     @default("MANUAL") // MANUAL | PUBLIC
   archivedAt    DateTime?
   archiveReason String?
+  shareToken    String?    @unique // link das páginas "Cotação" e "Reserva confirmada" para o cliente
+  locator       String? // localizador da reserva emitida
+  clientNotes   String? // recado para o cliente na página da reserva
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -940,6 +948,22 @@ model MilesLead {
   email     String?
   message   String?
   status    String   @default("NEW") // NEW | CONTACTED | CLIENT | DISCARDED
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// "Assinatura de contrato" da página pública: o cliente lê os termos de gestão de milhas e aceita.
+// Guarda uma cópia dos termos aceitos para não depender de edições posteriores.
+model ContractSignature {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  terms     String
   ipHash    String?
   createdAt DateTime @default(now())
 

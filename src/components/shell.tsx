@@ -222,7 +222,7 @@ export function Shell(props: {
         </div>
       </nav>
       <div className="space-y-0.5 border-t border-line px-3 py-3">
-        {navLink("/app/settings?tab=sales-profile", `Sua ${props.brand}`, Palette)}
+        {navLink("/editor", `Sua ${props.brand}`, Palette)}
         {navLink("/app/guides", "Guias", GraduationCap)}
         {navLink("/app/news", "Novidades", Megaphone, props.unreadNews)}
         {props.supportEmail && navLink(`mailto:${props.supportEmail}?subject=${encodeURIComponent(`Ajuda no ${props.appName}`)}`, "Fale com o suporte", LifeBuoy, undefined, true)}

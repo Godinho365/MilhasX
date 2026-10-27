@@ -3,12 +3,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useEffect, useState } from "react";
-import { Copy, Gift, ExternalLink } from "lucide-react";
+import { Copy, Gift, ExternalLink, Palette } from "lucide-react";
+import { Switch } from "@/components/form-parts";
 import { api } from "@/lib/api";
 import { fmtBRL } from "@/lib/format";
 import { Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
-import { Switch } from "@/components/form-parts";
 import { PLANS, REFERRAL_TRIAL_DAYS, TRIAL_DAYS, type PlanCode, type PlanInterval } from "@/domain/plans";
 import { Section } from "./client";
 
@@ -140,83 +140,50 @@ export function ReferralsTab({ state }: { state: { code: string; referred: { nam
   );
 }
 
-type Profile = { slug: string; displayName: string; bio: string | null; whatsapp: string | null; instagram: string | null; email: string | null; programIds: string[]; published: boolean; acceptsOrders: boolean; acceptsLeads: boolean; headline: string | null } | null;
-
 const slugify = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
-export function SalesProfileTab({ profile, defaultName, programs, brand }: { profile: Profile; defaultName: string; programs: { id: string; name: string }[]; brand: string }) {
+/** Só a ativação da página e o endereço; textos, cores e botões ficam no editor (/editor). */
+export function SalesProfileTab({ profile, defaultName, brand }: { profile: { slug: string; published: boolean } | null; defaultName: string; brand: string }) {
   const router = useRouter();
-  const [f, setF] = useState({
-    slug: profile?.slug ?? slugify(defaultName),
-    displayName: profile?.displayName ?? defaultName,
-    bio: profile?.bio ?? "",
-    whatsapp: profile?.whatsapp ?? "",
-    instagram: profile?.instagram ?? "",
-    email: profile?.email ?? "",
-    programIds: profile?.programIds ?? [],
-    published: profile?.published ?? false,
-    acceptsOrders: profile?.acceptsOrders ?? true,
-    acceptsLeads: profile?.acceptsLeads ?? true,
-    headline: profile?.headline ?? "",
-  });
+  const [slug, setSlug] = useState(profile?.slug ?? slugify(defaultName));
+  const [published, setPublished] = useState(profile?.published ?? false);
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
-  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
-
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  const link = `${origin}/p/${profile?.slug ?? slug}`;
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const r = await api("/api/sales-profile", "PUT", f);
+    const r = await api("/api/sales-profile", "PATCH", { slug, published });
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
     setErro("");
-    toast("Perfil público salvo");
+    toast("Página atualizada");
     refreshSafe(router);
   }
   return (
     <form onSubmit={save}>
-      <p className="mb-6 text-sm text-muted">Sua página na {brand}: a Central de Atendimento onde clientes pedem cotação, mostram interesse em gestão de milhas e falam com você no WhatsApp.</p>
+      <p className="mb-6 text-sm text-muted">Sua página na {brand}: a Central de Atendimento onde clientes pedem cotação, mostram interesse em gestão de milhas e falam com você no WhatsApp. Textos, cores, botões e as páginas de cotação, reserva, saldo e contrato você edita no editor.</p>
       {erro && <div className="mb-4"><Alert>{erro}</Alert></div>}
-      <Section title="Apresentação">
+      <Section title="Página">
         <div className="space-y-4">
-          <Field label="Frase de abertura" hint="Aparece abaixo do seu nome. Padrão: “Sua viagem começa aqui”"><input className="input" value={f.headline} onChange={(e) => set("headline", e.target.value)} maxLength={120} placeholder="Sua viagem começa aqui" /></Field>
-          <Field label="Sobre você" hint="Até 500 caracteres"><textarea className="input min-h-24" value={f.bio} onChange={(e) => set("bio", e.target.value)} maxLength={500} placeholder="Ex.: Emito passagens com milhas há 5 anos, atendimento pelo WhatsApp." /></Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Nome de exibição" required><input className="input" value={f.displayName} onChange={(e) => set("displayName", e.target.value)} required minLength={2} maxLength={80} /></Field>
-            <Field label="Endereço da página" required hint={`/p/${f.slug || "seu-nome"}`}><input className="input" value={f.slug} onChange={(e) => set("slug", slugify(e.target.value))} required minLength={3} maxLength={40} /></Field>
-          </div>
-          <Field label="Programas com que você trabalha">
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Programas com que você trabalha">
-              {programs.map((p) => {
-                const on = f.programIds.includes(p.id);
-                return (
-                  <button key={p.id} type="button" aria-pressed={on} onClick={() => set("programIds", on ? f.programIds.filter((x) => x !== p.id) : [...f.programIds, p.id])} className={`rounded-full border px-3 py-1 text-xs font-medium ${on ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>
-                    {p.name}
-                  </button>
-                );
-              })}
+          <Switch label="Página pública ativa" hint="Desligada, ninguém consegue abrir o endereço" checked={published} onChange={setPublished} />
+          <Field label="Endereço da página" required hint={`/p/${slug || "seu-nome"}`}><input className="input" value={slug} onChange={(e) => setSlug(slugify(e.target.value))} required minLength={3} maxLength={40} /></Field>
+          {profile && (
+            <div className="flex gap-2">
+              <input className="input min-w-0 flex-1 text-sm" readOnly value={link} aria-label="Link da sua página" onFocus={(e) => e.target.select()} />
+              <button type="button" className="btn-ghost h-10" onClick={() => navigator.clipboard.writeText(link).then(() => toast("Link copiado"), () => null)}><Copy className="h-4 w-4" />Copiar</button>
+              {profile.published && <a href={`/p/${profile.slug}`} target="_blank" rel="noopener" className="btn-ghost h-10"><ExternalLink className="h-4 w-4" />Abrir</a>}
             </div>
-          </Field>
+          )}
         </div>
       </Section>
-      <Section title="Contato">
-        <p className="mb-4 text-sm text-muted">Só os contatos preenchidos aparecem na página pública.</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="WhatsApp"><input className="input" value={f.whatsapp} onChange={(e) => set("whatsapp", e.target.value)} inputMode="tel" placeholder="(11) 90000-0000" maxLength={20} /></Field>
-          <Field label="Instagram"><input className="input" value={f.instagram} onChange={(e) => set("instagram", e.target.value)} placeholder="@seuperfil" maxLength={31} /></Field>
-          <Field label="E-mail de contato" className="sm:col-span-2"><input className="input" type="email" value={f.email} onChange={(e) => set("email", e.target.value)} maxLength={200} /></Field>
-        </div>
-      </Section>
-      <Section title="Publicação">
-        <Switch label="Página pública ativa" hint="Desligada, ninguém consegue abrir o endereço" checked={f.published} onChange={(v) => set("published", v)} />
-        <div className="mt-4"><Switch label="Receber pedidos de cotação" hint="Mostra o formulário “Pedir cotação”; os pedidos caem em CRM › Novos pedidos" checked={f.acceptsOrders} onChange={(v) => set("acceptsOrders", v)} /></div>
-        <div className="mt-4"><Switch label="Receber interessados em gestão de milhas" hint="Mostra “Interesse em gestão de milhas”; os contatos aparecem em CRM › Lista" checked={f.acceptsLeads} onChange={(v) => set("acceptsLeads", v)} /></div>
-        {profile?.published && (
-          <a href={`/p/${profile.slug}`} target="_blank" rel="noopener" className="mt-3 inline-flex items-center gap-1.5 text-sm text-accent-light hover:underline"><ExternalLink className="h-4 w-4" />Ver página pública</a>
-        )}
-      </Section>
-      <button className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Salvar perfil público"}</button>
+      <div className="flex flex-wrap gap-3">
+        <button className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</button>
+        <Link href="/editor" className="btn-ghost"><Palette className="h-4 w-4" />Personalizar página</Link>
+      </div>
     </form>
   );
 }

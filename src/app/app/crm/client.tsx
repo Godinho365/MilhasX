@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Plane, Paperclip, MessageCircle, Archive, ArchiveRestore, Trash2, Pencil, Search, Users, Eye, EyeOff, Download } from "lucide-react";
+import { Plus, Plane, Paperclip, MessageCircle, Archive, ArchiveRestore, Trash2, Pencil, Search, Users, Eye, EyeOff, Download, Copy } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, parseBRLToCents } from "@/lib/format";
@@ -213,7 +213,7 @@ export function OrdersList({ active, archived, customers }: { active: OrderView[
 
 /* ---------------- Detalhe do pedido ---------------- */
 
-type Detail = OrderView & { events: { id: string; type: string; fromStage: string | null; toStage: string | null; note: string | null; createdAt: string }[] };
+type Detail = OrderView & { locator: string | null; clientNotes: string | null; events: { id: string; type: string; fromStage: string | null; toStage: string | null; note: string | null; createdAt: string }[] };
 type FileRow = { id: string; name: string; mime: string; size: number; visibleToClient: boolean };
 type Quote = { id: string; label: string; miles: number | null; taxesCents: number | null; cashCents: number | null; departDate: string; notes: string | null };
 
@@ -324,6 +324,8 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
             )}
           </section>
 
+          <ClientLinks id={id} locator={o.locator} clientNotes={o.clientNotes} />
+
           <section aria-label="Documentos">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="kicker">Documentos</h3>
@@ -417,6 +419,43 @@ export function LeadsList({ leads }: { leads: Lead[] }) {
           })}
         </ul>
       )}
+    </section>
+  );
+}
+
+/* ---------------- Páginas do cliente (Cotação e Reserva confirmada) ---------------- */
+
+function ClientLinks({ id, locator, clientNotes }: { id: string; locator: string | null; clientNotes: string | null }) {
+  const [loc, setLoc] = useState(locator ?? "");
+  const [notes, setNotes] = useState(clientNotes ?? "");
+  const dirty = loc !== (locator ?? "") || notes !== (clientNotes ?? "");
+  async function copyLink(kind: "cotacao" | "reserva") {
+    const r = await api<{ token: string; slug: string | null }>(`/api/orders/${id}/share`, "POST");
+    if (!r.ok) return toast(r.erro, "error");
+    if (!r.data.slug) return toast("Crie sua página em Configurações › Sua MilhasX primeiro", "error");
+    const url = `${window.location.origin}/p/${r.data.slug}/${kind}/${r.data.token}`;
+    await navigator.clipboard.writeText(url).catch(() => null);
+    toast(kind === "cotacao" ? "Link da cotação copiado" : "Link da reserva copiado");
+  }
+  async function save() {
+    const r = await api(`/api/orders/${id}/share`, "PATCH", { locator: loc || null, clientNotes: notes || null });
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Dados da reserva salvos");
+  }
+  return (
+    <section aria-label="Para o cliente" className="rounded-xl border border-line p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="kicker flex-1">Para o cliente</h3>
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copyLink("cotacao")}><Copy className="h-3.5 w-3.5" />Copiar link da cotação</button>
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copyLink("reserva")}><Copy className="h-3.5 w-3.5" />Copiar link da reserva</button>
+        <Link href="/editor" className="btn-subtle h-8 text-xs">Personalizar páginas</Link>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
+        <Field label="Localizador"><input className="input font-mono uppercase" value={loc} onChange={(e) => setLoc(e.target.value.replace(/[^A-Za-z0-9]/g, ""))} maxLength={20} placeholder="ABC123" /></Field>
+        <Field label="Recado na página da reserva"><input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Ex.: bagagem de 23 kg incluída" /></Field>
+      </div>
+      {dirty && <button type="button" className="btn-primary mt-3 h-9" onClick={save}>Salvar dados da reserva</button>}
+      <p className="mt-2 text-xs text-muted">A cotação mostra as opções anotadas acima com o valor em R$; a reserva mostra o localizador, os trechos, o recado e os documentos marcados como visíveis.</p>
     </section>
   );
 }

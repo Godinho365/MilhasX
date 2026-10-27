@@ -83,9 +83,9 @@ export function notifyPrefs(raw: unknown): NotifyPrefs {
 }
 
 // Limites de cada plano (tirados das listas de recursos acima). null = sem limite.
-export type PlanLimits = { holders: number | null; accounts: number | null; storeAlerts: number | null; suppliers: boolean; holderPage: boolean };
+export type PlanLimits = { holders: number | null; accounts: number | null; storeAlerts: number | null; suppliers: boolean; holderPage: boolean; pageBranding: boolean };
 export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
-  PESSOAL: { holders: 1, accounts: 5, storeAlerts: 3, suppliers: false, holderPage: false },
-  PRO: { holders: 2, accounts: null, storeAlerts: null, suppliers: false, holderPage: false },
-  GESTOR: { holders: null, accounts: null, storeAlerts: null, suppliers: true, holderPage: true },
+  PESSOAL: { holders: 1, accounts: 5, storeAlerts: 3, suppliers: false, holderPage: false, pageBranding: false },
+  PRO: { holders: 2, accounts: null, storeAlerts: null, suppliers: false, holderPage: false, pageBranding: true },
+  GESTOR: { holders: null, accounts: null, storeAlerts: null, suppliers: true, holderPage: true, pageBranding: true },
 };

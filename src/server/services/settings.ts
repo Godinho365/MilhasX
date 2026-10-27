@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 import type { Plan, Prisma } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { mpEnabled, currentSubscription } from "./billing-mp";
+import { assertFeature, hasFeature } from "./plan-limits";
+import { detectImage } from "./extras";
+import { resolveDesign, type PageDesign } from "@/domain/page-design";
 import { PLANS, effectivePlan, planPriceCents, notifyPrefs, REFERRAL_TRIAL_DAYS, TRIAL_DAYS, type PlanCode, type PlanInterval, type ValuesMode } from "@/domain/plans";
 
 // ---------- Preferências (aba Geral) ----------
@@ -170,17 +173,25 @@ export interface SalesProfileInput {
   acceptsOrders?: boolean;
   acceptsLeads?: boolean;
   headline?: string | null;
+  design?: unknown;
 }
 
+/** Sem os bytes do banner: o editor só precisa saber se existe (bannerUpdatedAt). */
 export async function getSalesProfile(userId: string) {
-  return prisma.salesProfile.findUnique({ where: { userId } });
+  return prisma.salesProfile.findUnique({ where: { userId }, omit: { banner: true } });
 }
+
+const brandingKey = (d: PageDesign) => JSON.stringify([d.bgColor, d.share]);
 
 export async function saveSalesProfile(userId: string, input: SalesProfileInput) {
   const slug = input.slug.trim().toLowerCase();
   const taken = await prisma.salesProfile.findFirst({ where: { slug, NOT: { userId } }, select: { userId: true } });
   if (taken) throw new DomainError(409, "Esse endereço já está em uso");
   const programs = await prisma.program.findMany({ where: { id: { in: input.programIds }, active: true }, select: { id: true } });
+  const saved = await prisma.salesProfile.findUnique({ where: { userId }, select: { design: true } });
+  const design = resolveDesign(input.design === undefined ? saved?.design : input.design);
+  // Cor de fundo e prévia do link são do plano PRO; manter o que já estava salvo é sempre permitido
+  if (brandingKey(design) !== brandingKey(resolveDesign(saved?.design))) await assertFeature(userId, "pageBranding");
   const data = {
     slug,
     displayName: input.displayName.trim(),
@@ -193,16 +204,61 @@ export async function saveSalesProfile(userId: string, input: SalesProfileInput)
     acceptsOrders: input.acceptsOrders ?? true,
     acceptsLeads: input.acceptsLeads ?? true,
     headline: input.headline?.trim() || null,
+    design: design as unknown as Prisma.InputJsonValue,
   };
-  return prisma.salesProfile.upsert({ where: { userId }, update: data, create: { userId, ...data } });
+  return prisma.salesProfile.upsert({ where: { userId }, update: data, create: { userId, ...data }, omit: { banner: true } });
+}
+
+/** Configurações › Sua MilhasX: só ativar/desativar e o endereço (o resto fica no editor). */
+export async function setSalesProfilePublication(userId: string, defaultName: string, input: { published: boolean; slug: string }) {
+  const slug = input.slug.trim().toLowerCase();
+  const taken = await prisma.salesProfile.findFirst({ where: { slug, NOT: { userId } }, select: { userId: true } });
+  if (taken) throw new DomainError(409, "Esse endereço já está em uso");
+  return prisma.salesProfile.upsert({
+    where: { userId },
+    update: { slug, published: input.published },
+    create: { userId, slug, published: input.published, displayName: defaultName, programIds: [], design: resolveDesign(null) as unknown as Prisma.InputJsonValue },
+    omit: { banner: true },
+  });
 }
 
 /** Página pública: só perfis publicados e só os campos que o próprio usuário escolheu mostrar. */
 export async function publicSalesProfile(slug: string) {
-  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() } });
+  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, omit: { banner: true } });
   if (!p || !p.published) return null;
   const owner = await prisma.user.findUnique({ where: { id: p.userId }, select: { status: true } });
   if (owner?.status !== "ACTIVE") return null;
   const programs = await prisma.program.findMany({ where: { id: { in: p.programIds } }, select: { id: true, name: true, color: true }, orderBy: { name: "asc" } });
-  return { slug: p.slug, displayName: p.displayName, bio: p.bio, whatsapp: p.whatsapp, instagram: p.instagram, email: p.email, acceptsOrders: p.acceptsOrders, acceptsLeads: p.acceptsLeads, headline: p.headline, programs };
+  const design = resolveDesign(p.design);
+  // Se o plano deixou de incluir a personalização PRO, a página volta ao visual padrão
+  const branded = await hasFeature(p.userId, "pageBranding");
+  if (!branded) Object.assign(design, { bgColor: null, share: { title: "", description: "" } });
+  const bannerVersion = branded && p.bannerUpdatedAt ? String(p.bannerUpdatedAt.getTime()) : null;
+  return { slug: p.slug, displayName: p.displayName, bio: p.bio, whatsapp: p.whatsapp, instagram: p.instagram, email: p.email, acceptsOrders: p.acceptsOrders, acceptsLeads: p.acceptsLeads, headline: p.headline, programs, design, bannerVersion };
+}
+
+// ---------- Banner no topo da página (PRO) ----------
+
+const MAX_BANNER = 1024 * 1024;
+
+export async function setBanner(userId: string, buf: Buffer) {
+  await assertFeature(userId, "pageBranding");
+  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
+  if (buf.length > MAX_BANNER) throw new DomainError(413, "Imagem maior que 1 MB");
+  const mime = detectImage(buf);
+  if (!mime) throw new DomainError(415, "Envie uma imagem JPG, PNG ou WebP");
+  const r = await prisma.salesProfile.updateMany({ where: { userId }, data: { banner: new Uint8Array(buf), bannerMime: mime, bannerUpdatedAt: new Date() } });
+  if (r.count === 0) throw new DomainError(400, "Salve a página uma vez antes de enviar o banner");
+}
+
+export async function removeBanner(userId: string) {
+  await prisma.salesProfile.updateMany({ where: { userId }, data: { banner: null, bannerMime: null, bannerUpdatedAt: null } });
+}
+
+/** Banner da página publicada (o dono vê o próprio mesmo sem publicar, para a prévia). */
+export async function getBanner(slug: string, viewerId: string | null) {
+  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, published: true, banner: true, bannerMime: true } });
+  if (!p?.banner || !p.bannerMime) return null;
+  if (p.userId !== viewerId && (!p.published || !(await hasFeature(p.userId, "pageBranding")))) return null;
+  return { data: Buffer.from(p.banner), mime: p.bannerMime };
 }

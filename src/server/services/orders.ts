@@ -169,7 +169,7 @@ export async function listOrders(userId: string, opts: { archived?: boolean; q?:
 export async function getOrder(userId: string, id: string) {
   const o = await prisma.travelOrder.findFirst({ where: { id, userId }, include: { ...withCounts, events: { orderBy: { createdAt: "desc" }, take: 30 } } });
   if (!o) throw new DomainError(404, "Pedido não encontrado");
-  return { ...view(o), events: o.events.map((e) => ({ id: e.id, type: e.type, fromStage: e.fromStage, toStage: e.toStage, note: e.note, createdAt: e.createdAt.toISOString() })) };
+  return { ...view(o), locator: o.locator, clientNotes: o.clientNotes, events: o.events.map((e) => ({ id: e.id, type: e.type, fromStage: e.fromStage, toStage: e.toStage, note: e.note, createdAt: e.createdAt.toISOString() })) };
 }
 
 /* ---------------- Anexos ---------------- */

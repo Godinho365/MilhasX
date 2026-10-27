@@ -204,7 +204,11 @@ export const salesProfileSchema = z.object({
   acceptsOrders: z.boolean().default(true),
   acceptsLeads: z.boolean().default(true),
   headline: z.string().trim().max(120).nullable().optional(),
+  // Personalização: formato livre aqui, normalizado por resolveDesign (domain/page-design.ts)
+  design: z.record(z.unknown()).refine((d) => JSON.stringify(d).length <= 20_000, "Personalização grande demais").optional(),
 });
+
+export const salesPublicationSchema = salesProfileSchema.pick({ slug: true, published: true });
 
 export const programSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -416,3 +420,15 @@ export const publicLeadSchema = z.object({
   website: z.string().max(0).optional(),
 });
 export const leadStatusSchema = z.object({ status: z.enum(["NEW", "CONTACTED", "CLIENT", "DISCARDED"]) });
+
+export const publicContractSchema = z.object({
+  name: z.string().trim().min(3, "Informe seu nome completo").max(120),
+  phone: z.string().trim().max(30).regex(/^[\d\s()+-]*$/, "Telefone inválido").nullable().optional(),
+  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  accepted: z.literal(true, { errorMap: () => ({ message: "É preciso aceitar os termos" }) }),
+  website: z.string().max(0).optional(),
+});
+export const orderClientInfoSchema = z.object({
+  locator: z.string().trim().max(20).regex(/^[A-Za-z0-9]*$/, "Localizador inválido").nullable().optional(),
+  clientNotes: z.string().trim().max(1000).nullable().optional(),
+});

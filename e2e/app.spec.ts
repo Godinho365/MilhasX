@@ -819,16 +819,72 @@ test("configurações: abas, plano, indicação e perfil público", async () => 
   await tabs.getByRole("link", { name: "Indicações", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Link de indicação" })).toHaveValue(/\/register\?ref=[A-Z2-9]{8}$/);
 
-  // Perfil público: salva e abre a página pública
+  // Sua MilhasX nas configurações: só ativar e o endereço; o resto fica no editor
   await tabs.getByRole("link", { name: "Sua MilhasX", exact: true }).click();
   await page.getByLabel("Endereço da página").fill(`e2e-${Date.now()}`);
-  await page.getByLabel("WhatsApp").fill("(11) 98888-7777");
   await page.getByRole("switch", { name: "Página pública ativa" }).click();
-  await page.getByRole("button", { name: "Salvar perfil público" }).click();
-  await toastSays("Perfil público salvo");
-  const href = await page.getByRole("link", { name: "Ver página pública" }).getAttribute("href");
-  await page.goto(href!);
-  await expect(page.getByRole("link", { name: "WhatsApp" })).toHaveAttribute("href", "https://wa.me/5511988887777");
+  await page.getByRole("button", { name: "Salvar", exact: true }).click();
+  await toastSays("Página atualizada");
+  await page.getByRole("link", { name: "Personalizar página" }).click();
+  await expect(page).toHaveURL(/\/editor$/);
+
+  // Editor em página própria: cada mudança aparece na prévia (iframe) antes de salvar
+  const preview = page.frameLocator('iframe[title="Prévia da sua página"]');
+  const panel = (name: string) => page.locator("details", { has: page.locator("summary", { hasText: name }) });
+  const open = async (name: string) => { if (!(await panel(name).evaluate((d) => (d as HTMLDetailsElement).open))) await panel(name).locator("summary").click(); };
+  await open("Introdução");
+  await page.getByLabel("Frase de abertura").fill("Viaje mais pagando menos");
+  await expect(preview.getByText("Viaje mais pagando menos")).toBeVisible();
+  await open("Cor de Fundo");
+  await page.getByRole("button", { name: "Cor #f8fafc" }).click();
+  await expect(preview.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "light");
+  await open("Botões");
+  const zap = page.getByRole("listitem", { name: "Botão WhatsApp" });
+  await zap.getByLabel("Texto do botão").fill("Chama no zap");
+  await zap.getByLabel("WhatsApp").fill("(11) 98888-7777");
+  await zap.getByRole("button", { name: "Subir" }).click();
+  await zap.getByRole("button", { name: "Subir" }).click();
+  await expect(preview.locator("main a").first()).toContainText("Chama no zap");
+  await page.getByRole("button", { name: "Tablet" }).click();
+  await expect(page.locator('iframe[title="Prévia da sua página"]')).toHaveCSS("width", "768px");
+  await page.getByRole("button", { name: "Celular" }).click();
+  await page.screenshot({ path: `${SHOTS}/editor_pagina_principal.png` });
+
+  await page.getByRole("tab", { name: "Captação de Viagens" }).click();
+  await page.getByLabel("Depois de enviar, o cliente vê").fill("Obrigado! Respondo ainda hoje.");
+  await preview.getByRole("button", { name: "Pedir cotação", exact: true }).click();
+  await expect(preview.getByText("Obrigado! Respondo ainda hoje.")).toBeVisible();
+  await page.getByRole("tab", { name: "Cotação", exact: true }).click();
+  await page.getByLabel("Botão de aprovação (WhatsApp)").fill("Fechar viagem");
+  await expect(preview.getByRole("link", { name: "Fechar viagem" })).toBeVisible();
+  await page.getByRole("tab", { name: "Reserva Confirmada" }).click();
+  await expect(preview.getByText("ABC123", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Gestão de Milhas" }).click();
+  await expect(preview.getByRole("list", { name: "Saldos" })).toContainText("Smiles");
+  await page.getByRole("tab", { name: "Assinatura de Contrato" }).click();
+  await page.getByLabel("Termos do contrato").fill("1. Termo de teste E2E.");
+  await expect(preview.getByText("1. Termo de teste E2E.")).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/editor_contrato.png` });
+  await page.getByRole("button", { name: "Salvar alterações" }).click();
+  await toastSays("Página salva");
+
+  // Página pública e contrato com o que foi salvo
+  const contract = await page.getByRole("textbox", { name: "Link da sua página" }).inputValue();
+  await page.goto(contract);
+  await expect(page.getByLabel("Termos do contrato")).toContainText("Termo de teste E2E");
+  await page.getByLabel("Nome completo").fill("Cliente Contrato E2E");
+  await page.getByLabel("WhatsApp").fill("(11) 97777-6666");
+  await page.getByLabel("Li os termos acima").check();
+  await page.getByRole("button", { name: "Li e aceito" }).click();
+  await expect(page.getByText("Contrato assinado!")).toBeVisible();
+  await page.goto(contract.replace(/\/contrato$/, ""));
+  await expect(page.getByRole("link", { name: /Chama no zap/ })).toHaveAttribute("href", "https://wa.me/5511988887777");
+  await expect(page.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "light");
+  await expect(page.getByText("Viaje mais pagando menos")).toBeVisible();
+  await page.goto("/editor");
+  await page.getByRole("tab", { name: "Assinatura de Contrato" }).click();
+  await open("Assinaturas recebidas");
+  await expect(page.getByRole("list", { name: "Assinaturas" })).toContainText("Cliente Contrato E2E");
 });
 
 test("CRM: pedido, etapas, lista, dashboard e captação pela página pública", async () => {
@@ -896,7 +952,7 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   await page.goto(pub!);
   // Central de Atendimento: os formulários abrem ao clicar no cartão
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.getByText("Sua viagem começa aqui")).toBeVisible();
+  await expect(page.getByText("Viaje mais pagando menos")).toBeVisible();
   await page.getByRole("button", { name: /Interesse em gestão de milhas/ }).click();
   const lead = page.getByRole("form", { name: "Interesse em gestão de milhas" });
   await lead.getByLabel("Seu nome").fill("Interessado E2E");
@@ -911,19 +967,19 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   await form.getByLabel("Destino", { exact: true }).fill("LIS");
   await form.getByLabel("Data de ida").fill("2027-05-10");
   await form.getByRole("button", { name: "Pedir cotação" }).click();
-  await expect(page.getByText("Pedido enviado!")).toBeVisible();
+  await expect(page.getByText("Obrigado! Respondo ainda hoje.")).toBeVisible();
   await page.goto("/app/crm");
   await expect(page.getByRole("region", { name: "Novos pedidos" }).getByRole("listitem", { name: /Visitante E2E/ })).toContainText("Página pública");
   await page.goto("/app/crm?view=lista");
   await expect(page.getByRole("region", { name: "Interessados em gestão de milhas" })).toContainText("Interessado E2E");
-  // menu lateral: Sua MilhasX leva às configurações da página
+  // menu lateral: Sua MilhasX abre o editor da página
   await page.locator("aside").getByRole("link", { name: "Sua MilhasX" }).click();
-  await expect(page).toHaveURL(/tab=sales-profile/);
+  await expect(page).toHaveURL(/\/editor$/);
 });
 
 const PAGES = [
   "/app", "/app/entries", "/app/programs", "/app/programs?view=titulares", "/app/purchases", "/app/purchases?tab=alertas",
-  "/app/sales", "/app/sales?tab=clientes", "/app/simulators", "/app/reports", "/app/notifications", "/app/settings", "/app/settings?tab=profile", "/app/settings?tab=billing", "/app/settings?tab=referrals", "/app/settings?tab=sales-profile", "/app/upgrade", "/app/crm", "/app/crm?view=lista", "/app/crm?view=dashboard", "/app/buscador", "/app/tradutor", "/app/tradutor?de=BSB&para=GIG",
+  "/app/sales", "/app/sales?tab=clientes", "/app/simulators", "/app/reports", "/app/notifications", "/app/settings", "/app/settings?tab=profile", "/app/settings?tab=billing", "/app/settings?tab=referrals", "/app/settings?tab=sales-profile", "/editor", "/app/upgrade", "/app/crm", "/app/crm?view=lista", "/app/crm?view=dashboard", "/app/buscador", "/app/tradutor", "/app/tradutor?de=BSB&para=GIG",
   "/app/offers", "/app/offers?tab=historico", "/app/offers?tab=alertas", "/app/credit-cards", "/app/management",
   "/app/management?tab=fornecedores", "/app/guides", "/app/guides/entendendo-o-cpm", "/app/news", "/app/purchases?tab=compras",
 ];

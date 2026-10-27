@@ -80,7 +80,7 @@ export async function holderView(rawSession: string | undefined) {
   if (!rawSession) return null;
   const row = await prisma.holderAccess.findUnique({
     where: { sessionHash: sha(rawSession) },
-    include: { holder: { select: { id: true, name: true, accessEmail: true, user: { select: { status: true } } } } },
+    include: { holder: { select: { id: true, name: true, accessEmail: true, userId: true, user: { select: { status: true } } } } },
   });
   if (!row || !row.sessionExpiresAt || row.sessionExpiresAt < new Date()) return null;
   // Trocar o e-mail autorizado ou desativar o dono encerra o acesso
@@ -98,6 +98,7 @@ export async function holderView(rawSession: string | undefined) {
   });
   return {
     holder: row.holder.name,
+    ownerId: row.holder.userId,
     sessionExpiresAt: row.sessionExpiresAt.toISOString(),
     accounts: accounts.map((a) => ({ id: a.id, program: a.program.name, color: a.program.color, balance: a.balance })),
     entries: entries.map((e) => ({ id: e.id, label: ENTRY_LABELS[e.type], pending: e.status === "PENDING", points: e.points, program: e.account.program.name, date: e.occurredAt.toISOString() })),

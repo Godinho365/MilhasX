@@ -4,7 +4,7 @@ import { Field, Alert } from "@/components/ui";
 import { TripFields, emptyTrip, tripSegments, type Trip } from "@/components/trip-fields";
 
 /** "Pedir cotação": vira um pedido em "Novos pedidos" no CRM de quem é dono da página. */
-export function PublicOrderForm({ slug }: { slug: string }) {
+export function PublicOrderForm({ slug, submit = "Pedir cotação", thanks = "Pedido enviado! Em breve entraremos em contato com a sua cotação.", preview = false }: { slug: string; submit?: string; thanks?: string; preview?: boolean }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -18,6 +18,7 @@ export function PublicOrderForm({ slug }: { slug: string }) {
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
+    if (preview) return setDone(0); // prévia do editor: só mostra a confirmação
     if (!phone.trim() && !email.trim()) return setErro("Informe um WhatsApp ou e-mail para contato");
     setBusy(true);
     const r = await fetch(`/api/public/orders/${encodeURIComponent(slug)}`, {
@@ -30,9 +31,9 @@ export function PublicOrderForm({ slug }: { slug: string }) {
     if (!r.ok) return setErro(j.erro ?? "Não foi possível enviar. Tente de novo.");
     setDone(j.number);
   }
-  if (done !== null) return <Alert kind="ok">Pedido enviado! Em breve entraremos em contato com a sua cotação.</Alert>;
+  if (done !== null) return <Alert kind="ok">{thanks}</Alert>;
   return (
-    <form onSubmit={send} className="space-y-4" aria-label="Pedir cotação">
+    <form onSubmit={send} noValidate={preview} className="space-y-4" aria-label="Pedir cotação">
       {erro && <Alert>{erro}</Alert>}
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Seu nome" required><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
@@ -42,7 +43,7 @@ export function PublicOrderForm({ slug }: { slug: string }) {
       <input type="text" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} className="absolute -left-[9999px] h-0 w-0 opacity-0" aria-hidden />
       <TripFields trip={trip} setTrip={setTrip} returnDate={returnDate} setReturnDate={setReturnDate} />
       <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Horários, companhias de preferência, bagagem..." /></Field>
-      <button className="btn-primary w-full" disabled={busy}>{busy ? "Enviando…" : "Pedir cotação"}</button>
+      <button className="btn-primary w-full" disabled={busy}>{busy ? "Enviando…" : submit}</button>
       <p className="text-center text-xs text-muted">Seus dados são usados só para responder a este pedido.</p>
     </form>
   );

@@ -2,10 +2,10 @@ import { prisma, DomainError } from "../db";
 import { PLANS, PLAN_LIMITS, effectivePlan, type PlanCode } from "@/domain/plans";
 
 type Countable = "holders" | "accounts" | "storeAlerts";
-type Feature = "suppliers" | "holderPage";
+export type Feature = "suppliers" | "holderPage" | "pageBranding";
 
 const LABELS: Record<Countable, [string, string]> = { holders: ["titular", "titulares"], accounts: ["conta", "contas"], storeAlerts: ["alerta de loja", "alertas de loja"] };
-const FEATURE_LABELS: Record<Feature, string> = { suppliers: "Fornecedores e emissão com fornecedor", holderPage: "A página do titular" };
+const FEATURE_LABELS: Record<Feature, string> = { suppliers: "Fornecedores e emissão com fornecedor", holderPage: "A página do titular", pageBranding: "Cor de fundo, banner e prévia do link" };
 const HINT = "Altere o plano em Configurações › Assinatura.";
 
 async function planOf(userId: string): Promise<PlanCode | "ADMIN"> {
@@ -32,5 +32,12 @@ export async function assertWithinLimit(userId: string, what: Countable) {
 export async function assertFeature(userId: string, feature: Feature) {
   const plan = await planOf(userId);
   if (plan === "ADMIN" || PLAN_LIMITS[plan][feature]) return;
-  throw new DomainError(402, `${FEATURE_LABELS[feature]} faz parte do plano Gestor. ${HINT}`);
+  const from = (Object.keys(PLAN_LIMITS) as PlanCode[]).find((k) => PLAN_LIMITS[k][feature]) ?? "GESTOR";
+  throw new DomainError(402, `${FEATURE_LABELS[feature]} faz parte do plano ${PLANS[from].name}. ${HINT}`);
+}
+
+/** Mesmo critério de assertFeature, para a interface saber o que mostrar liberado. */
+export async function hasFeature(userId: string, feature: Feature) {
+  const plan = await planOf(userId);
+  return plan === "ADMIN" || PLAN_LIMITS[plan][feature];
 }

@@ -31,12 +31,45 @@ uma frase de abertura (padrão “Sua viagem começa aqui”) e três cartões:
   situação (novo, em contato, virou cliente, descartado) e botão de WhatsApp;
 - **Falar no WhatsApp**.
 
-O menu lateral tem **“Sua MilhasX”**, que abre Configurações › Sua MilhasX (nome, endereço, frase,
-programas, contatos, publicar e ligar/desligar cada formulário).
+O menu lateral **“Sua MilhasX”** abre o **editor em página própria** (`/editor`, fora do menu do app),
+como o editor da simbora.la. Em Configurações › Sua MilhasX ficam só a **ativação** da página e o
+**endereço**, com um botão “Personalizar página”.
+
+**Barra “Personalizar:”** com 7 abas:
+- **Página Principal (Bio)**: Cor de Fundo, Introdução, Banner no topo, Botões e Outros contatos.
+  - **Botões**: mudar texto, descrição e ordem, e incluir até 6 links próprios (só `http`/`https`).
+  - **Prévia do link ao compartilhar**: dados de Open Graph.
+- **Captação de Viagens** e **Interesse em Gestão**: liga/desliga, título, apresentação, botão de envio e
+  mensagem de confirmação.
+- **Cotação**: página `/p/<nome>/cotacao/<token>` com as opções anotadas no pedido (valor em R$, sem
+  milhas nem anotações internas) e o botão de aprovar pelo WhatsApp.
+- **Reserva Confirmada**: página `/p/<nome>/reserva/<token>` com localizador, trechos, recado e documentos
+  marcados como visíveis.
+  - O link das duas páginas sai do CRM: pedido › “Para o cliente” › Copiar link.
+  - É um token aleatório por pedido.
+- **Gestão de Milhas**: a página de saldos do titular (`/h`), agora com o visual da página.
+- **Assinatura de Contrato**: página `/p/<nome>/contrato`, onde o cliente lê os termos e aceita.
+  - Cada assinatura guarda uma cópia dos termos aceitos.
+  - As assinaturas aparecem na aba “Assinaturas recebidas”, e o dono recebe uma notificação.
+
+**Prévia ao vivo** à esquerda, numa moldura de navegador com o endereço:
+- Vem de um iframe de `/preview/central` (só para o dono logado), que recebe o rascunho por `postMessage` da
+  mesma origem.
+- Três tamanhos: computador (1280px), tablet (768px) e celular (390px).
+- As páginas de cotação, reserva e saldo aparecem com dados de exemplo.
+
+**Recursos PRO**: Cor de Fundo, Banner e Prévia do link são do plano PRO (`pageBranding`).
+- Ao voltar para o Pessoal, as páginas voltam ao visual padrão.
+- Fundo claro troca o texto para escuro (`themeForBg`).
+
+**Onde fica salvo**:
+- A personalização fica em `SalesProfile.design`, normalizada por `resolveDesign` em
+  `src/domain/page-design.ts`.
+- O banner fica em `SalesProfile.banner` e é servido por `/api/public/banner/<nome>`.
 
 ### Captação pela página pública
 
-Com a página pública publicada (Configurações › Perfil Público) e “Receber pedidos de cotação” ligado,
+Com a página pública publicada (Configurações › Sua MilhasX) e “Receber pedidos de cotação” ligado,
 `/p/<nome>` mostra o formulário **Pedir cotação**. O pedido cai em “Novos pedidos” e o dono recebe uma
 notificação. Proteções: só página publicada e ativa, contato obrigatório, campo-armadilha para robôs e
 no máximo 5 pedidos por hora por IP. As visitas da página contam para a conversão no dashboard.
