@@ -236,8 +236,8 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
           })}
         </nav>
 
-        {planNote && <div className="mt-3 rounded-xl border border-green-900/60 bg-green-950/30 px-4 py-3 text-sm text-green-200">{planNote} <Link href="/app/upgrade" className="font-semibold underline">Ver planos</Link></div>}
-        {!profile?.published && <div className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">Sua página ainda não está no ar. Ative em <Link href="/app/settings?tab=sales-profile" className="font-semibold underline">Configurações › Sua {brand}</Link>.</div>}
+        {planNote && <div className="mt-3 rounded-xl border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm text-green-300">{planNote} <Link href="/app/upgrade" className="font-semibold underline">Ver planos</Link></div>}
+        {!profile?.published && <div className="mt-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">Sua página ainda não está no ar. Ative em <Link href="/app/settings?tab=sales-profile" className="font-semibold underline">Configurações › Sua {brand}</Link>.</div>}
         {erro && <div className="mt-3"><Alert>{erro}</Alert></div>}
 
         <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">

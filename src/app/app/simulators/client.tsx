@@ -233,7 +233,7 @@ export function SimulatorView({ kind, accounts, suppliers, initial, simId }: { k
           {accountField("accountId")}
           <div className="grid gap-4 sm:grid-cols-2">
             {pointsField("outbound", "Pontos (Ida)", { required: true, placeholder: "Ex: 15000" })}
-            {pointsField("ret", "Pontos (Volta)", { placeholder: "Informar pontos da volta" })}
+            {pointsField("ret", "Pontos (Volta)", { placeholder: "Opcional" })}
           </div>
           {moneyField("taxes", "Total de Taxas (R$)")}
         </>
@@ -272,7 +272,7 @@ export function SimulatorView({ kind, accounts, suppliers, initial, simId }: { k
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             {pointsField("outbound", "Pontos (Ida)", { required: true, big: true, placeholder: "Ex: 15000" })}
-            {pointsField("ret", "Pontos (Volta)", { big: true, placeholder: "Informar pontos da volta" })}
+            {pointsField("ret", "Pontos (Volta)", { big: true, placeholder: "Opcional" })}
           </div>
           {moneyField("saleValue", "Valor dos Pontos (R$)", { required: true, hint: "Quanto o cliente paga pelos pontos" })}
           <Collapsible icon={<Receipt className="h-4 w-4" />} title="Custos adicionais" subtitle="Taxas e outros valores repassados nesta venda" open={extraOpen} onToggle={() => setExtraOpen(!extraOpen)}>
@@ -331,7 +331,7 @@ function Rows({ rows }: { rows: { label: string; value: React.ReactNode; strong?
     </dl>
   );
 }
-const Warn = ({ children }: { children: React.ReactNode }) => <p className="mt-3 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"><AlertTriangle className="h-4 w-4 shrink-0" />{children}</p>;
+const Warn = ({ children }: { children: React.ReactNode }) => <p className="mt-3 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-300"><AlertTriangle className="h-4 w-4 shrink-0" />{children}</p>;
 
 function ResultView({ kind, v, accounts, suppliers }: { kind: SimulatorKind; v: Values; accounts: SimAccount[]; suppliers: SimSupplier[] }) {
   const acc = (id: string | boolean | undefined) => accounts.find((a) => a.id === id);

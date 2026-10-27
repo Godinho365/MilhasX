@@ -53,11 +53,12 @@ export function Switch({ checked, onChange, label, hint, id }: { checked: boolea
 export function PointsInput({ value, onChange, label = "Pontos", quick = [[100, "+100"], [1000, "+1k"], [10000, "+10k"]] as [number, string][], placeholder = "0" }: { value: string; onChange: (v: string) => void; label?: string; quick?: [number, string][]; placeholder?: string }) {
   const add = (n: number) => onChange(fmtPts(parsePts(value) + n));
   return (
-    <div className="relative">
-      <input className="input pr-[124px] tabular-nums" inputMode="numeric" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value ? fmtPts(parsePts(e.target.value)) : "")} aria-label={label} />
-      <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5">
+    <div>
+      <input className="input tabular-nums" inputMode="numeric" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value ? fmtPts(parsePts(e.target.value)) : "")} aria-label={label} />
+      {/* Atalhos abaixo do campo: dentro dele espremiam o número em colunas estreitas */}
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
         {quick.map(([n, l]) => (
-          <button key={l} type="button" onClick={() => add(n)} className="rounded-md px-1.5 py-1 text-[11px] font-medium text-muted hover:bg-panel2 hover:text-white">{l}</button>
+          <button key={l} type="button" onClick={() => add(n)} className="rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-muted transition-colors hover:border-zinc-500 hover:text-white">{l}</button>
         ))}
       </div>
     </div>
