@@ -49,10 +49,10 @@ describe("resolveDesign", () => {
     expect(resolveDesign({ buttons: Array.from({ length: 9 }, (_, i) => ({ kind: "link", label: `L${i}`, url: "https://x.test" })) }).buttons.filter((b) => b.kind === "link")).toHaveLength(6);
   });
 
-  it("fundo claro usa texto escuro", () => {
-    expect(themeForBg("#f8fafc")).toBe("light");
+  it("sem cor ou com fundo claro usa o tema claro das páginas do cliente", () => {
+    expect(themeForBg("#f8fafc")).toBe("client");
     expect(themeForBg("#0f172a")).toBe("dark");
-    expect(themeForBg(null)).toBe("dark");
+    expect(themeForBg(null)).toBe("client");
   });
 });
 

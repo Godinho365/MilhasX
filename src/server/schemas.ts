@@ -391,7 +391,7 @@ export const orderSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
 });
 // "website" é um campo-armadilha: pessoas não veem, robôs preenchem
-export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, budgetCents: true }).extend({ website: z.string().max(0).optional() });
+export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true }).extend({ website: z.string().max(0).optional() });
 export const orderMoveSchema = z.object({ stage: z.enum(["NEW", "QUOTING", "QUOTE_SENT", "NEGOTIATION", "ISSUED", "TRAVELING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() });
 export const orderArchiveSchema = z.object({ reason: z.string().trim().min(1).max(120) });
 const searchParamsSchema = z.object({ origin: iataCode, destination: iataCode, departDate: ymd, returnDate: ymd.nullable().optional(), adults: z.number().int().min(1).max(9), children: z.number().int().min(0).max(8), infants: z.number().int().min(0).max(8), cabin: z.enum(["ECONOMY", "PREMIUM", "BUSINESS", "FIRST"]) });
@@ -417,18 +417,25 @@ export const publicLeadSchema = z.object({
   phone: z.string().trim().max(30).regex(/^[\d\s()+-]*$/, "Telefone inválido").nullable().optional(),
   email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
   message: z.string().trim().max(1000).nullable().optional(),
+  programs: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
+  incomeRange: z.string().trim().max(60).nullable().optional(),
   website: z.string().max(0).optional(),
 });
 export const leadStatusSchema = z.object({ status: z.enum(["NEW", "CONTACTED", "CLIENT", "DISCARDED"]) });
 
 export const publicContractSchema = z.object({
-  name: z.string().trim().min(3, "Informe seu nome completo").max(120),
-  phone: z.string().trim().max(30).regex(/^[\d\s()+-]*$/, "Telefone inválido").nullable().optional(),
-  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  name: z.string().trim().min(5, "Informe seu nome completo").max(120),
+  cpf: z.string().trim().refine((v) => v.replace(/\D/g, "").length === 11, "CPF inválido"),
+  birthDate: ymd,
+  address: z.string().trim().min(8, "Informe seu endereço").max(200),
   accepted: z.literal(true, { errorMap: () => ({ message: "É preciso aceitar os termos" }) }),
   website: z.string().max(0).optional(),
 });
 export const orderClientInfoSchema = z.object({
   locator: z.string().trim().max(20).regex(/^[A-Za-z0-9]*$/, "Localizador inválido").nullable().optional(),
   clientNotes: z.string().trim().max(1000).nullable().optional(),
+  // Formato livre aqui; normalizados por resolveProposal / resolveReservation (domain/proposal.ts)
+  proposal: z.record(z.unknown()).refine((d) => JSON.stringify(d).length <= 20_000, "Cotação grande demais").nullable().optional(),
+  reservation: z.record(z.unknown()).refine((d) => JSON.stringify(d).length <= 5_000, "Reserva grande demais").nullable().optional(),
 });
+export const orderAccessSchema = z.object({ digits: z.string().trim().regex(/^\d{4}$/, "Informe os 4 últimos dígitos") });

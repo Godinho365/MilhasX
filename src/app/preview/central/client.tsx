@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { resolveDesign, bannerUrl, type DesignPage } from "@/domain/page-design";
+import { contractText } from "@/domain/proposal";
 import { CentralPage, PageShell, type CentralData } from "@/app/p/[slug]/central";
-import { CotacaoView, ReservaView, GestaoMilhasView, ContratoView, SAMPLE_ORDER, SAMPLE_BALANCES } from "@/app/p/[slug]/pages";
+import { CaptacaoForm, GestaoForm } from "@/app/p/[slug]/forms";
+import { CotacaoView, ReservaView, ContratoView, SAMPLE_ORDER } from "@/app/p/[slug]/pages";
+import { PainelView, SAMPLE_PAINEL } from "@/app/p/[slug]/painel";
 
 export type PreviewMessage = {
   type: "central-preview";
@@ -32,14 +35,18 @@ export function PreviewClient({ initial, programs, brand, appName }: { initial: 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [view]);
-  if (view === "home" || view === "captacao" || view === "gestao") return <CentralPage data={data} brand={brand} appName={appName} view={view} preview bannerSrc={bannerSrc} />;
+  if (view === "home") return <CentralPage data={data} brand={brand} appName={appName} preview bannerSrc={bannerSrc} />;
   const d = data.design;
+  const agency = data.displayName;
   return (
-    <PageShell brand={brand} appName={appName} bgColor={d.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
-      {view === "cotacao" && <CotacaoView design={d.cotacao} order={SAMPLE_ORDER} whatsapp={data.whatsapp ?? "11900000000"} />}
-      {view === "reserva" && <ReservaView design={d.reserva} order={SAMPLE_ORDER} fileBase={null} />}
-      {view === "gestaoMilhas" && <GestaoMilhasView design={d.gestaoMilhas} data={SAMPLE_BALANCES} />}
-      {view === "contrato" && <ContratoView key="contrato" design={d.contrato} slug={data.slug} preview />}
+    // key: cada página começa do zero ao trocar de aba (formulários voltam à primeira etapa)
+    <PageShell key={view} brand={brand} appName={appName} bgColor={d.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
+      {view === "captacao" && <CaptacaoForm slug={data.slug} agency={agency} design={d.captacao} whatsapp={data.whatsapp} preview />}
+      {view === "gestao" && <GestaoForm slug={data.slug} agency={agency} design={d.gestao} whatsapp={data.whatsapp} preview />}
+      {view === "cotacao" && <CotacaoView agency={agency} whatsapp={data.whatsapp ?? "11900000000"} design={d.cotacao} order={SAMPLE_ORDER} />}
+      {view === "reserva" && <ReservaView agency={agency} whatsapp={data.whatsapp ?? "11900000000"} design={d.reserva} order={SAMPLE_ORDER} fileBase={null} links={{ cotacao: "#", contrato: "#" }} />}
+      {view === "gestaoMilhas" && <PainelView agency={agency} design={d.gestaoMilhas} data={SAMPLE_PAINEL} />}
+      {view === "contrato" && <ContratoView slug={data.slug} token="exemplo" agency={agency} design={d.contrato} order={SAMPLE_ORDER} text={contractText(d.contrato.terms, { name: agency, doc: d.contrato.agencyDoc, address: d.contrato.agencyAddress }, SAMPLE_ORDER)} preview />}
       <p className="mt-6 text-center text-xs text-muted">Prévia com dados de exemplo</p>
     </PageShell>
   );

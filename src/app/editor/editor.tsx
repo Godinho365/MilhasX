@@ -17,7 +17,7 @@ export type EditorProfile = {
   programIds: string[]; published: boolean; acceptsOrders: boolean; acceptsLeads: boolean; headline: string | null;
   design: unknown; bannerUpdatedAt: string | Date | null;
 } | null;
-type Signature = { id: string; name: string; email: string | null; phone: string | null; createdAt: string | Date };
+type Signature = { id: string; name: string; email: string | null; phone: string | null; orderNumber: number | null; createdAt: string | Date };
 
 const PAGE_ICONS: Record<DesignPage, typeof User> = { home: User, captacao: Send, gestao: Star, cotacao: FileText, reserva: BadgeCheck, gestaoMilhas: BarChart3, contrato: FileSignature };
 const DEVICES = [
@@ -29,13 +29,14 @@ const PREVIEW_HEIGHT = 680;
 const BUTTON_ICONS = { cotacao: Plane, gestao: Wallet, whatsapp: MessageCircle, link: Link2 } as const;
 // Onde cada página é usada (mostrado no topo da aba)
 const PAGE_HELP: Partial<Record<DesignPage, string>> = {
-  captacao: "O formulário “Pedir cotação” da página principal. Cada envio vira um pedido em CRM › Novos pedidos.",
-  gestao: "O formulário “Interesse em gestão de milhas” da página principal. Os contatos aparecem em CRM › Lista.",
-  cotacao: "Página que o cliente abre pelo link da cotação. No CRM, abra o pedido e use “Copiar link da cotação”.",
-  reserva: "Página que o cliente abre depois da emissão, com localizador e documentos. No CRM, abra o pedido e use “Copiar link da reserva”.",
-  gestaoMilhas: "Página de saldos que o titular abre pelo acesso enviado em Titulares › Enviar acesso.",
-  contrato: "Página onde o cliente da gestão de milhas lê os termos e assina. Envie o link abaixo.",
+  captacao: "Página onde o cliente pede cotação em etapas (viagem → dados). Cada envio vira um pedido em CRM › Novos pedidos.",
+  gestao: "Página para captar quem quer a assessoria de milhas. Os contatos aparecem em CRM › Lista › Interessados.",
+  cotacao: "Página exclusiva de cada pedido, onde o cliente confere voos, bagagem, condições e valores. Você monta a cotação no CRM (pedido › Para o cliente › Montar cotação) e envia o link. O cliente confirma os 4 últimos dígitos do telefone para abrir.",
+  reserva: "Página de cada pedido emitido: localizador, acompanhamento no site da companhia, voos, passageiros e documentos. Preencha em CRM › pedido › Para o cliente. Também pede os 4 últimos dígitos do telefone.",
+  gestaoMilhas: "Painel do titular: saldo total, evolução, contas, extrato e relatório. O titular abre pelo acesso enviado em Programas › Titulares › Enviar acesso.",
+  contrato: "Termo de compra e venda de cada pedido: o cliente confere os dados, preenche CPF, nascimento e endereço e assina. Data, hora e IP ficam registrados. O link sai do CRM (pedido › Para o cliente).",
 };
+const PER_ORDER: DesignPage[] = ["cotacao", "reserva", "contrato"];
 
 const slugify = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
@@ -96,7 +97,7 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const setD = (patch: Partial<PageDesign>) => setF((x) => ({ ...x, design: { ...x.design, ...patch } }));
-  const setSect = <K extends "captacao" | "gestao" | "cotacao" | "reserva" | "gestaoMilhas" | "contrato">(k: K, field: keyof PageDesign[K], v: string) =>
+  const setSect = <K extends "captacao" | "gestao" | "cotacao" | "reserva" | "gestaoMilhas" | "contrato">(k: K, field: keyof PageDesign[K], v: string | boolean) =>
     setF((x) => ({ ...x, design: { ...x.design, [k]: { ...x.design[k], [field]: v } } }));
   const savedSlug = profile?.slug ?? null;
   const bannerSrc = bannerVersion && savedSlug ? `/api/public/banner/${encodeURIComponent(savedSlug)}?v=${bannerVersion}` : null;
@@ -164,7 +165,8 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
     setBannerVersion(null);
   }
 
-  const pageLink = `${origin}/p/${savedSlug ?? f.slug}${page === "contrato" ? "/contrato" : ""}`;
+  const pageLink = `${origin}/p/${savedSlug ?? f.slug}${page === "captacao" ? "/solicitar" : page === "gestao" ? "/gestao" : ""}`;
+  const linkTitle = page === "captacao" ? "Link de Cotação de Viagem" : page === "gestao" ? "Link de Interesse em Gestão" : "Link da sua página (Bio)";
   async function copy(text: string) {
     await navigator.clipboard.writeText(text).catch(() => null);
     toast("Link copiado");
@@ -269,10 +271,17 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
           </section>
 
           <div className="min-w-0 space-y-3">
+            {PER_ORDER.includes(page) || page === "gestaoMilhas" ? (
+              <section className="card card-pad" aria-label="Como enviar">
+                <h2 className="font-semibold">{page === "gestaoMilhas" ? "Como o titular acessa" : "Como funciona o envio"}</h2>
+                <p className="mt-1 text-sm text-muted">{PAGE_HELP[page]}</p>
+                <Link href={page === "gestaoMilhas" ? "/app/programs?view=titulares" : "/app/crm"} className="btn-ghost mt-3 h-9">{page === "gestaoMilhas" ? "Ir para Titulares" : "Ir para o CRM"}<ExternalLink className="h-3.5 w-3.5" /></Link>
+              </section>
+            ) : (
             <section className="card card-pad" aria-label="Link da sua página">
               <div className="flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-green-400" />
-                <h2 className="flex-1 font-semibold">{page === "contrato" ? "Link do contrato" : "Link da sua página (Bio)"}</h2>
+                <h2 className="flex-1 font-semibold">{linkTitle}</h2>
                 {profile?.published && <a href={pageLink} target="_blank" rel="noopener" className="btn-ghost h-8 text-xs">Abrir<ExternalLink className="h-3.5 w-3.5" /></a>}
               </div>
               <p className="mb-3 mt-1 text-xs text-muted">Compartilhe este link com seus clientes.</p>
@@ -282,7 +291,8 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
               </div>
             </section>
 
-            {PAGE_HELP[page] && <p className="px-1 text-sm text-muted">{PAGE_HELP[page]}</p>}
+            )}
+            {PAGE_HELP[page] && !PER_ORDER.includes(page) && page !== "gestaoMilhas" && <p className="px-1 text-sm text-muted">{PAGE_HELP[page]}</p>}
 
             {bgPanel}
 
@@ -382,31 +392,73 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
               </>
             )}
 
-            {(page === "captacao" || page === "gestao") && (
+            {page === "captacao" && (
               <>
-                <Panel title="Ativação" open>
-                  <Switch
-                    label={page === "captacao" ? "Receber pedidos de cotação" : "Receber interessados em gestão de milhas"}
-                    checked={page === "captacao" ? f.acceptsOrders : f.acceptsLeads}
-                    onChange={(v) => set(page === "captacao" ? "acceptsOrders" : "acceptsLeads", v)}
-                  />
+                <Panel title="Receber pedidos" open>
+                  <Switch label="Receber pedidos de cotação" hint="Desligado, a página e o botão da Bio somem" checked={f.acceptsOrders} onChange={(v) => set("acceptsOrders", v)} />
                 </Panel>
-                {textPanel(page, [["title", "Título do formulário", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["submit", "Texto do botão de envio", "input", 40]])}
-                <Panel title="Mensagem de confirmação" open>
-                  <Field label="Depois de enviar, o cliente vê" hint="Na prévia, clique no botão de envio para ver a mensagem"><textarea className="input min-h-16" value={f.design[page].thanks} onChange={(e) => setSect(page, "thanks", e.target.value)} maxLength={200} placeholder={DEFAULT_DESIGN[page].thanks} /></Field>
+                {textPanel("captacao", [["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["submit", "Texto do botão de envio", "input", 40]])}
+                <Panel title="Adicionais">
+                  <div className="space-y-4">
+                    <Switch label="Datas flexíveis (± 3 dias)" checked={f.design.captacao.askFlexible} onChange={(v) => setSect("captacao", "askFlexible", v)} />
+                    <Switch label="Preciso despachar bagagem" checked={f.design.captacao.askBaggage} onChange={(v) => setSect("captacao", "askBaggage", v)} />
+                    <Switch label="Prefiro voos diretos" checked={f.design.captacao.askDirect} onChange={(v) => setSect("captacao", "askDirect", v)} />
+                  </div>
+                </Panel>
+                <Panel title="Orçamento do cliente">
+                  <Switch label="Perguntar quanto o cliente pretende investir" hint="Aparece no pedido como orçamento" checked={f.design.captacao.askBudget} onChange={(v) => setSect("captacao", "askBudget", v)} />
+                </Panel>
+                <Panel title="Mensagem de conclusão" open>
+                  <div className="space-y-4">
+                    <Field label="Título"><input className="input" value={f.design.captacao.thanksTitle} onChange={(e) => setSect("captacao", "thanksTitle", e.target.value)} maxLength={60} placeholder={DEFAULT_DESIGN.captacao.thanksTitle} /></Field>
+                    <Field label="Texto" hint="Na prévia, avance até o fim para ver a mensagem"><textarea className="input min-h-16" value={f.design.captacao.thanks} onChange={(e) => setSect("captacao", "thanks", e.target.value)} maxLength={200} placeholder={DEFAULT_DESIGN.captacao.thanks} /></Field>
+                  </div>
                 </Panel>
               </>
             )}
-            {page === "cotacao" && textPanel("cotacao", [["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["cta", "Botão de aprovação (WhatsApp)", "input", 40], ["footer", "Observação no rodapé", "textarea", 200]])}
-            {page === "reserva" && textPanel("reserva", [["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["tips", "Dicas para a viagem", "textarea", 500]])}
-            {page === "gestaoMilhas" && textPanel("gestaoMilhas", [["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300]])}
+            {page === "gestao" && (
+              <>
+                <Panel title="Ativação" open>
+                  <Switch label="Receber interessados em gestão de milhas" checked={f.acceptsLeads} onChange={(v) => set("acceptsLeads", v)} />
+                </Panel>
+                {textPanel("gestao", [["kicker", "Selo acima do título", "input", 40], ["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["submit", "Texto do botão de envio", "input", 40]])}
+                <Panel title="Campos">
+                  <div className="space-y-4">
+                    <p className="text-xs text-muted">Nome, WhatsApp e e-mail são sempre obrigatórios.</p>
+                    <Switch label="Programas que o cliente possui" checked={f.design.gestao.askPrograms} onChange={(v) => setSect("gestao", "askPrograms", v)} />
+                    <Switch label="Renda mensal média" checked={f.design.gestao.askIncome} onChange={(v) => setSect("gestao", "askIncome", v)} />
+                  </div>
+                </Panel>
+                <Panel title="Mensagem de confirmação" open>
+                  <Field label="Depois de enviar, o cliente vê"><textarea className="input min-h-16" value={f.design.gestao.thanks} onChange={(e) => setSect("gestao", "thanks", e.target.value)} maxLength={200} placeholder={DEFAULT_DESIGN.gestao.thanks} /></Field>
+                </Panel>
+              </>
+            )}
+            {page === "cotacao" && textPanel("cotacao", [["text", "Texto de apresentação", "textarea", 300], ["cta", "Botão do WhatsApp", "input", 40], ["footer", "Observação abaixo do valor", "textarea", 200]])}
+            {page === "reserva" && textPanel("reserva", [["title", "Selo (ex.: Reserva confirmada)", "input", 80], ["text", "Texto abaixo do código", "textarea", 300], ["tips", "Dicas para a viagem", "textarea", 500]])}
+            {page === "gestaoMilhas" && textPanel("gestaoMilhas", [["title", "Subtítulo do painel", "input", 80], ["text", "Texto abaixo do painel", "textarea", 300]])}
             {page === "contrato" && (
               <>
-                {textPanel("contrato", [["title", "Título", "input", 80], ["text", "Texto de apresentação", "textarea", 300], ["terms", "Termos do contrato", "textarea", 5000], ["submit", "Texto do botão de assinatura", "input", 40], ["thanks", "Mensagem depois de assinar", "textarea", 200]])}
+                <Panel title="Dados da agência no termo" open>
+                  <div className="space-y-4">
+                    <p className="text-xs text-muted">O nome da agência é o nome de exibição da sua página ({f.displayName || defaultName}).</p>
+                    <Field label="CNPJ ou CPF da agência"><input className="input" value={f.design.contrato.agencyDoc} onChange={(e) => setSect("contrato", "agencyDoc", e.target.value)} maxLength={30} placeholder="00.000.000/0001-00" /></Field>
+                    <Field label="Endereço da agência"><input className="input" value={f.design.contrato.agencyAddress} onChange={(e) => setSect("contrato", "agencyAddress", e.target.value)} maxLength={200} placeholder="Rua, número, cidade/UF" /></Field>
+                  </div>
+                </Panel>
+                <Panel title="Termo" open>
+                  <div className="space-y-4">
+                    <Field label="Título"><input className="input" value={f.design.contrato.title} onChange={(e) => setSect("contrato", "title", e.target.value)} maxLength={80} placeholder={DEFAULT_DESIGN.contrato.title} /></Field>
+                    <Field label="Texto do termo" hint="Campos preenchidos sozinhos: {{AGENCIA}}, {{AGENCIA_DOCUMENTO}}, {{AGENCIA_ENDERECO}}, {{CLIENTE}}, {{CLIENTE_CPF}}, {{CLIENTE_NASCIMENTO}}, {{CLIENTE_ENDERECO}}, {{TRECHOS}}, {{VALOR}}, {{PAGAMENTO}}, {{DATA}}. Recomendamos revisar com um advogado."><textarea className="input min-h-80 font-mono text-xs" value={f.design.contrato.terms} onChange={(e) => setSect("contrato", "terms", e.target.value)} maxLength={8000} aria-label="Texto do termo" /></Field>
+                    <button type="button" className="btn-ghost h-8 text-xs" onClick={() => setSect("contrato", "terms", DEFAULT_DESIGN.contrato.terms)}>Voltar ao texto padrão</button>
+                    <Field label="Texto do botão de assinatura"><input className="input" value={f.design.contrato.submit} onChange={(e) => setSect("contrato", "submit", e.target.value)} maxLength={40} placeholder={DEFAULT_DESIGN.contrato.submit} /></Field>
+                    <Field label="Mensagem depois de assinar"><textarea className="input min-h-16" value={f.design.contrato.thanks} onChange={(e) => setSect("contrato", "thanks", e.target.value)} maxLength={200} placeholder={DEFAULT_DESIGN.contrato.thanks} /></Field>
+                  </div>
+                </Panel>
                 <Panel title="Assinaturas recebidas" aside={<span className="ml-2 text-sm font-normal text-muted">{signatures.length}</span>}>
                   {signatures.length === 0 ? <p className="text-sm text-muted">Ninguém assinou ainda.</p> : (
                     <ul className="divide-y divide-line text-sm" aria-label="Assinaturas">
-                      {signatures.map((s) => <li key={s.id} className="flex justify-between gap-3 py-2"><span className="min-w-0 truncate">{s.name}<span className="text-muted">{[s.phone, s.email].filter(Boolean).length ? ` · ${[s.phone, s.email].filter(Boolean).join(" · ")}` : ""}</span></span><span className="shrink-0 text-muted">{fmtDate(s.createdAt)}</span></li>)}
+                      {signatures.map((s) => <li key={s.id} className="flex justify-between gap-3 py-2"><span className="min-w-0 truncate">{s.name}{s.orderNumber != null && <span className="text-muted"> · pedido {s.orderNumber}</span>}</span><span className="shrink-0 text-muted">{fmtDate(s.createdAt)}</span></li>)}
                     </ul>
                   )}
                 </Panel>

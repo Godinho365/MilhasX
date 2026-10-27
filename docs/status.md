@@ -40,7 +40,7 @@ seguidas, em 25/10/2026 (após assinatura pelo Mercado Pago e limites por plano)
 | CRM de pedidos (Kanban de 7 etapas, lista, dashboard, documentos, WhatsApp, arquivar) e captação pela página pública — ver `docs/crm-buscador.md` | API + E2E |
 | Buscador de passagens: abre o site de cada programa já com a busca (21 sites), histórico e comparador de cotações | API (endereços) + E2E |
 | Sua MilhasX: página pública da agência como Central de Atendimento (cotação, interesse em gestão de milhas, WhatsApp), interessados no CRM | API + E2E |
-| Sua MilhasX › editor em página própria (/editor): 7 abas (Bio, Captação, Interesse em Gestão, Cotação, Reserva Confirmada, Gestão de Milhas, Assinatura de Contrato), botões/links, textos, cor/banner/prévia do link (PRO), prévia ao vivo; links de cotação e reserva por pedido no CRM; contrato assinado online | API + E2E |
+| Sua MilhasX › editor (/editor) e páginas do cliente no layout da simbora.la: Bio, captação em etapas, interesse em gestão, cotação e reserva por pedido (acesso pelos 4 últimos dígitos), painel de milhas do titular, termo de compra e venda assinado online | API + E2E |
 | Tradutor de milhas: milhas típicas por programa e por antecedência, a partir das cotações anotadas | API + E2E |
 | Limites por plano: Pessoal 1 titular / 5 contas / 3 alertas de loja, PRO 2 titulares, fornecedores e página do titular só no Gestor | API |
 | Perfil público de vendas (`/p/<nome>`), só quando publicado | API + E2E |

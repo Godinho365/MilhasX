@@ -1,12 +1,8 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Plane, Wallet, MessageCircle, ChevronRight, ExternalLink, AtSign, Mail } from "lucide-react";
-import { Field, Alert } from "@/components/ui";
+import { Send, Star, MessageCircle, ChevronRight, ExternalLink, AtSign, Mail } from "lucide-react";
 import { ProgramLogo } from "@/components/program-logo";
 import { themeForBg, bannerUrl, type PageDesign, type PageButton } from "@/domain/page-design";
-import { PublicOrderForm } from "./order-form";
 
-export type CentralView = "home" | "captacao" | "gestao";
 export type CentralData = {
   slug: string;
   displayName: string;
@@ -22,156 +18,94 @@ export type CentralData = {
   bannerVersion: string | null;
 };
 
-/**
- * Central de Atendimento inteira. A mesma tela serve a página pública e a prévia do editor
- * (preview: os formulários não enviam nada, só mostram a mensagem de confirmação).
- */
-export function CentralPage({ data, brand, appName, view = "home", preview = false, bannerSrc }: { data: CentralData; brand: string; appName: string; view?: CentralView; preview?: boolean; bannerSrc?: string | null }) {
-  return (
-    <PageShell brand={brand} appName={appName} bgColor={data.design.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
-        <p className="kicker">Central de Atendimento</p>
-        <h1 className="mt-1 text-3xl font-semibold">{data.displayName}</h1>
-        <p className="mt-2 text-lg text-muted">{data.headline || "Sua viagem começa aqui"}</p>
-        {data.bio && <p className="mt-4 whitespace-pre-line text-sm text-muted">{data.bio}</p>}
-        {data.programs.length > 0 && (
-          <ul className="mt-5 flex flex-wrap gap-2" aria-label="Programas">
-            {data.programs.map((pr) => (
-              <li key={pr.id} className="flex items-center gap-2 rounded-full border border-line px-3 py-1 text-sm">
-                <ProgramLogo programId={pr.id} name={pr.name} color={pr.color} size={18} />
-                {pr.name}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="mt-8">
-          <CentralActions data={data} view={view} preview={preview} />
-        </div>
-        {(data.instagram || data.email) && (
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            {data.instagram && <a className="btn-ghost h-9" href={`https://instagram.com/${data.instagram}`} target="_blank" rel="noopener noreferrer"><AtSign className="h-4 w-4" />{data.instagram}</a>}
-            {data.email && <a className="btn-ghost h-9" href={`mailto:${data.email}`}><Mail className="h-4 w-4" />E-mail</a>}
-          </div>
-        )}
-    </PageShell>
-  );
-}
+export const waLink = (phone: string | null, text?: string) => {
+  const d = (phone ?? "").replace(/\D/g, "");
+  if (!d) return null;
+  return `https://wa.me/${d.length <= 11 ? `55${d}` : d}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+};
 
-/** Moldura comum das páginas do cliente: cor de fundo, marca, banner e rodapé. */
-export function PageShell({ brand, appName, bgColor, banner, children }: { brand: string; appName: string; bgColor: string | null; banner: string | null; children: React.ReactNode }) {
+/** Moldura das páginas do cliente: cor de fundo, selo da marca, banner e rodapé. */
+export function PageShell({ brand, appName, bgColor, banner, children, wide = false }: { brand: string; appName: string; bgColor: string | null; banner: string | null; children: React.ReactNode; wide?: boolean }) {
   return (
     <div data-theme={themeForBg(bgColor)} className="min-h-screen bg-bg text-zinc-100" style={bgColor ? { backgroundColor: bgColor } : undefined}>
-      <header className="border-b border-line">
-        <div className="mx-auto flex max-w-xl items-center px-4 py-3">
-          <span className="text-lg font-bold tracking-tight">{brand}</span>
+      <main className={`mx-auto px-4 pb-28 pt-6 ${wide ? "max-w-2xl" : "max-w-xl"}`}>
+        <div className="mb-5 flex justify-center">
+          <span className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-bold tracking-tight shadow-sm">{brand}</span>
         </div>
-      </header>
-      {banner && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={banner} alt="" className="mx-auto block aspect-[3/1] w-full max-w-xl object-cover sm:mt-4 sm:rounded-2xl" />
-      )}
-      <main className="mx-auto max-w-xl px-4 py-10">
+        {banner && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={banner} alt="" className="mb-5 block aspect-[3/1] w-full rounded-2xl object-cover" />
+        )}
         {children}
-        <p className="mt-10 text-center text-xs text-muted">{brand} · página criada com o {appName}</p>
+        <p className="mt-10 text-center text-xs text-muted">Página criada com {brand}</p>
       </main>
     </div>
   );
 }
 
+/** Página Principal (Bio): nome, frase e os cartões de ação, cada um levando à sua página. */
+export function CentralPage({ data, brand, appName, preview = false, bannerSrc }: { data: CentralData; brand: string; appName: string; preview?: boolean; bannerSrc?: string | null }) {
+  return (
+    <PageShell brand={brand} appName={appName} bgColor={data.design.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
+      <section className="card px-6 py-7 text-center" aria-label="Apresentação">
+        <h1 className="text-2xl font-bold">{data.displayName}</h1>
+        <p className="mt-1.5 text-muted">{data.headline || "Sua viagem começa aqui"}</p>
+        {data.bio && <p className="mt-3 whitespace-pre-line text-sm text-muted">{data.bio}</p>}
+        {data.programs.length > 0 && (
+          <ul className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Programas">
+            {data.programs.map((pr) => (
+              <li key={pr.id} className="flex items-center gap-1.5 rounded-full border border-line bg-panel2 px-2.5 py-1 text-xs font-medium">
+                <ProgramLogo programId={pr.id} name={pr.name} color={pr.color} size={16} />
+                {pr.name}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <div className="mt-5">
+        <CentralActions data={data} preview={preview} />
+      </div>
+      {(data.instagram || data.email) && (
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {data.instagram && <a className="btn-ghost h-9 bg-panel" href={`https://instagram.com/${data.instagram}`} target="_blank" rel="noopener noreferrer"><AtSign className="h-4 w-4" />{data.instagram}</a>}
+          {data.email && <a className="btn-ghost h-9 bg-panel" href={`mailto:${data.email}`}><Mail className="h-4 w-4" />E-mail</a>}
+        </div>
+      )}
+    </PageShell>
+  );
+}
+
 const ICONS = {
-  cotacao: { Icon: Plane, tone: "bg-blue-500/15 text-blue-300" },
-  gestao: { Icon: Wallet, tone: "bg-amber-500/15 text-amber-300" },
-  whatsapp: { Icon: MessageCircle, tone: "bg-green-500/15 text-green-300" },
-  link: { Icon: ExternalLink, tone: "bg-violet-500/15 text-violet-300" },
+  cotacao: { Icon: Send, tone: "bg-blue-500/10 text-blue-400" },
+  gestao: { Icon: Star, tone: "bg-fuchsia-500/10 text-fuchsia-400" },
+  whatsapp: { Icon: MessageCircle, tone: "bg-green-500/10 text-green-400" },
+  link: { Icon: ExternalLink, tone: "bg-violet-500/10 text-violet-400" },
 } as const;
 
-/** Botões da Central na ordem escolhida pelo dono; cada botão fixo só aparece se estiver ligado. */
-function CentralActions({ data, view, preview }: { data: CentralData; view: CentralView; preview: boolean }) {
-  const [open, setOpen] = useState<CentralView>(view);
-  const opened = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    setOpen(view);
-  }, [view]);
-  // Na prévia do editor, a aba do formulário rola até ele
-  useEffect(() => {
-    if (preview && open !== "home" && open === view) opened.current?.scrollIntoView({ block: "start" });
-  }, [preview, view, open]);
-  const wa = data.whatsapp ? `https://wa.me/${data.whatsapp.length <= 11 ? `55${data.whatsapp}` : data.whatsapp}` : null;
-  const card = "flex w-full items-center gap-4 rounded-2xl border border-line bg-panel p-4 text-left transition-colors hover:border-accent-light";
+/** Botões da Bio na ordem escolhida pelo dono; cada botão fixo só aparece se estiver ligado. */
+function CentralActions({ data, preview }: { data: CentralData; preview: boolean }) {
+  const wa = waLink(data.whatsapp);
   const visible = (b: PageButton) => (b.kind === "cotacao" ? data.acceptsOrders : b.kind === "gestao" ? data.acceptsLeads : b.kind === "whatsapp" ? !!wa : true);
-  const body = (b: PageButton, chevron: React.ReactNode) => {
-    const { Icon, tone } = ICONS[b.kind];
-    return (
-      <>
-        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tone}`}><Icon className="h-5 w-5" /></span>
-        <span className="min-w-0 flex-1"><span className="block font-semibold">{b.label}</span>{b.description && <span className="block text-sm text-muted">{b.description}</span>}</span>
-        {chevron}
-      </>
-    );
-  };
+  const target = (b: PageButton) => (b.kind === "cotacao" ? `/p/${data.slug}/solicitar` : b.kind === "gestao" ? `/p/${data.slug}/gestao` : b.kind === "whatsapp" ? wa! : b.url!);
+  const external = (b: PageButton) => b.kind === "whatsapp" || b.kind === "link";
   return (
     <div className="space-y-3">
       {data.design.buttons.filter(visible).map((b, i) => {
-        if (b.kind === "cotacao" || b.kind === "gestao") {
-          const s = data.design[b.kind === "cotacao" ? "captacao" : "gestao"];
-          const isOpen = open === (b.kind === "cotacao" ? "captacao" : "gestao");
-          return (
-            <div key={b.kind}>
-              <button type="button" className={card} onClick={() => setOpen(isOpen ? "home" : b.kind === "cotacao" ? "captacao" : "gestao")} aria-expanded={isOpen}>
-                {body(b, <ChevronRight className={`h-5 w-5 text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} />)}
-              </button>
-              {isOpen && (
-                <div ref={opened} className="card card-pad mt-2 scroll-mt-4">
-                  <h2 className="font-semibold">{s.title}</h2>
-                  {s.text && <p className="mb-4 mt-1 whitespace-pre-line text-sm text-muted">{s.text}</p>}
-                  {b.kind === "cotacao" ? <PublicOrderForm slug={data.slug} submit={s.submit} thanks={s.thanks} preview={preview} /> : <LeadForm slug={data.slug} submit={s.submit} thanks={s.thanks} preview={preview} />}
-                </div>
-              )}
-            </div>
-          );
-        }
-        const href = b.kind === "whatsapp" ? wa! : b.url!;
+        const { Icon, tone } = ICONS[b.kind];
         return (
-          <a key={`${b.kind}-${i}`} href={href} target="_blank" rel="noopener noreferrer" className={card}>
-            {body(b, <ChevronRight className="h-5 w-5 text-muted" />)}
+          <a
+            key={`${b.kind}-${i}`}
+            // Na prévia do editor os cartões não navegam (o rascunho ainda não foi salvo)
+            href={preview ? undefined : target(b)}
+            {...(external(b) && !preview ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+            className="card flex w-full cursor-pointer items-center gap-4 p-4 text-left transition-colors hover:border-zinc-600"
+          >
+            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${tone}`}><Icon className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1"><span className="block font-semibold">{b.label}</span>{b.description && <span className="block text-sm text-muted">{b.description}</span>}</span>
+            <ChevronRight className="h-5 w-5 text-muted" />
           </a>
         );
       })}
     </div>
-  );
-}
-
-function LeadForm({ slug, submit, thanks, preview }: { slug: string; submit: string; thanks: string; preview: boolean }) {
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
-  const [website, setWebsite] = useState("");
-  const [erro, setErro] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (preview) return setDone(true);
-    if (!phone.trim() && !email.trim()) return setErro("Informe um WhatsApp ou e-mail para contato");
-    setBusy(true);
-    const r = await fetch(`/api/public/leads/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, phone: phone || null, email: email || null, message: message || null, website }) });
-    const j = await r.json().catch(() => ({}));
-    setBusy(false);
-    if (!r.ok) return setErro(j.erro ?? "Não foi possível enviar. Tente de novo.");
-    setDone(true);
-  }
-  if (done) return <Alert kind="ok">{thanks}</Alert>;
-  return (
-    <form onSubmit={send} noValidate={preview} className="space-y-3" aria-label="Interesse em gestão de milhas">
-      {erro && <Alert>{erro}</Alert>}
-      <Field label="Seu nome" required><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="WhatsApp"><input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" maxLength={30} autoComplete="tel" /></Field>
-        <Field label="E-mail"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} autoComplete="email" /></Field>
-      </div>
-      <input type="text" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} className="absolute -left-[9999px] h-0 w-0 opacity-0" aria-hidden />
-      <Field label="Conte um pouco (opcional)"><textarea className="input min-h-20" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1000} placeholder="Quais cartões e programas você usa, objetivos de viagem…" /></Field>
-      <button className="btn-primary w-full" disabled={busy}>{busy ? "Enviando…" : submit}</button>
-    </form>
   );
 }

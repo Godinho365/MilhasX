@@ -271,7 +271,7 @@ export async function createPublicOrder(slug: string, input: OrderInput, ip: str
   const recent = await prisma.orderEvent.count({ where: { type: "created", note: `public:${ipHash}`, createdAt: { gte: new Date(Date.now() - 3600_000) } } });
   if (recent >= PUBLIC_LIMIT_PER_HOUR) throw new DomainError(429, "Muitos pedidos enviados. Tente de novo mais tarde.");
   if (!input.customerPhone && !input.customerEmail) throw new DomainError(400, "Informe um telefone ou e-mail para contato");
-  const o = await createOrder(p.userId, { ...input, customerId: null, priority: "MEDIUM", budgetCents: null }, "PUBLIC");
+  const o = await createOrder(p.userId, { ...input, customerId: null, priority: "MEDIUM", budgetCents: input.budgetCents ?? null }, "PUBLIC");
   await prisma.orderEvent.updateMany({ where: { orderId: o.id, type: "created" }, data: { note: `public:${ipHash}` } });
   await prisma.notification.create({ data: { userId: p.userId, title: "Novo pedido pela sua página", body: `${o.customerName} pediu ${o.route}.` } });
   return { number: o.number };

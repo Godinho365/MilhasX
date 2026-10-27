@@ -1,14 +1,18 @@
 import { route, json, parseBody, requireUser } from "@/server/http";
 import { orderClientInfoSchema } from "@/server/schemas";
-import { orderShareToken, setOrderClientInfo } from "@/server/services/client-pages";
-import { prisma } from "@/server/db";
+import { orderShareToken, setOrderClientInfo, orderClientInfo } from "@/server/services/client-pages";
 
-// Link do pedido para o cliente (páginas Cotação e Reserva confirmada) e o que aparece nelas.
+// Páginas do cliente para o pedido (cotação, reserva, termo): dados, link e o que aparece nelas.
+export const GET = route(async (req, { params }) => {
+  const u = await requireUser(req);
+  return json({ ok: true, item: await orderClientInfo(u.id, (await params).id!) });
+});
+
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);
-  const token = await orderShareToken(u.id, (await params).id!);
-  const slug = (await prisma.salesProfile.findUnique({ where: { userId: u.id }, select: { slug: true } }))?.slug ?? null;
-  return json({ ok: true, token, slug });
+  const id = (await params).id!;
+  const token = await orderShareToken(u.id, id);
+  return json({ ok: true, token, slug: (await orderClientInfo(u.id, id)).slug });
 });
 
 export const PATCH = route(async (req, { params }) => {

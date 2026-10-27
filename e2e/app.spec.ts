@@ -837,7 +837,7 @@ test("configurações: abas, plano, indicação e perfil público", async () => 
   await expect(preview.getByText("Viaje mais pagando menos")).toBeVisible();
   await open("Cor de Fundo");
   await page.getByRole("button", { name: "Cor #f8fafc" }).click();
-  await expect(preview.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "light");
+  await expect(preview.locator("body [data-theme]").first()).toHaveCSS("background-color", "rgb(248, 250, 252)");
   await open("Botões");
   const zap = page.getByRole("listitem", { name: "Botão WhatsApp" });
   await zap.getByLabel("Texto do botão").fill("Chama no zap");
@@ -851,40 +851,32 @@ test("configurações: abas, plano, indicação e perfil público", async () => 
   await page.screenshot({ path: `${SHOTS}/editor_pagina_principal.png` });
 
   await page.getByRole("tab", { name: "Captação de Viagens" }).click();
-  await page.getByLabel("Depois de enviar, o cliente vê").fill("Obrigado! Respondo ainda hoje.");
-  await preview.getByRole("button", { name: "Pedir cotação", exact: true }).click();
+  await panel("Mensagem de conclusão").getByRole("textbox").nth(1).fill("Obrigado! Respondo ainda hoje.");
+  await preview.getByRole("button", { name: /Próximo/ }).click();
+  await preview.getByRole("button", { name: "Enviar solicitação" }).click();
   await expect(preview.getByText("Obrigado! Respondo ainda hoje.")).toBeVisible();
   await page.getByRole("tab", { name: "Cotação", exact: true }).click();
-  await page.getByLabel("Botão de aprovação (WhatsApp)").fill("Fechar viagem");
+  await page.getByLabel("Botão do WhatsApp").fill("Fechar viagem");
   await expect(preview.getByRole("link", { name: "Fechar viagem" })).toBeVisible();
   await page.getByRole("tab", { name: "Reserva Confirmada" }).click();
-  await expect(preview.getByText("ABC123", { exact: true })).toBeVisible();
+  await expect(preview.getByRole("heading", { name: "MX7Q2K" })).toBeVisible();
   await page.getByRole("tab", { name: "Gestão de Milhas" }).click();
   await expect(preview.getByRole("list", { name: "Saldos" })).toContainText("Smiles");
   await page.getByRole("tab", { name: "Assinatura de Contrato" }).click();
-  await page.getByLabel("Termos do contrato").fill("1. Termo de teste E2E.");
-  await expect(preview.getByText("1. Termo de teste E2E.")).toBeVisible();
+  await page.getByLabel("CNPJ ou CPF da agência").fill("12.345.678/0001-90");
+  await expect(preview.getByLabel("Termo", { exact: true })).toContainText("12.345.678/0001-90");
   await page.screenshot({ path: `${SHOTS}/editor_contrato.png` });
   await page.getByRole("button", { name: "Salvar alterações" }).click();
   await toastSays("Página salva");
 
-  // Página pública e contrato com o que foi salvo
-  const contract = await page.getByRole("textbox", { name: "Link da sua página" }).inputValue();
-  await page.goto(contract);
-  await expect(page.getByLabel("Termos do contrato")).toContainText("Termo de teste E2E");
-  await page.getByLabel("Nome completo").fill("Cliente Contrato E2E");
-  await page.getByLabel("WhatsApp").fill("(11) 97777-6666");
-  await page.getByLabel("Li os termos acima").check();
-  await page.getByRole("button", { name: "Li e aceito" }).click();
-  await expect(page.getByText("Contrato assinado!")).toBeVisible();
-  await page.goto(contract.replace(/\/contrato$/, ""));
+  // Bio pública com o que foi salvo
+  await page.getByRole("tab", { name: "Página Principal (Bio)" }).click();
+  const bio = await page.getByRole("textbox", { name: "Link da sua página" }).inputValue();
+  await page.goto(bio);
   await expect(page.getByRole("link", { name: /Chama no zap/ })).toHaveAttribute("href", "https://wa.me/5511988887777");
-  await expect(page.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "client");
   await expect(page.getByText("Viaje mais pagando menos")).toBeVisible();
-  await page.goto("/editor");
-  await page.getByRole("tab", { name: "Assinatura de Contrato" }).click();
-  await open("Assinaturas recebidas");
-  await expect(page.getByRole("list", { name: "Assinaturas" })).toContainText("Cliente Contrato E2E");
+  await page.screenshot({ path: `${SHOTS}/pagina_bio.png` });
 });
 
 test("CRM: pedido, etapas, lista, dashboard e captação pela página pública", async () => {
@@ -950,28 +942,82 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   await page.goto("/app/crm?view=dashboard");
   const pub = await page.getByRole("region", { name: "Captação de pedidos" }).getByRole("link", { name: "Ver página" }).getAttribute("href");
   await page.goto(pub!);
-  // Central de Atendimento: os formulários abrem ao clicar no cartão
+  // Bio: cada cartão leva à sua página
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByText("Viaje mais pagando menos")).toBeVisible();
-  await page.getByRole("button", { name: /Interesse em gestão de milhas/ }).click();
+  await page.getByRole("link", { name: /Interesse em gestão de milhas/ }).click();
+  await expect(page).toHaveURL(/\/gestao$/);
   const lead = page.getByRole("form", { name: "Interesse em gestão de milhas" });
-  await lead.getByLabel("Seu nome").fill("Interessado E2E");
+  await lead.getByLabel("Nome completo").fill("Interessado E2E");
   await lead.getByLabel("WhatsApp").fill("(11) 96666-3333");
-  await lead.getByRole("button", { name: "Quero saber mais" }).click();
-  await expect(page.getByText("Recebemos seu interesse!")).toBeVisible();
-  await page.getByRole("button", { name: /Pedir cotação de viagem/ }).click();
-  const form = page.getByRole("form", { name: "Pedir cotação" });
-  await form.getByLabel("Seu nome").fill("Visitante E2E");
-  await form.getByLabel("WhatsApp").fill("(11) 97777-2222");
-  await form.getByLabel("Origem", { exact: true }).fill("GRU");
-  await form.getByLabel("Destino", { exact: true }).fill("LIS");
-  await form.getByLabel("Data de ida").fill("2027-05-10");
-  await form.getByRole("button", { name: "Pedir cotação" }).click();
+  await lead.getByLabel("E-mail").fill("interessado@exemplo.test");
+  await lead.getByRole("button", { name: "LATAM Pass" }).click();
+  await lead.getByRole("button", { name: /Enviar interesse/ }).click();
+  await expect(page.getByText("Interesse enviado!")).toBeVisible();
+  await page.goto(pub!);
+  await page.getByRole("link", { name: /Pedir cotação de viagem/ }).click();
+  await expect(page).toHaveURL(/\/solicitar$/);
+  const trip = page.getByRole("form", { name: "Sua viagem" });
+  await trip.getByRole("radio", { name: "Somente ida" }).click();
+  await trip.getByLabel("Origem", { exact: true }).fill("GRU");
+  await trip.getByLabel("Destino", { exact: true }).fill("LIS");
+  await trip.getByLabel("Data de ida").fill("2027-05-10");
+  await trip.getByRole("button", { name: "Mais Adultos" }).click();
+  await page.screenshot({ path: `${SHOTS}/pagina_captacao.png` });
+  await trip.getByRole("button", { name: /Próximo/ }).click();
+  const dados = page.getByRole("form", { name: "Seus dados" });
+  await dados.getByLabel("Seu nome").fill("Visitante E2E");
+  await dados.getByLabel("WhatsApp").fill("(11) 97777-2222");
+  await dados.getByRole("button", { name: "Enviar solicitação" }).click();
   await expect(page.getByText("Obrigado! Respondo ainda hoje.")).toBeVisible();
   await page.goto("/app/crm");
   await expect(page.getByRole("region", { name: "Novos pedidos" }).getByRole("listitem", { name: /Visitante E2E/ })).toContainText("Página pública");
   await page.goto("/app/crm?view=lista");
   await expect(page.getByRole("region", { name: "Interessados em gestão de milhas" })).toContainText("Interessado E2E");
+  // páginas do pedido: monta a cotação no CRM e o cliente abre com os 4 últimos dígitos do telefone
+  await page.goto("/app/crm");
+  await page.getByRole("region", { name: "Cotação enviada" }).getByRole("button", { name: /Cliente CRM E2E/ }).click();
+  const cli = page.getByRole("dialog").getByRole("region", { name: "Para o cliente" });
+  await cli.getByRole("button", { name: "Montar cotação" }).click();
+  const mont = cli.getByRole("listitem", { name: "Montar cotação" });
+  await mont.getByLabel("Companhia").first().fill("LATAM");
+  await mont.getByLabel("Valor no Pix (R$)").fill("2.450,00");
+  await mont.getByRole("button", { name: "Salvar cotação" }).click();
+  await toastSays("Cotação salva");
+  await page.evaluate(() => {
+    const w = window as unknown as { __clip: string };
+    w.__clip = "";
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => { w.__clip = t; } } });
+  });
+  await cli.getByRole("button", { name: "Copiar link da cotação" }).click();
+  await toastSays("Link da cotação copiado");
+  const cot = await page.evaluate(() => (window as unknown as { __clip: string }).__clip);
+  expect(cot).toMatch(/\/p\/e2e-\d+\/cotacao\/[\w-]+$/);
+  await page.goto(cot);
+  await page.getByLabel("Últimos 4 dígitos do telefone").fill("0000");
+  await page.getByRole("button", { name: "Ver a cotação" }).click();
+  await expect(page.getByText("Os dígitos não conferem")).toBeVisible();
+  await page.getByLabel("Últimos 4 dígitos do telefone").fill("1111");
+  await page.getByRole("button", { name: "Ver a cotação" }).click();
+  await expect(page.getByRole("heading", { name: /Sua viagem para Rio de Janeiro/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Valor total" })).toContainText("2.450,00");
+  await page.screenshot({ path: `${SHOTS}/pagina_cotacao.png`, fullPage: true });
+  // termo do mesmo pedido (o acesso já está liberado)
+  await page.goto(cot.replace("/cotacao/", "/contrato/"));
+  const ass = page.getByRole("form", { name: "Assinar termo" });
+  await ass.getByLabel("Nome completo").fill("Cliente CRM E2E");
+  await ass.getByLabel("CPF").fill("123.456.789-09");
+  await ass.getByLabel("Data de nascimento").fill("1990-05-01");
+  await ass.getByLabel("Endereço").fill("Rua das Flores, 10, Brasília/DF");
+  await ass.getByRole("checkbox").check();
+  await ass.getByRole("button", { name: "Assinar termo" }).click();
+  await expect(page.getByText(/Assinado em/)).toBeVisible();
+  await expect(page.getByLabel("Termo", { exact: true })).toContainText("12.345.678/0001-90");
+  await page.goto(cot.replace("/cotacao/", "/reserva/"));
+  await expect(page.getByRole("region", { name: "Documentos" })).toContainText("Assinado · ver");
+  await page.screenshot({ path: `${SHOTS}/pagina_reserva.png`, fullPage: true });
+  await page.goto("/app/crm");
+
   // menu lateral: Sua MilhasX abre o editor da página
   await page.locator("aside").getByRole("link", { name: "Sua MilhasX" }).click();
   await expect(page).toHaveURL(/\/editor$/);

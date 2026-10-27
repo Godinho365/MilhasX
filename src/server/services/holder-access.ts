@@ -87,7 +87,7 @@ export async function holderView(rawSession: string | undefined) {
   if (row.holder.accessEmail !== row.email || row.holder.user.status !== "ACTIVE") return null;
   const accounts = await prisma.account.findMany({
     where: { holderId: row.holder.id, archived: false },
-    select: { id: true, balance: true, program: { select: { name: true, color: true } } },
+    select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true, color: true, marketValueCpmCents: true } } },
     orderBy: { balance: "desc" },
   });
   const entries = await prisma.entry.findMany({
@@ -96,11 +96,34 @@ export async function holderView(rawSession: string | undefined) {
     orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
     take: 30,
   });
+  // Evolução do saldo total nos últimos 12 meses (a partir do saldo de hoje, desfazendo cada mês)
+  const since = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 11, 1));
+  const year = await prisma.entry.findMany({
+    where: { account: { holderId: row.holder.id, archived: false }, status: "CONFIRMED", occurredAt: { gte: since } },
+    select: { points: true, occurredAt: true },
+  });
+  const byMonth = new Map<string, number>();
+  for (const e of year) { const k = e.occurredAt.toISOString().slice(0, 7); byMonth.set(k, (byMonth.get(k) ?? 0) + e.points); }
+  const total = accounts.reduce((s, a) => s + a.balance, 0);
+  const series: { month: string; total: number }[] = [];
+  let running = total;
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - i, 1));
+    const k = d.toISOString().slice(0, 7);
+    series.unshift({ month: k, total: running });
+    running -= byMonth.get(k) ?? 0;
+  }
   return {
     holder: row.holder.name,
     ownerId: row.holder.userId,
     sessionExpiresAt: row.sessionExpiresAt.toISOString(),
-    accounts: accounts.map((a) => ({ id: a.id, program: a.program.name, color: a.program.color, balance: a.balance })),
+    accounts: accounts.map((a) => ({
+      id: a.id, program: a.program.name, color: a.program.color, balance: a.balance, nickname: a.nickname,
+      cpmCents: a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null,
+      valueCents: Math.round((a.balance * a.program.marketValueCpmCents) / 1000),
+    })),
+    series,
+    earned12m: year.filter((e) => e.points > 0).reduce((s, e) => s + e.points, 0),
     entries: entries.map((e) => ({ id: e.id, label: ENTRY_LABELS[e.type], pending: e.status === "PENDING", points: e.points, program: e.account.program.name, date: e.occurredAt.toISOString() })),
   };
 }

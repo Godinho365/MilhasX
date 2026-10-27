@@ -1,6 +1,7 @@
 // Personalização da Central de Atendimento (/p/[slug]): textos de cada página, botões,
 // cor de fundo e prévia do link. Guardado como JSON em SalesProfile.design e sempre lido
 // por resolveDesign, que completa o que faltar com os textos padrão.
+import { DEFAULT_CONTRACT } from "./proposal";
 
 export type ButtonKind = "cotacao" | "gestao" | "whatsapp" | "link";
 export type PageButton = { kind: ButtonKind; label: string; description: string; url?: string };
@@ -8,12 +9,12 @@ export type PageButton = { kind: ButtonKind; label: string; description: string;
 export type PageDesign = {
   bgColor: string | null;
   buttons: PageButton[];
-  captacao: { title: string; text: string; submit: string; thanks: string };
-  gestao: { title: string; text: string; submit: string; thanks: string };
-  cotacao: { title: string; text: string; cta: string; footer: string };
+  captacao: { title: string; text: string; submit: string; thanksTitle: string; thanks: string; askBudget: boolean; askBaggage: boolean; askDirect: boolean; askFlexible: boolean };
+  gestao: { kicker: string; title: string; text: string; submit: string; thanks: string; askPrograms: boolean; askIncome: boolean };
+  cotacao: { text: string; cta: string; footer: string };
   reserva: { title: string; text: string; tips: string };
   gestaoMilhas: { title: string; text: string };
-  contrato: { title: string; text: string; terms: string; submit: string; thanks: string };
+  contrato: { title: string; text: string; terms: string; submit: string; thanks: string; agencyDoc: string; agencyAddress: string };
   share: { title: string; description: string };
 };
 
@@ -29,11 +30,6 @@ export const DESIGN_PAGES = [
 ] as const;
 export type DesignPage = (typeof DESIGN_PAGES)[number]["key"];
 
-const DEFAULT_TERMS = `1. Objeto: assessoria na gestão de milhas e pontos do CLIENTE (acúmulo, transferências bonificadas e emissões).
-2. O CLIENTE continua titular das suas contas e senhas; a assessoria só age com autorização prévia para cada operação.
-3. Remuneração: conforme proposta combinada pelo WhatsApp ou e-mail.
-4. Qualquer parte pode encerrar a assessoria a qualquer momento, avisando a outra por escrito.
-5. Os dados do CLIENTE são usados só para prestar este serviço.`;
 
 export const BUILTIN_BUTTONS: Record<Exclude<ButtonKind, "link">, { label: string; description: string }> = {
   cotacao: { label: "Pedir cotação de viagem", description: "Envie trecho, datas e passageiros para cotarmos com milhas" },
@@ -44,12 +40,12 @@ export const BUILTIN_BUTTONS: Record<Exclude<ButtonKind, "link">, { label: strin
 export const DEFAULT_DESIGN: PageDesign = {
   bgColor: null,
   buttons: (["cotacao", "gestao", "whatsapp"] as const).map((kind) => ({ kind, ...BUILTIN_BUTTONS[kind] })),
-  captacao: { title: "Pedir cotação de viagem", text: "Conte para onde quer ir. Cotamos com milhas e respondemos pelo WhatsApp ou e-mail.", submit: "Pedir cotação", thanks: "Pedido enviado! Em breve entraremos em contato com a sua cotação." },
-  gestao: { title: "Interesse em gestão de milhas", text: "Deixe seu contato para conversarmos sobre como acumular e usar melhor seus pontos.", submit: "Quero saber mais", thanks: "Recebemos seu interesse! Em breve entraremos em contato." },
-  cotacao: { title: "Sua cotação", text: "Separei as melhores opções para a sua viagem. Os valores podem mudar até a emissão.", cta: "Aprovar pelo WhatsApp", footer: "Cotação válida enquanto houver disponibilidade de assentos." },
-  reserva: { title: "Reserva confirmada!", text: "Sua passagem foi emitida. Guarde o localizador abaixo.", tips: "Faça o check-in online a partir de 48h antes do voo e chegue ao aeroporto com antecedência." },
-  gestaoMilhas: { title: "Suas milhas", text: "Acompanhe aqui o saldo das suas contas, atualizado pela nossa equipe." },
-  contrato: { title: "Contrato de gestão de milhas", text: "Leia os termos abaixo e confirme para começarmos.", terms: DEFAULT_TERMS, submit: "Li e aceito", thanks: "Contrato assinado! Você receberá a confirmação pelo WhatsApp ou e-mail." },
+  captacao: { title: "Solicite sua cotação", text: "Conte para onde quer ir. Cotamos com milhas e respondemos pelo WhatsApp.", submit: "Enviar solicitação", thanksTitle: "Solicitação enviada!", thanks: "Recebemos seu pedido e vamos falar com você pelo WhatsApp em breve.", askBudget: false, askBaggage: true, askDirect: true, askFlexible: true },
+  gestao: { kicker: "Assessoria & Gestão", title: "Interesse em Gestão de Milhas", text: "Preencha seus dados para avaliarmos o potencial das suas milhas e como viajar mais gastando menos.", submit: "Enviar interesse", thanks: "Recebemos seu interesse! Em breve entraremos em contato.", askPrograms: true, askIncome: true },
+  cotacao: { text: "Preparamos esta cotação para você. Confira os voos, o que está incluso e o valor.", cta: "WhatsApp", footer: "Valores e disponibilidade podem mudar até a emissão." },
+  reserva: { title: "Reserva confirmada", text: "", tips: "Faça o check-in online a partir de 48h antes do voo e chegue ao aeroporto com antecedência." },
+  gestaoMilhas: { title: "Seu painel de milhas", text: "Saldo e movimentações das suas contas, atualizados pela nossa equipe." },
+  contrato: { title: "Termo de Compra e Venda de Passagem Aérea", text: "", terms: DEFAULT_CONTRACT, submit: "Assinar termo", thanks: "Termo assinado! Uma cópia fica disponível na página da sua reserva.", agencyDoc: "", agencyAddress: "" },
   share: { title: "", description: "" },
 };
 
@@ -72,13 +68,14 @@ const safeUrl = (v: unknown) => {
 export function resolveDesign(raw: unknown): PageDesign {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   // Cada campo de texto: limite de tamanho e, se vier vazio, o padrão (menos os opcionais)
-  const LIMITS: Record<string, number> = { title: 80, text: 300, submit: 40, thanks: 200, cta: 40, footer: 200, tips: 500, terms: 5000 };
-  const OPTIONAL = new Set(["text", "footer", "tips"]);
+  const LIMITS: Record<string, number> = { title: 80, kicker: 40, text: 300, submit: 40, thanksTitle: 60, thanks: 200, cta: 40, footer: 200, tips: 500, terms: 8000, agencyDoc: 30, agencyAddress: 200 };
+  const OPTIONAL = new Set(["text", "footer", "tips", "kicker", "agencyDoc", "agencyAddress"]);
   const sect = <K extends "captacao" | "gestao" | "cotacao" | "reserva" | "gestaoMilhas" | "contrato">(k: K): PageDesign[K] => {
     const s = (o[k] && typeof o[k] === "object" ? o[k] : {}) as Record<string, unknown>;
-    const d = DEFAULT_DESIGN[k] as Record<string, string>;
+    const d = DEFAULT_DESIGN[k] as Record<string, string | boolean>;
     return Object.fromEntries(Object.keys(d).map((f) => {
-      const v = str(s[f], LIMITS[f] ?? 200, d[f]!);
+      if (typeof d[f] === "boolean") return [f, typeof s[f] === "boolean" ? s[f] : d[f]];
+      const v = str(s[f], LIMITS[f] ?? 200, d[f] as string);
       return [f, v || (OPTIONAL.has(f) ? "" : d[f])];
     })) as PageDesign[K];
   };
@@ -117,11 +114,11 @@ export function resolveDesign(raw: unknown): PageDesign {
   };
 }
 
-/** Fundo claro pede texto escuro: escolhe o tema da página pela luminância da cor. */
-export function themeForBg(hex: string | null): "dark" | "light" {
-  if (!hex || !HEX.test(hex)) return "dark";
+/** Sem cor escolhida, ou com fundo claro, usa o tema claro das páginas do cliente; fundo escuro pede texto claro. */
+export function themeForBg(hex: string | null): "dark" | "client" {
+  if (!hex || !HEX.test(hex)) return "client";
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "light" : "dark";
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? "client" : "dark";
 }
 
 /** Os recursos marcados PRO (cor, banner, prévia do link) foram mudados em relação ao padrão? */

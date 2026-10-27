@@ -12,6 +12,7 @@ import { TripFields, emptyTrip, tripSegments, type Trip } from "@/components/tri
 import { ORDER_STAGES, STAGE_LABELS, TRIP_LABELS, PRIORITY_LABELS, ARCHIVE_REASONS, WHATSAPP_TEMPLATES, whatsappText, whatsappLink, type OrderStageKey } from "@/domain/orders";
 import { CABIN_LABELS } from "@/domain/flight-search";
 import type { OrderView } from "@/server/services/orders";
+import { ClientPages } from "./client-pages";
 
 type Customer = { id: string; name: string; phone: string | null; email: string | null };
 const PRIORITY_CLS = { LOW: "bg-panel2 text-muted", MEDIUM: "bg-blue-500/15 text-blue-300", HIGH: "bg-red-500/15 text-red-300" } as const;
@@ -324,7 +325,7 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
             )}
           </section>
 
-          <ClientLinks id={id} locator={o.locator} clientNotes={o.clientNotes} />
+          <ClientPages id={id} segments={o.segments} />
 
           <section aria-label="Documentos">
             <div className="mb-2 flex items-center justify-between">
@@ -419,43 +420,6 @@ export function LeadsList({ leads }: { leads: Lead[] }) {
           })}
         </ul>
       )}
-    </section>
-  );
-}
-
-/* ---------------- Páginas do cliente (Cotação e Reserva confirmada) ---------------- */
-
-function ClientLinks({ id, locator, clientNotes }: { id: string; locator: string | null; clientNotes: string | null }) {
-  const [loc, setLoc] = useState(locator ?? "");
-  const [notes, setNotes] = useState(clientNotes ?? "");
-  const dirty = loc !== (locator ?? "") || notes !== (clientNotes ?? "");
-  async function copyLink(kind: "cotacao" | "reserva") {
-    const r = await api<{ token: string; slug: string | null }>(`/api/orders/${id}/share`, "POST");
-    if (!r.ok) return toast(r.erro, "error");
-    if (!r.data.slug) return toast("Crie sua página em Configurações › Sua MilhasX primeiro", "error");
-    const url = `${window.location.origin}/p/${r.data.slug}/${kind}/${r.data.token}`;
-    await navigator.clipboard.writeText(url).catch(() => null);
-    toast(kind === "cotacao" ? "Link da cotação copiado" : "Link da reserva copiado");
-  }
-  async function save() {
-    const r = await api(`/api/orders/${id}/share`, "PATCH", { locator: loc || null, clientNotes: notes || null });
-    if (!r.ok) return toast(r.erro, "error");
-    toast("Dados da reserva salvos");
-  }
-  return (
-    <section aria-label="Para o cliente" className="rounded-xl border border-line p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h3 className="kicker flex-1">Para o cliente</h3>
-        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copyLink("cotacao")}><Copy className="h-3.5 w-3.5" />Copiar link da cotação</button>
-        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copyLink("reserva")}><Copy className="h-3.5 w-3.5" />Copiar link da reserva</button>
-        <Link href="/editor" className="btn-subtle h-8 text-xs">Personalizar páginas</Link>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
-        <Field label="Localizador"><input className="input font-mono uppercase" value={loc} onChange={(e) => setLoc(e.target.value.replace(/[^A-Za-z0-9]/g, ""))} maxLength={20} placeholder="ABC123" /></Field>
-        <Field label="Recado na página da reserva"><input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Ex.: bagagem de 23 kg incluída" /></Field>
-      </div>
-      {dirty && <button type="button" className="btn-primary mt-3 h-9" onClick={save}>Salvar dados da reserva</button>}
-      <p className="mt-2 text-xs text-muted">A cotação mostra as opções anotadas acima com o valor em R$; a reserva mostra o localizador, os trechos, o recado e os documentos marcados como visíveis.</p>
     </section>
   );
 }

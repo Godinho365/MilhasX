@@ -19,6 +19,27 @@
   --teal-300: 94 234 212; --teal-400: 45 212 191; --fuchsia-300: 240 171 252; --fuchsia-400: 232 121 249;
 }
 
+/* Páginas do cliente (Central de Atendimento, cotação, reserva, contrato): bege claro, cartões
+   brancos e destaque verde-limão. É o padrão quando o dono não escolhe outra cor de fundo. */
+[data-theme="client"] {
+  color-scheme: light;
+  --bg: 245 245 239; --side: 255 255 255; --panel: 255 255 255; --panel2: 243 243 236; --line: 230 230 221; --muted: 110 110 102;
+  --white: 20 22 18;
+  --zinc-50: 20 22 18; --zinc-100: 28 30 26; --zinc-200: 42 44 40; --zinc-300: 63 66 60; --zinc-400: 104 106 98;
+  --zinc-500: 120 122 114; --zinc-600: 165 167 158; --zinc-700: 212 213 205; --zinc-800: 230 230 222; --zinc-900: 243 243 236; --zinc-950: 20 40 12;
+  --accent: 47 125 35; --accent-light: 47 125 35; --accent-soft: 225 246 214;
+  --lime: 141 230 112; --lime-ink: 18 40 10; --hero: 26 46 22;
+  --ok: 22 163 74; --bad: 220 38 38;
+  --red-300: 220 38 38; --red-400: 220 38 38; --green-300: 22 140 60; --green-400: 22 163 74;
+  --amber-300: 180 83 9; --amber-400: 217 119 6; --blue-300: 37 99 235; --blue-400: 37 99 235;
+  --violet-300: 109 40 217; --violet-400: 124 58 237; --orange-300: 194 65 12; --orange-400: 234 88 12;
+  --sky-300: 3 105 161; --sky-400: 2 132 199; --emerald-300: 4 120 87; --emerald-400: 5 150 105;
+  --teal-300: 15 118 110; --teal-400: 13 148 136; --fuchsia-300: 190 24 93; --fuchsia-400: 219 39 119;
+}
+[data-theme="client"] .btn-primary { background-color: rgb(var(--lime)); color: rgb(var(--lime-ink)); }
+[data-theme="client"] .btn-primary:hover { filter: brightness(0.95); }
+[data-theme="client"] .card { box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
+
 /* Claro: escala zinc invertida (texto escuro sobre fundo claro) e tons fortes para manter o contraste */
 [data-theme="light"] {
   color-scheme: light;

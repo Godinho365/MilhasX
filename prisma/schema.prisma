@@ -868,12 +868,16 @@ model TravelOrder {
   shareToken    String?    @unique // link das páginas "Cotação" e "Reserva confirmada" para o cliente
   locator       String? // localizador da reserva emitida
   clientNotes   String? // recado para o cliente na página da reserva
+  proposal      Json? // cotação para o cliente: voos, bagagem, valores, condições (domain/proposal.ts)
+  reservation   Json? // reserva emitida: programa, companhia, sobrenome, passageiros
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
   attachments OrderAttachment[]
   events      OrderEvent[]
   quotes      FlightQuote[]
+  signatures  ContractSignature[]
+  accesses    OrderAccess[]
 
   @@unique([userId, number])
   @@index([userId, stage])
@@ -947,6 +951,8 @@ model MilesLead {
   phone     String?
   email     String?
   message   String?
+  programs    String[] @default([])
+  incomeRange String?
   status    String   @default("NEW") // NEW | CONTACTED | CLIENT | DISCARDED
   ipHash    String?
   createdAt DateTime @default(now())
@@ -960,12 +966,30 @@ model ContractSignature {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId   String?
+  order     TravelOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
   name      String
   email     String?
   phone     String?
+  cpf       String?
+  birthDate String?
+  address   String?
   terms     String
   ipHash    String?
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// Acesso do cliente às páginas do pedido (cotação, reserva, contrato) depois de confirmar os
+// 4 últimos dígitos do telefone. O cookie guarda um token aleatório; aqui fica só o hash.
+model OrderAccess {
+  id          String      @id @default(cuid())
+  orderId     String
+  order       TravelOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sessionHash String      @unique
+  expiresAt   DateTime
+  createdAt   DateTime    @default(now())
+
+  @@index([orderId])
 }
