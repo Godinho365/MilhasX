@@ -303,7 +303,9 @@ export const cardSchema = z.object({
   annualFeeCents: cents.default(0),
   feeWaiverCents: cents.nullable().default(null),
 });
-export const invoiceSchema = z.object({ closingDate: dateStr, dueDate: dateStr, amountCents: cents.refine((v) => v > 0, "Informe o valor da fatura") });
+export const invoiceSchema = z.object({ closingDate: dateStr, dueDate: dateStr, amountCents: cents.refine((v) => v > 0, "Informe o valor da fatura"), pointsIncluded: z.boolean().default(false) });
+export const cardBalanceSchema = z.object({ points: z.number().int().min(0).max(100_000_000), date: dateStr });
+export const invoiceIncludedSchema = z.object({ pointsIncluded: z.boolean() });
 export const promotionSchema = z.object({
   kind: z.enum(["TRANSFER_BONUS", "PURCHASE_BONUS", "CLUB", "SHOPPING", "OTHER"]),
   title: z.string().trim().min(3).max(140),

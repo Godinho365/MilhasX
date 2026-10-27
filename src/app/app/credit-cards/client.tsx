@@ -10,8 +10,8 @@ import { ProgramDot } from "@/components/stat";
 import { toast, confirmDialog } from "@/components/feedback";
 import { feeCpmCents, simulateMonth } from "@/domain/cards";
 
-type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; status: "OPEN" | "CLOSED" | "RECEIVED" };
-type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; received: number; invoices: Invoice[] };
+type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; pointsIncluded: boolean; status: "OPEN" | "CLOSED" | "RECEIVED" };
+type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; received: number; invoices: Invoice[] };
 const money = (c: number | null | undefined) => (c ? (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "");
 
 const STATUS: Record<Invoice["status"], { label: string; cls: string }> = {
@@ -26,7 +26,7 @@ function nextDate(day: number, after = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-type Stats = { expectedPoints: number; openCents: number; receivedPoints: number; actionCards: number; totalCards: number };
+type Stats = { activePoints: number; expectedPoints: number; openCents: number; receivedPoints: number; actionCards: number; totalCards: number };
 type Tab = "resumo" | "faturas" | "cartoes";
 type InvoiceFilter = "all" | "OPEN" | "CLOSED" | "RECEIVED";
 
@@ -59,8 +59,15 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
       pointsPerDollar: Math.round(Number(String(f.get("ppd")).replace(",", ".")) * 100), dollarRateCents: rate,
       closingDay: Number(f.get("closing")), dueDay: Number(f.get("due")), annualFeeCents: fee, feeWaiverCents: waiver || null,
     };
-    const r = editing ? await api(`/api/cards/${editing.id}`, "PUT", body) : await api("/api/cards", "POST", body);
+    const r = editing ? await api<{ item: { id: string } }>(`/api/cards/${editing.id}`, "PUT", body) : await api<{ item: { id: string } }>("/api/cards", "POST", body);
     if (!r.ok) return setErro(r.erro);
+    // Pontos que o cartão já tem acumulados: viram "Saldo inicial" na conta que recebe os pontos
+    const bal = Number(String(f.get("balance") || "0").replace(/\D/g, "")) || 0;
+    const balDate = String(f.get("balanceDate") || new Date().toISOString().slice(0, 10));
+    if (bal !== (editing?.balancePoints ?? 0) || (bal > 0 && balDate !== editing?.balanceDate)) {
+      const b = await api(`/api/cards/${r.data.item.id}/balance`, "PUT", { points: bal, date: balDate });
+      if (!b.ok) return setErro(b.erro);
+    }
     setErro("");
     setCardModal(false);
     toast(editing ? "Cartão atualizado" : "Cartão cadastrado");
@@ -73,7 +80,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     const f = new FormData(e.currentTarget);
     const amount = parseBRLToCents(String(f.get("amount") || ""));
     if (!amount) return setErro("Informe o valor da fatura");
-    const r = await api(`/api/cards/${invoiceFor.id}/invoices`, "POST", { closingDate: f.get("closing"), dueDate: f.get("due"), amountCents: amount });
+    const r = await api(`/api/cards/${invoiceFor.id}/invoices`, "POST", { closingDate: f.get("closing"), dueDate: f.get("due"), amountCents: amount, pointsIncluded: f.get("included") === "on" });
     if (!r.ok) return setErro(r.erro);
     setErro("");
     setInvoiceFor(null);
@@ -86,6 +93,14 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     const r = await api(`/api/invoices/${invoiceId}/close`, "POST");
     if (!r.ok) return toast(r.erro, "error");
     toast("Fatura fechada");
+    refreshSafe(router);
+  }
+  async function markIncluded(id: string) {
+    const ok = await confirmDialog({ title: "Pontos já estão no saldo do cartão?", body: "A fatura deixa de lançar pontos. Se já estiver fechada com pontos a receber, esse lançamento sai do extrato.", confirmLabel: "Marcar como incluída" });
+    if (!ok) return;
+    const r = await api(`/api/invoices/${id}`, "PATCH", { pointsIncluded: true });
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Fatura marcada como incluída no saldo");
     refreshSafe(router);
   }
   async function delInvoice(id: string) {
@@ -124,7 +139,8 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
 
       {tab === "resumo" && (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5 [&>*:first-child]:col-span-2 lg:[&>*:first-child]:col-span-1">
+            {kpi("Pontos ativos no cartão", fmtPts(stats.activePoints), stats.activePoints ? "Já acumulados nos cartões" : "Informe em Cartões › editar", () => go("cartoes"))}
             {kpi("Pontos esperados", fmtPts(stats.expectedPoints), "Próximas faturas", () => go("faturas", "OPEN"))}
             {kpi("Valor em aberto", fmtBRL(stats.openCents), "Próximas faturas", () => go("faturas", "OPEN"))}
             {kpi("Pontos recebidos", fmtPts(stats.receivedPoints), "De todas as faturas", () => go("faturas", "RECEIVED"))}
@@ -172,12 +188,13 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
                     <p className="truncate font-medium">{i.card.name}</p>
                     <p className="text-xs text-muted">Fecha {fmtDate(i.closingDate)} · vence {fmtDate(i.dueDate)}</p>
                   </div>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[i.status].cls}`}>{STATUS[i.status].label}</span>
+                  {i.pointsIncluded ? <span className="rounded-full bg-panel2 px-2 py-0.5 text-xs font-medium text-muted">Pontos já no saldo do cartão</span> : <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[i.status].cls}`}>{STATUS[i.status].label}</span>}
                   <span className="w-24 text-right font-medium tabular-nums">{fmtBRL(i.amountCents)}</span>
                   <span className="w-28 text-right text-sm tabular-nums text-muted">{fmtPts(i.expectedPoints)} pts</span>
                   <span className="w-36 text-right text-xs tabular-nums text-muted" title="Parcela da anuidade nesta fatura e o custo por milheiro que ela gera">{i.feeCents > 0 ? <>Anuidade {fmtBRL(i.feeCents)}<br />CPM {fmtBRL(feeCpmCents(i.feeCents, i.expectedPoints))}</> : i.card.annualFeeCents > 0 ? "Anuidade isenta" : "Sem anuidade"}</span>
                   <span className="flex gap-1">
                     {i.status === "OPEN" && <button className="btn-ghost h-8" onClick={() => close(i.id)}>Fechar fatura</button>}
+                    {!i.pointsIncluded && i.status !== "RECEIVED" && <button className="btn-subtle h-8 px-2 text-xs" onClick={() => markIncluded(i.id)} title="Os pontos desta fatura já estão no saldo acumulado do cartão">Já no saldo</button>}
                     <button className="btn-subtle h-8 w-8 px-0" onClick={() => delInvoice(i.id)} aria-label="Excluir fatura"><Trash2 className="h-4 w-4" /></button>
                   </span>
                 </li>
@@ -208,6 +225,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
                             <span className="min-w-0">
                               <span className="block truncate font-semibold">{c.name}</span>
                               <span className="flex items-center gap-1.5 truncate text-xs text-muted"><ProgramDot color={c.color} />{c.program} · {c.holder}{c.brand && ` · ${c.brand}`}</span>
+                              {c.balancePoints > 0 && <span className="block text-xs font-medium text-accent-light">{fmtPts(c.balancePoints)} pts acumulados no cartão</span>}
                             </span>
                           </span>
                         </td>
@@ -242,6 +260,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
               <Field label="Fechamento" required><input className="input" type="date" name="closing" required defaultValue={nextDate(invoiceFor.closingDay)} /></Field>
               <Field label="Vencimento" required><input className="input" type="date" name="due" required defaultValue={nextDate(invoiceFor.dueDay, new Date(nextDate(invoiceFor.closingDay)))} /></Field>
             </div>
+            <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="included" className="checkbox mt-0.5" defaultChecked={invoiceFor.balancePoints > 0} />Os pontos desta fatura já estão no saldo acumulado do cartão (não lançar de novo)</label>
             <p className="text-xs text-muted">Pontos estimados: valor ÷ cotação (R$ {(invoiceFor.dollarRateCents / 100).toFixed(2).replace(".", ",")}) × {invoiceFor.pointsPerDollar.toLocaleString("pt-BR")} pts/US$.</p>
           </form>
         )}
@@ -292,6 +311,8 @@ function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accou
       <Field label="Cotação do dólar (R$)" hint="Usada para estimar os pontos"><input className="input" name="rate" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
       <Field label="Dia do fechamento" required><input className="input" name="closing" type="number" min={1} max={31} required defaultValue={card?.closingDay} /></Field>
       <Field label="Dia do vencimento" required><input className="input" name="due" type="number" min={1} max={31} required defaultValue={card?.dueDay} /></Field>
+      <Field label="Pontos já acumulados no cartão" hint="Entram no saldo da conta que recebe os pontos (lançamento “Saldo inicial”)"><input className="input" name="balance" inputMode="numeric" placeholder="0" defaultValue={card?.balancePoints ? fmtPts(card.balancePoints) : ""} /></Field>
+      <Field label="Data do saldo"><input className="input" type="date" name="balanceDate" defaultValue={card?.balanceDate ?? new Date().toISOString().slice(0, 10)} /></Field>
       <Field label="Anuidade (R$ por ano)" hint="Cobrada em 12 parcelas; cada parcela vira custo dos pontos da fatura"><input className="input" name="fee" inputMode="decimal" placeholder="0,00" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
       <Field label="Isenta gastando (R$ por mês)" hint="Vazio: sem isenção. Ex.: 8.000,00"><input className="input" name="waiver" inputMode="decimal" placeholder="8.000,00" value={waiver} onChange={(e) => setWaiver(e.target.value)} /></Field>
       <section className="rounded-xl border border-line bg-panel2 p-4 sm:col-span-2" aria-label="Simulação do mês">

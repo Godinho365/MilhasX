@@ -11,6 +11,7 @@ import * as invoices from "@/app/api/cards/[id]/invoices/route";
 import * as invoiceClose from "@/app/api/invoices/[id]/close/route";
 import * as invoice from "@/app/api/invoices/[id]/route";
 import * as card from "@/app/api/cards/[id]/route";
+import * as cardBalance from "@/app/api/cards/[id]/balance/route";
 import { simulateMonth, invoiceFeeCents } from "@/domain/cards";
 import * as entry from "@/app/api/entries/[id]/route";
 import * as summary from "@/app/api/summary/route";
@@ -117,6 +118,33 @@ describe("cartões e faturas", () => {
     expect((await prisma.cardInvoice.findUniqueOrThrow({ where: { id: high.id } })).feeCents).toBe(20000); // R$ 9.000 < R$ 10.000
     expect((await prisma.cardInvoice.findUniqueOrThrow({ where: { id: low.id } })).feeCents).toBe(10000); // fechada: não muda
     expect((await b.call(card.PUT, "PUT", "/x", { ...base, annualFeeCents: 0 }, { id: c.id })).status).toBe(404);
+  });
+
+  it("pontos já acumulados no cartão entram no saldo uma vez; fatura já incluída não soma de novo", async () => {
+    const c = (await a.call(cards.POST, "POST", "/c", { accountId: accA, name: "Ultravioleta", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10 })).data.item;
+    expect((await a.call(cardBalance.PUT, "PUT", "/x", { points: 1698, date: "2026-10-27" }, { id: c.id })).status).toBe(200);
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: accA } })).balance).toBe(1698);
+    // informar de novo atualiza o mesmo lançamento (não duplica)
+    await a.call(cardBalance.PUT, "PUT", "/x", { points: 1800, date: "2026-10-27" }, { id: c.id });
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: accA } })).balance).toBe(1800);
+    expect(await prisma.entry.count({ where: { accountId: accA, type: "INITIAL_BALANCE" } })).toBe(1);
+    expect((await b.call(cardBalance.PUT, "PUT", "/x", { points: 5, date: "2026-10-27" }, { id: c.id })).status).toBe(404);
+
+    // fatura atual (R$ 250) já está dentro dos pontos acumulados: fechar não lança nada
+    const inc = (await a.call(invoices.POST, "POST", "/i", { closingDate: "2026-10-03", dueDate: "2026-10-10", amountCents: 25000, pointsIncluded: true }, { id: c.id })).data.item;
+    const closedInc = (await a.call(invoiceClose.POST, "POST", "/x", undefined, { id: inc.id })).data.item;
+    expect(closedInc.entryId).toBeNull();
+    // fatura já fechada com pontos a receber: marcar como incluída tira o lançamento pendente
+    const other = (await a.call(invoices.POST, "POST", "/i", { closingDate: "2026-11-03", dueDate: "2026-11-10", amountCents: 450000 }, { id: c.id })).data.item;
+    const closed = (await a.call(invoiceClose.POST, "POST", "/x", undefined, { id: other.id })).data.item;
+    expect(await prisma.entry.count({ where: { id: closed.entryId } })).toBe(1);
+    expect((await a.call(invoice.PATCH, "PATCH", "/x", { pointsIncluded: true }, { id: other.id })).status).toBe(200);
+    expect(await prisma.entry.count({ where: { id: closed.entryId } })).toBe(0);
+    expect((await a.call(cards.GET, "GET", "/c")).data.stats).toMatchObject({ expectedPoints: 0, activePoints: 1800 });
+
+    // zerar remove o saldo inicial
+    await a.call(cardBalance.PUT, "PUT", "/x", { points: 0, date: "2026-10-27" }, { id: c.id });
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: accA } })).balance).toBe(0);
   });
 
   it("não cria cartão em conta de outro usuário", async () => {

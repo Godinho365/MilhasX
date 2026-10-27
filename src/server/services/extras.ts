@@ -3,7 +3,7 @@ import { expectedCardPoints, invoiceFeeCents } from "@/domain/cards";
 import type { GuideKind, GuideLevel, PromotionKind, Prisma } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { assertFeature } from "./plan-limits";
-import { createEntry, deleteEntry } from "./ledger";
+import { createEntry, deleteEntry, updateEntry } from "./ledger";
 import { listSales as listSalesView } from "./sales";
 
 /* ---------------- Fornecedores ---------------- */
@@ -118,6 +118,43 @@ export async function updateCard(userId: string, id: string, input: CardInput) {
   return updated;
 }
 
+/**
+ * Pontos que o cartão já tem acumulados: um lançamento "Saldo inicial" na conta que recebe os pontos.
+ * Um por cartão; informar de novo atualiza o mesmo lançamento, e zero o remove.
+ */
+export async function setCardBalance(userId: string, cardId: string, input: { points: number; date: Date }) {
+  const card = await prisma.creditCard.findFirst({ where: { id: cardId, userId }, include: { balanceEntry: { select: { id: true } } } });
+  if (!card) throw new DomainError(404, "Cartão não encontrado");
+  if (!Number.isInteger(input.points) || input.points < 0) throw new DomainError(400, "Quantidade de pontos inválida");
+  const current = card.balanceEntry?.id ?? null;
+  if (input.points === 0) {
+    if (current) await deleteEntry(userId, current);
+    return prisma.creditCard.update({ where: { id: cardId }, data: { balanceEntryId: null } });
+  }
+  const description = `Pontos acumulados no cartão ${card.name}`;
+  if (current) {
+    await updateEntry(userId, current, { points: input.points, occurredAt: input.date, description });
+    return card;
+  }
+  const { entry } = await createEntry(userId, { accountId: card.accountId, type: "INITIAL_BALANCE", points: input.points, occurredAt: input.date, description });
+  return prisma.creditCard.update({ where: { id: cardId }, data: { balanceEntryId: entry.id } });
+}
+
+/**
+ * "Pontos já incluídos no saldo do cartão": a fatura não lança pontos ao fechar. Se já estava fechada
+ * com pontos a receber, o lançamento pendente sai (os pontos já estão no saldo acumulado).
+ */
+export async function setInvoicePointsIncluded(userId: string, invoiceId: string, included: boolean) {
+  const inv = await prisma.cardInvoice.findFirst({ where: { id: invoiceId, card: { userId } }, include: { entry: { select: { id: true, status: true } } } });
+  if (!inv) throw new DomainError(404, "Fatura não encontrada");
+  if (included && inv.entry) {
+    if (inv.entry.status === "CONFIRMED") throw new DomainError(409, "Os pontos desta fatura já foram recebidos; exclua o lançamento no extrato se estiverem duplicados.");
+    await deleteEntry(userId, inv.entry.id);
+  }
+  if (!included && inv.pointsIncluded && inv.status === "CLOSED") throw new DomainError(409, "A fatura já foi fechada sem lançar pontos; exclua e cadastre de novo para lançar.");
+  return prisma.cardInvoice.update({ where: { id: inv.id }, data: { pointsIncluded: included, entryId: included ? null : inv.entryId } });
+}
+
 export async function deleteCard(userId: string, id: string) {
   const card = await prisma.creditCard.findFirst({ where: { id, userId }, include: { invoices: true } });
   if (!card) throw new DomainError(404, "Cartão não encontrado");
@@ -125,7 +162,7 @@ export async function deleteCard(userId: string, id: string) {
   await prisma.creditCard.delete({ where: { id } });
 }
 
-export async function addInvoice(userId: string, cardId: string, input: { closingDate: Date; dueDate: Date; amountCents: number }) {
+export async function addInvoice(userId: string, cardId: string, input: { closingDate: Date; dueDate: Date; amountCents: number; pointsIncluded?: boolean }) {
   const card = await prisma.creditCard.findFirst({ where: { id: cardId, userId } });
   if (!card) throw new DomainError(404, "Cartão não encontrado");
   if (input.dueDate < input.closingDate) throw new DomainError(400, "O vencimento precisa ser depois do fechamento");
@@ -142,7 +179,8 @@ export async function closeInvoice(userId: string, invoiceId: string) {
   if (!inv) throw new DomainError(404, "Fatura não encontrada");
   if (inv.status === "CLOSED") throw new DomainError(409, "A fatura já está fechada");
   let entryId: string | null = null;
-  if (inv.expectedPoints > 0) {
+  // Pontos já contados no saldo acumulado do cartão: fecha sem lançar de novo
+  if (inv.expectedPoints > 0 && !inv.pointsIncluded) {
     const { entry } = await createEntry(userId, {
       accountId: inv.card.accountId,
       type: "CARD",
@@ -170,6 +208,7 @@ export async function cardsOverview(userId: string) {
     where: { userId },
     include: {
       account: { include: { program: true, holder: true } },
+      balanceEntry: { select: { points: true, occurredAt: true } },
       invoices: { include: { entry: { select: { status: true, points: true } } }, orderBy: { dueDate: "desc" } },
     },
     orderBy: { name: "asc" },
@@ -180,7 +219,7 @@ export async function cardsOverview(userId: string) {
   for (const c of cards) {
     for (const i of c.invoices) {
       if (i.status === "OPEN") {
-        expected += i.expectedPoints;
+        if (!i.pointsIncluded) expected += i.expectedPoints;
         openCents += i.amountCents;
         if (i.closingDate <= now) actions.push({ cardId: c.id, card: c.name, invoiceId: i.id, dueDate: i.dueDate, amountCents: i.amountCents });
       } else if (i.entry) {
@@ -190,7 +229,8 @@ export async function cardsOverview(userId: string) {
     }
   }
   return {
-    stats: { expectedPoints: expected, openCents, receivedPoints: received, actionCards: new Set(actions.map((a) => a.cardId)).size, totalCards: cards.length },
+    // Pontos ativos: os já acumulados no cartão (saldo informado), de todos os cartões
+    stats: { activePoints: cards.reduce((t, c) => t + (c.balanceEntry?.points ?? 0), 0), expectedPoints: expected, openCents, receivedPoints: received, actionCards: new Set(actions.map((a) => a.cardId)).size, totalCards: cards.length },
     actions,
     cards,
   };

@@ -298,6 +298,7 @@ model Entry {
 
   saleItem      SaleItem?
   invoice       CardInvoice?
+  cardBalance   CreditCard?  @relation("CardBalance")
   bonusPurchase BonusPurchase?
   costs         EntryCost[]
 
@@ -555,6 +556,8 @@ model CreditCard {
   dueDay          Int // dia do vencimento
   annualFeeCents  Int      @default(0)
   feeWaiverCents  Int? // gasto mensal que isenta a parcela da anuidade (ex.: R$ 8.000)
+  balanceEntryId  String?  @unique // lançamento "Saldo inicial" com os pontos já acumulados no cartão
+  balanceEntry    Entry?   @relation("CardBalance", fields: [balanceEntryId], references: [id], onDelete: SetNull)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
 
@@ -573,6 +576,7 @@ model CardInvoice {
   amountCents    Int
   expectedPoints Int
   feeCents       Int           @default(0) // parcela da anuidade nesta fatura (vira custo dos pontos)
+  pointsIncluded Boolean       @default(false) // pontos já contados no saldo acumulado do cartão: fechar não lança de novo
   status         InvoiceStatus @default(OPEN)
   entryId        String?       @unique // lançamento "a receber" criado ao fechar a fatura
   entry          Entry?        @relation(fields: [entryId], references: [id], onDelete: SetNull)
