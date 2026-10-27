@@ -11,6 +11,7 @@ import * as sale from "@/app/api/sales/[id]/route";
 import * as customers from "@/app/api/customers/route";
 import * as customer from "@/app/api/customers/[id]/route";
 import { prisma } from "@/server/db";
+import { salesDashboard } from "@/server/services/extras";
 
 let c: Client;
 let userId: string;
@@ -49,6 +50,18 @@ describe("venda de emissão", () => {
     expect(await acc(lat)).toMatchObject({ balance: 10000, costCents: 25000 });
     const e = await prisma.entry.findFirstOrThrow({ where: { type: "SALE" } });
     expect(e.description).toContain("Passagem aérea GRU → LIS");
+  });
+
+  it("preço médio por milheiro e margem não contam a taxa de embarque repassada", async () => {
+    // 10.000 pts por R$ 300,00 + R$ 80,00 de taxa de embarque repassada ao cliente
+    await newSale({ items: [flight({ costs: [{ type: "TAXA_EMBARQUE", amountCents: 8000 }] })] });
+    const d = await salesDashboard(userId);
+    expect(d.totals).toMatchObject({
+      revenueCents: 38000, // faturamento: inclui a taxa (é o que entra)
+      profitCents: 5000,
+      avgPriceCpmCents: 3000, // R$ 300,00 ÷ 10 milheiros (antes: R$ 380,00 ÷ 10 = R$ 38,00)
+      marginPct: 16.7, // R$ 50,00 ÷ R$ 300,00 (antes: ÷ R$ 380,00 = 13,2%)
+    });
   });
 
   it("vários itens e emissão em dinheiro", async () => {

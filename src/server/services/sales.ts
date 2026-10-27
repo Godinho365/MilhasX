@@ -90,7 +90,9 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
   const costCents = parts.reduce((t, p) => t + p.costCents, 0);
   const resultCents = parts.reduce((t, p) => t + p.resultCents, 0);
   const priced = s.items.reduce((t, i) => t + i.salePriceCents, 0);
-  return { totalCents, costCents, resultCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null };
+  // Valor cobrado só pelos pontos (sem taxa de embarque e outros custos repassados): base do preço por milheiro
+  const pointsValueCents = s.items.filter((i) => i.issuedWith === "POINTS").reduce((t, i) => t + i.salePriceCents, 0);
+  return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null };
 }
 
 function validate(input: SaleInput) {

@@ -370,11 +370,13 @@ export async function salesDashboard(userId: string, months = 12) {
   }
   const customers = new Map<string, { revenue: number; count: number }>();
   const programs = new Map<string, number>();
-  let revenue = 0, profit = 0, points = 0;
+  let revenue = 0, profit = 0, points = 0, priced = 0, pointsValue = 0;
   for (const s of sales) {
     revenue += s.totalCents;
     profit += s.resultCents;
     points += s.points;
+    priced += s.pricedCents;
+    pointsValue += s.pointsValueCents;
     const m = byMonth.get(s.date.slice(0, 7));
     if (m) {
       m.revenue += s.totalCents;
@@ -394,8 +396,9 @@ export async function salesDashboard(userId: string, months = 12) {
       profitCents: profit,
       points,
       count: sales.length,
-      avgPriceCpmCents: points > 0 ? Math.round((revenue * 1000) / points) : null,
-      marginPct: revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : null,
+      // Preço por milheiro e margem sobre o valor dos pontos: taxa de embarque e outros repasses não contam
+      avgPriceCpmCents: points > 0 ? Math.round((pointsValue * 1000) / points) : null,
+      marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : null,
     },
     monthly: [...byMonth.entries()].map(([month, v]) => ({ month, ...v })),
     topCustomers: [...customers.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.revenue - a.revenue).slice(0, 5),

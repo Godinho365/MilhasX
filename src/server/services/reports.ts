@@ -345,11 +345,12 @@ export async function salesReport(f: ReportFilter) {
   const revenueBy = new Map<string, { name: string; value: number; color?: string }>();
   const profitBy = new Map<string, { name: string; value: number; color?: string }>();
   const beneficiaries = new Map<string, { name: string; value: number; count: number }>();
-  let revenue = 0, profit = 0, points = 0;
+  let revenue = 0, profit = 0, points = 0, priced = 0;
   for (const s of sales) {
     revenue += s.totalCents;
     profit += s.resultCents;
     points += s.points;
+    priced += s.pricedCents;
     const m = monthly.get(s.date.slice(0, 7));
     if (m) {
       m.revenue += s.totalCents;
@@ -368,7 +369,7 @@ export async function salesReport(f: ReportFilter) {
     }
   }
   return {
-    totals: { count: sales.length, revenueCents: revenue, profitCents: profit, points, marginPct: revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : 0 },
+    totals: { count: sales.length, revenueCents: revenue, profitCents: profit, points, marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : 0 },
     monthly: [...monthly.values()],
     count: desc(count),
     revenue: desc(revenueBy),
