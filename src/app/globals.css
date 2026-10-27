@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tema: data-theme="dark" | "light" | "system" (segue o sistema operacional). Cores em "R G B". */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: 9 9 11; --side: 12 12 15; --panel: 17 17 20; --panel2: 24 24 27; --line: 39 39 42; --muted: 161 161 170;
+  --white: 255 255 255;
+  --zinc-50: 250 250 250; --zinc-100: 244 244 245; --zinc-200: 228 228 231; --zinc-300: 212 212 216; --zinc-400: 161 161 170;
+  --zinc-500: 113 113 122; --zinc-600: 82 82 91; --zinc-700: 63 63 70; --zinc-800: 39 39 42; --zinc-900: 24 24 27; --zinc-950: 9 9 11;
+  --accent: 59 130 246; --accent-light: 96 165 250; --accent-soft: 23 37 84;
+  --ok: 34 197 94; --bad: 239 68 68;
+  --red-300: 252 165 165; --red-400: 248 113 113; --green-300: 134 239 172; --green-400: 74 222 128;
+  --amber-300: 252 211 77; --amber-400: 251 191 36; --blue-300: 147 197 253; --blue-400: 96 165 250;
+  --violet-300: 196 181 253; --violet-400: 167 139 250; --orange-300: 253 186 116; --orange-400: 251 146 60;
+  --sky-300: 125 211 252; --sky-400: 56 189 248; --emerald-300: 110 231 183; --emerald-400: 52 211 153;
+  --teal-300: 94 234 212; --teal-400: 45 212 191; --fuchsia-300: 240 171 252; --fuchsia-400: 232 121 249;
+}
+
+/* Claro: escala zinc invertida (texto escuro sobre fundo claro) e tons fortes para manter o contraste */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: 246 247 249; --side: 255 255 255; --panel: 255 255 255; --panel2: 241 243 246; --line: 226 228 233; --muted: 100 104 116;
+  --white: 9 9 11;
+  --zinc-50: 9 9 11; --zinc-100: 24 24 27; --zinc-200: 39 39 42; --zinc-300: 63 63 70; --zinc-400: 100 104 116;
+  --zinc-500: 113 113 122; --zinc-600: 161 161 170; --zinc-700: 212 212 216; --zinc-800: 228 228 231; --zinc-900: 241 243 246; --zinc-950: 255 255 255;
+  --accent: 37 99 235; --accent-light: 37 99 235; --accent-soft: 219 234 254;
+  --ok: 22 163 74; --bad: 220 38 38;
+  --red-300: 220 38 38; --red-400: 220 38 38; --green-300: 22 163 74; --green-400: 22 163 74;
+  --amber-300: 180 83 9; --amber-400: 217 119 6; --blue-300: 37 99 235; --blue-400: 37 99 235;
+  --violet-300: 109 40 217; --violet-400: 124 58 237; --orange-300: 194 65 12; --orange-400: 234 88 12;
+  --sky-300: 3 105 161; --sky-400: 2 132 199; --emerald-300: 4 120 87; --emerald-400: 5 150 105;
+  --teal-300: 15 118 110; --teal-400: 13 148 136; --fuchsia-300: 162 28 175; --fuchsia-400: 192 38 211;
+}
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] {
+    color-scheme: light;
+    --bg: 246 247 249; --side: 255 255 255; --panel: 255 255 255; --panel2: 241 243 246; --line: 226 228 233; --muted: 100 104 116;
+    --white: 9 9 11;
+    --zinc-50: 9 9 11; --zinc-100: 24 24 27; --zinc-200: 39 39 42; --zinc-300: 63 63 70; --zinc-400: 100 104 116;
+    --zinc-500: 113 113 122; --zinc-600: 161 161 170; --zinc-700: 212 212 216; --zinc-800: 228 228 231; --zinc-900: 241 243 246; --zinc-950: 255 255 255;
+    --accent: 37 99 235; --accent-light: 37 99 235; --accent-soft: 219 234 254;
+    --ok: 22 163 74; --bad: 220 38 38;
+    --red-300: 220 38 38; --red-400: 220 38 38; --green-300: 22 163 74; --green-400: 22 163 74;
+    --amber-300: 180 83 9; --amber-400: 217 119 6; --blue-300: 37 99 235; --blue-400: 37 99 235;
+    --violet-300: 109 40 217; --violet-400: 124 58 237; --orange-300: 194 65 12; --orange-400: 234 88 12;
+    --sky-300: 3 105 161; --sky-400: 2 132 199; --emerald-300: 4 120 87; --emerald-400: 5 150 105;
+    --teal-300: 15 118 110; --teal-400: 13 148 136; --fuchsia-300: 162 28 175; --fuchsia-400: 192 38 211;
+  }
+}
+
+body { @apply bg-bg font-sans text-zinc-50 antialiased; font-feature-settings: "cv11", "ss01"; }
+
+/* Gráficos (recharts): cores pelo tema via CSS, que tem prioridade sobre os atributos do SVG */
+.recharts-cartesian-grid line { stroke: rgb(var(--line)); }
+.recharts-cartesian-axis-tick-value { fill: rgb(var(--muted)); }
+.recharts-tooltip-cursor { fill: rgb(var(--panel2)); }
+.chart-strong .recharts-cartesian-axis-tick-value { fill: rgb(var(--zinc-300)); }
+::selection { @apply bg-accent/40; }
+
+@layer components {
+  .card { @apply relative rounded-card border border-line bg-panel; }
+  .card-pad { @apply p-5 sm:p-6; }
+  .btn { @apply inline-flex h-9 select-none items-center justify-center gap-2 whitespace-nowrap rounded-[10px] px-3.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-50; }
+  .btn-primary { @apply btn bg-accent-light text-zinc-950 hover:bg-blue-300; }
+  .btn-ghost { @apply btn border border-line bg-transparent text-zinc-100 hover:bg-panel2; }
+  .btn-subtle { @apply btn text-muted hover:bg-panel2 hover:text-zinc-100; }
+  .btn-danger { @apply btn bg-red-500/90 text-white hover:bg-red-500; }
+  .btn-icon { @apply btn h-9 w-9 px-0; }
+  .pill { @apply inline-flex h-9 items-center gap-2 rounded-full border border-line bg-transparent px-3 text-sm text-zinc-200 hover:bg-panel2; }
+  .input { @apply h-10 w-full rounded-[10px] border border-line bg-transparent px-3 text-sm text-zinc-50 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-accent/30; }
+  select.input { @apply appearance-none bg-no-repeat pr-9; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E"); background-position: right .7rem center; }
+  select.input option { @apply bg-panel2; }
+  .label { @apply mb-1.5 block text-sm font-medium text-zinc-200; }
+  .req::after { content: " *"; @apply text-red-400; }
+  .table-base { @apply w-full text-left text-sm; }
+  .table-base th { @apply h-12 border-b border-line px-4 font-medium text-muted; }
+  .table-base td { @apply border-b border-line px-4 py-3.5; }
+  .table-base tbody tr { @apply transition-colors hover:bg-panel2/60; }
+  .table-base tbody tr:last-child td { @apply border-b-0; }
+  .kicker { @apply text-xs font-semibold uppercase tracking-wider text-muted; }
+  .checkbox { @apply h-[18px] w-[18px] cursor-pointer appearance-none rounded-full border-2 border-accent-light/80 bg-transparent transition checked:border-accent-light checked:bg-accent-light; }
+}
+
+/* Visibilidade dos valores: "Oculto" borra números do conteúdo (passe o mouse para ver) */
+html[data-values="hidden"] main .tabular-nums { filter: blur(7px); transition: filter 0.15s; }
+html[data-values="hidden"] main .tabular-nums:hover { filter: none; }

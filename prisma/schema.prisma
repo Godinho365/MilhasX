@@ -1,0 +1,947 @@
+// Valores financeiros sempre em centavos (Int). Pontos em Int.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ProgramKind {
+  POINTS
+  MILES
+}
+
+enum EntryType {
+  INITIAL_BALANCE // Saldo inicial (sem custo)
+  PURCHASE // Compra de pontos (com custo)
+  CLUB // Pontos de clube (com custo da mensalidade)
+  CARD // Pontos de cartão (sem custo)
+  PARTNER_PURCHASE // Compra em parceiro
+  FLIGHT // Pontos de voo
+  HOTEL // Pontos de hotel
+  BONUS // Bônus de pontos
+  OTHER_CREDIT // Outros créditos (custo opcional)
+  TRANSFER_IN // Entrada de transferência (custo vem da origem)
+  TRANSFER_BONUS // Bônus de transferência (divide o custo da transferência)
+  TRANSFER_OUT // Saída de transferência
+  SALE // Venda de pontos (débito)
+  FLIGHT_REDEMPTION // Emissão de passagem
+  CAR_RENTAL // Aluguel de veículo
+  HOTEL_REDEMPTION // Reserva de hotel
+  PRODUCT_REDEMPTION // Resgate de produto
+  EXPIRATION // Expiração (débito)
+  OTHER_DEBIT // Outros débitos / ajuste
+}
+
+enum EntryStatus {
+  CONFIRMED
+  PENDING // pontos a receber: não entram no saldo
+}
+
+enum AlertType {
+  STORE_POINTS // oferta de loja >= limite (pts/R$)
+  MIN_BALANCE // saldo da conta < limite
+  PROMOTION // nova promoção do programa com bônus >= limite (%)
+}
+
+enum PromotionKind {
+  TRANSFER_BONUS
+  PURCHASE_BONUS
+  CLUB
+  SHOPPING
+  OTHER
+}
+
+enum InvoiceStatus {
+  OPEN
+  CLOSED
+}
+
+enum GuideKind {
+  VIDEO
+  ARTICLE
+}
+
+enum GuideLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         Role          @default(USER)
+  status       AccountStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  sessions         Session[]
+  resetTokens      PasswordResetToken[]
+  holders          Holder[]
+  accounts         Account[]
+  entries          Entry[]
+  customers        Customer[]
+  sales            Sale[]
+  favorites        FavoriteStore[]
+  alerts           Alert[]
+  notifications    Notification[]
+  preference       UserPreference?
+  auditLogs        AuditLog[]
+  suppliers        Supplier[]
+  supplierAccounts SupplierAccount[]
+  cards            CreditCard[]
+
+  recurrences     Recurrence[]
+  bonusPurchases  BonusPurchase[]
+  avatar          Bytes?
+  avatarMime      String?
+  avatarUpdatedAt DateTime?
+  simulations     Simulation[]
+
+  // Assinatura: o plano só muda pela administração (sem cobrança real)
+  plan                Plan          @default(PESSOAL)
+  planInterval        String?
+  trialEndsAt         DateTime?
+  planRequest         Plan?
+  planRequestInterval String?
+  planRequestedAt     DateTime?
+  deletionRequestedAt DateTime?
+  referralCode        String?       @unique
+  referredById        String?
+  referredBy          User?         @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals           User[]        @relation("Referrals")
+  salesProfile        SalesProfile?
+  subscriptions       Subscription[]
+  travelOrders        TravelOrder[]
+  flightQuotes        FlightQuote[]
+  flightSearches      FlightSearch[]
+  milesLeads          MilesLead[]
+}
+
+enum Plan {
+  PESSOAL
+  PRO
+  GESTOR
+}
+
+model SalesProfile {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug        String   @unique
+  displayName String
+  bio         String?
+  whatsapp    String?
+  instagram   String?
+  email       String?
+  programIds  String[]
+  published   Boolean  @default(false)
+  acceptsOrders Boolean @default(true) // formulário "Pedir cotação" na página pública
+  acceptsLeads  Boolean @default(true) // formulário "Interesse em gestão de milhas"
+  headline      String? // frase de abertura da Central de Atendimento
+  views         Int     @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+model Session {
+  id        String   @id // sha256 do token; o token em si só existe no cookie
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Program {
+  id                  String      @id @default(cuid())
+  name                String
+  code                String      @unique
+  kind                ProgramKind @default(POINTS)
+  active              Boolean     @default(true)
+  // Valor estimado de mercado por milheiro (centavos). Não é custo de aquisição.
+  marketValueCpmCents Int         @default(0)
+  color               String      @default("#3b82f6") // cor de identificação na interface
+  logoUpdatedAt       DateTime? // versão da imagem (cache); os bytes ficam em ProgramLogo
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  accounts         Account[]
+  logo             ProgramLogo?
+  offers           StoreOffer[]
+  alerts           Alert[]
+  supplierAccounts SupplierAccount[]
+  promotionsFrom   Promotion[]       @relation("PromoFrom")
+  promotionsTo     Promotion[]       @relation("PromoTo")
+  parityDays ParityDay[]
+}
+
+// Titular: pessoa dona de contas nos programas
+model Holder {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  isSelf       Boolean   @default(false) // "Minhas contas": o titular que é o próprio usuário
+  active       Boolean   @default(true) // desativado some dos seletores, mas mantém o histórico
+  birthDate    DateTime?
+  documents    Json? // [{ type: CPF|CNPJ|RG|PASSAPORTE, number }]
+  address      String?
+  addressParts Json? // { cep, logradouro, numero, complemento, bairro, cidade, uf }
+  accessEmail  String? // e-mail autorizado a ver a página do titular
+  attributes   Json? // [{ key, value }] (informações extras)
+  notes        String?
+  createdAt    DateTime  @default(now())
+
+  accounts    Account[]
+  attachments HolderAttachment[]
+  accessLinks HolderAccess[]
+
+  @@unique([userId, name])
+}
+
+// Carteira: um titular em um programa
+model Account {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holderId      String
+  holder        Holder   @relation(fields: [holderId], references: [id], onDelete: Cascade)
+  programId     String
+  program       Program  @relation(fields: [programId], references: [id])
+  // Campos derivados do extrato (recalculados por replay)
+  balance       Int      @default(0)
+  costCents     Int      @default(0) // custo do saldo atual
+  investedCents Int      @default(0) // total investido em créditos com custo
+  nickname      String? // nome da conta (em branco: programa + titular)
+  pinned        Boolean  @default(false) // fixada na barra lateral
+  archived      Boolean  @default(false)
+  tags          String[] @default([])
+  cpfAvailable  Int? // CPFs (passageiros) que ainda podem ser emitidos
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  entries        Entry[]
+  sales          Sale[]
+  alerts         Alert[]
+  cards          CreditCard[]
+  recurrences    Recurrence[]
+  bonusPurchases BonusPurchase[]
+  credential     AccountCredential?
+
+  @@unique([holderId, programId])
+  @@index([userId])
+}
+
+model Entry {
+  id                String      @id @default(cuid())
+  userId            String
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId         String
+  account           Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type              EntryType
+  status            EntryStatus @default(CONFIRMED)
+  points            Int // positivo = crédito, negativo = débito
+  inputCostCents    Int         @default(0) // custo informado pelo usuário (créditos com custo)
+  costCents         Int         @default(0) // custo efetivo calculado pelo replay
+  occurredAt        DateTime
+  description       String
+  reference         String?
+  groupId           String? // agrupa as pernas de uma transferência ou venda
+  storeId           String? // loja parceira (compra em parceiro)
+  details           Json? // detalhes do resgate: referência em dinheiro, passageiros, reserva, trecho, datas
+  priorityPoints    Int? // transferência: pontos comprados no carrinho que saem primeiro
+  priorityCostCents Int? // custo desses pontos comprados
+  idempotencyKey    String?
+  ignored           Boolean     @default(false) // fora dos relatórios (continua no saldo)
+  createdAt         DateTime    @default(now())
+
+  saleItem      SaleItem?
+  invoice       CardInvoice?
+  bonusPurchase BonusPurchase?
+  costs         EntryCost[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, occurredAt])
+  @@index([accountId, occurredAt])
+  @@index([groupId])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  contact   String?
+  kind      String   @default("FINAL") // FINAL (cliente final) | AGENCY (agência)
+  docType   String? // CPF | CNPJ
+  docNumber String?
+  email     String?
+  phone     String?
+  documents Json? // documentos adicionais: [{ type, number }]
+  createdAt DateTime @default(now())
+
+  sales     Sale[]
+  saleItems SaleItem[] @relation("SaleItemCustomers")
+  orders    TravelOrder[]
+
+  @@index([userId])
+}
+
+// Venda de emissão (como na referência): origem dos pontos, itens, anexos.
+// Custo dos pontos próprios vem do lançamento "Venda" de cada item (custo médio no momento);
+// pontos de fornecedor custam o preço combinado da conta do fornecedor.
+model Sale {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  origin            String           @default("OWN") // OWN (meus pontos) | SUPPLIER (fornecedor)
+  accountId         String?
+  account           Account?         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  supplierAccountId String?
+  supplierAccount   SupplierAccount? @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
+  customerId        String? // primeiro cliente (para listas)
+  customer          Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  groupId           String?          @unique // agrupa os lançamentos "Venda" dos itens
+  points            Int // soma dos pontos dos itens
+  totalCents        Int // total da venda: valor dos itens + custos repassados ao cliente
+  occurredAt        DateTime
+  createdAt         DateTime         @default(now())
+
+  items       SaleItem[]
+  attachments SaleAttachment[]
+
+  @@index([userId, occurredAt])
+}
+
+model SaleItem {
+  id               String     @id @default(cuid())
+  saleId           String
+  sale             Sale       @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  kind             String // FLIGHT | BAGGAGE | SEAT | HOTEL | CAR | OTHER
+  issuedWith       String     @default("POINTS") // POINTS | CASH
+  points           Int        @default(0)
+  salePriceCents   Int // valor cobrado pelos pontos (ou pela emissão em dinheiro)
+  cashCostCents    Int        @default(0) // emitido com dinheiro: quanto foi pago
+  supplierCpmCents Int? // fornecedor: preço por milheiro no momento da venda
+  costs            Json? // custos repassados: [{ type, amountCents, cardId }]
+  clientType       String     @default("FINAL") // FINAL | AGENCY
+  customers        Customer[] @relation("SaleItemCustomers")
+  passengers       Int?
+  reservation      String?
+  origin           String?
+  destination      String?
+  departureDate    DateTime?
+  returnDate       DateTime?
+  description      String?
+  observation      String?
+  entryId          String?    @unique
+  entry            Entry?     @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  position         Int        @default(0)
+
+  @@index([saleId])
+}
+
+// Anexo da venda (comprovantes, contratos, cartões de embarque): até 10 arquivos, 10 MB no total
+model SaleAttachment {
+  id        String   @id @default(cuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([saleId])
+}
+
+model Store {
+  id             String          @id @default(cuid())
+  name           String          @unique
+  active         Boolean         @default(true)
+  offers         StoreOffer[]
+  parityDays     ParityDay[]
+  favorites      FavoriteStore[]
+  alerts         Alert[]
+  bonusPurchases BonusPurchase[]
+}
+
+model StoreOffer {
+  id            String   @id @default(cuid())
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  programId     String?
+  program       Program? @relation(fields: [programId], references: [id], onDelete: Cascade)
+  pointsPerReal Int      @default(0) // x100 (1,5 pts/R$ = 150)
+  cashbackBps   Int      @default(0) // pontos-base (1,5% = 150)
+  portal        String? // nome do portal de cashback
+  source        String? // importada de uma fonte (ex.: "esfera", "csv"); null = cadastro manual
+  upTo          Boolean  @default(false) // "até N pontos": o valor é o máximo
+  perDollar     Boolean  @default(false) // pontos por dólar gasto, não por real
+  clubPointsPerReal    Int? // x100, para assinantes do clube do programa
+  regularPointsPerReal Int? // x100, valor fora da promoção ("Era N")
+  promotion            Boolean   @default(false)
+  promoEndsAt          DateTime?
+  partnerLink          String? // página do parceiro no site do programa
+  observedAt           DateTime? // última leitura na fonte
+  updatedAt     DateTime @updatedAt
+
+  @@index([storeId])
+}
+
+model FavoriteStore {
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([userId, storeId])
+}
+
+model Alert {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            AlertType
+  storeId         String?
+  store           Store?    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  programId       String?
+  program         Program?  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  accountId       String?
+  account         Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  threshold       Int // STORE_POINTS: pts/R$ x100; MIN_BALANCE: pontos
+  active          Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model UserPreference {
+  userId          String    @id
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showValues      Boolean   @default(true)
+  checklistHidden Boolean   @default(false)
+  dashboardView   String    @default("gestao")
+  newsReadAt      DateTime?
+  soundEffects       Boolean @default(true)
+  usageAnalytics     Boolean @default(true)
+  hideVideoTutorials Boolean @default(false)
+  valuesMode         String  @default("VISIBLE")
+  notifications      Json    @default("{}")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  targetType String
+  targetId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// Fornecedores: pessoas/empresas de quem você compra milhas ou cujas contas você administra.
+// Nunca guardamos senhas de programas aqui.
+model Supplier {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  contact   String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  accounts SupplierAccount[]
+
+  @@index([userId])
+}
+
+model SupplierAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplierId    String
+  supplier      Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  programId     String
+  program       Program  @relation(fields: [programId], references: [id])
+  identifier    String? // ex.: número de fidelidade ou apelido (não é senha)
+  balance       Int      @default(0)
+  priceCpmCents Int      @default(0) // preço combinado por milheiro
+  cpfAvailable  Int? // CPFs (passageiros) que ainda podem ser emitidos nessa conta
+  tags          String[] @default([])
+  notes         String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  sales         Sale[]
+
+  @@index([userId])
+}
+
+model CreditCard {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId       String // conta (titular × programa) que recebe os pontos
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name            String
+  brand           String? // Visa, Mastercard…
+  pointsPerDollar Int // x100 (2,2 pts/US$ = 220)
+  dollarRateCents Int      @default(550) // cotação usada no cálculo (R$ por US$)
+  closingDay      Int // dia do fechamento
+  dueDay          Int // dia do vencimento
+  annualFeeCents  Int      @default(0)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  invoices   CardInvoice[]
+  entryCosts EntryCost[]
+
+  @@index([userId])
+}
+
+model CardInvoice {
+  id             String        @id @default(cuid())
+  cardId         String
+  card           CreditCard    @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  closingDate    DateTime
+  dueDate        DateTime
+  amountCents    Int
+  expectedPoints Int
+  status         InvoiceStatus @default(OPEN)
+  entryId        String?       @unique // lançamento "a receber" criado ao fechar a fatura
+  entry          Entry?        @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  createdAt      DateTime      @default(now())
+
+  @@unique([cardId, dueDate])
+}
+
+model Promotion {
+  id            String        @id @default(cuid())
+  kind          PromotionKind
+  title         String
+  description   String?
+  fromProgramId String?
+  fromProgram   Program?      @relation("PromoFrom", fields: [fromProgramId], references: [id], onDelete: SetNull)
+  toProgramId   String?
+  toProgram     Program?      @relation("PromoTo", fields: [toProgramId], references: [id], onDelete: SetNull)
+  bonusPercent  Int           @default(0)
+  url           String?
+  startsAt      DateTime
+  endsAt        DateTime
+  active        Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+
+  @@index([endsAt])
+}
+
+model Guide {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  kind      GuideKind
+  title     String
+  summary   String
+  body      String // texto simples; linhas em branco separam parágrafos, "## " vira subtítulo
+  level     GuideLevel @default(BEGINNER)
+  minutes   Int        @default(5)
+  tags      String[]
+  videoUrl  String?
+  order     Int        @default(0)
+  published Boolean    @default(true)
+  updatedAt DateTime   @updatedAt
+}
+
+model NewsPost {
+  id          String   @id @default(cuid())
+  title       String
+  body        String
+  publishedAt DateTime @default(now())
+  published   Boolean  @default(true)
+
+  @@index([publishedAt])
+}
+
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+// Lançamento recorrente (ex.: assinatura de clube): gera um crédito a cada vencimento
+model Recurrence {
+  id           String              @id @default(cuid())
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String
+  account      Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type         EntryType           @default(CLUB)
+  description  String
+  points       Int
+  costCents    Int                 @default(0)
+  frequency    RecurrenceFrequency @default(MONTHLY)
+  interval     Int                 @default(1) // a cada N períodos
+  dayOfMonth   Int? // mensal: dia fixo (vazio = dia da primeira data)
+  endDate      DateTime?
+  skipWeekends Boolean             @default(false)
+  nextDate     DateTime
+  notify       Boolean             @default(true)
+  active       Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+
+  @@index([userId, nextDate])
+}
+
+enum BonusPurchaseStatus {
+  PENDING // aguardando entrega
+  DELIVERED // entregue, aguardando pontos
+  RECEIVED
+  CANCELED
+}
+
+// Compra bonificada em loja parceira: fica pendente até os pontos caírem
+model BonusPurchase {
+  id                 String              @id @default(cuid())
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId          String
+  account            Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  storeId            String?
+  store              Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  storeName          String
+  purchasedAt        DateTime
+  amountCents        Int
+  extraCostCents     Int                 @default(0) // custo atribuído aos pontos (frete, ágio)
+  costs              Json? // custos detalhados: [{ type, amountCents }] (soma = extraCostCents)
+  description        String?
+  tags               String[]            @default([])
+  expectedDeliveryAt DateTime? // entrega prevista
+  deliveredAt        DateTime?
+  pointsPerReal      Int // x100
+  expectedPoints     Int
+  expectedAt         DateTime?
+  status             BonusPurchaseStatus @default(PENDING)
+  entryId            String?             @unique
+  entry              Entry?              @relation(fields: [entryId], references: [id], onDelete: SetNull)
+  notes              String?
+  createdAt          DateTime            @default(now())
+
+  attachments PurchaseAttachment[]
+
+  @@index([userId, status])
+}
+
+// Login e senha da conta no programa, criptografados (AES-256-GCM com CREDENTIALS_KEY)
+model AccountCredential {
+  id        String   @id @default(cuid())
+  accountId String   @unique
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  loginEnc  String
+  secretEnc String
+  notesEnc  String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+// Itens de custo de um lançamento (Custos: tipo | valor | cartão).
+// Em créditos, a soma vira o custo dos pontos; em resgates, é o gasto em dinheiro do resgate.
+model EntryCost {
+  id          String      @id @default(cuid())
+  entryId     String
+  entry       Entry       @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  type        String // PONTOS, IOF, OUTROS, FRETE, MARKUP, MENSALIDADE, ANUIDADE, TAXA_EMBARQUE, COMPLETAR_PONTOS
+  amountCents Int
+  cardId      String?
+  card        CreditCard? @relation(fields: [cardId], references: [id], onDelete: SetNull)
+
+  @@index([entryId])
+}
+
+// Imagem do programa, separada para não vir junto em toda consulta de Program
+model ProgramLogo {
+  programId String  @id
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  data      Bytes
+  mime      String
+}
+
+// Simulação salva ("Recentes" dos simuladores): tipo, título e os valores informados
+model Simulation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String // bonificada, store-comparison, pontos, transfer, flight, hotel, sale, supplier-ranking
+  title     String
+  input     Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Anexo do titular (contratos, comprovantes): PNG, JPEG, WEBP, HEIC ou PDF, até 10 MB, no máximo 10
+model HolderAttachment {
+  id        String   @id @default(cuid())
+  holderId  String
+  holder    Holder   @relation(fields: [holderId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([holderId])
+}
+
+// Evidências da compra (prints, recibos, vídeos): até 10 arquivos, 10 MB no total
+model PurchaseAttachment {
+  id         String        @id @default(cuid())
+  purchaseId String
+  purchase   BonusPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  userId     String
+  name       String
+  mime       String
+  size       Int
+  data       Bytes
+  createdAt  DateTime      @default(now())
+
+  @@index([purchaseId])
+}
+
+// Página do titular: link de uso único enviado ao e-mail autorizado, trocado por uma sessão só de leitura
+model HolderAccess {
+  id               String    @id @default(cuid())
+  holderId         String
+  holder           Holder    @relation(fields: [holderId], references: [id], onDelete: Cascade)
+  email            String
+  tokenHash        String    @unique
+  expiresAt        DateTime
+  usedAt           DateTime?
+  sessionHash      String?   @unique
+  sessionExpiresAt DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([holderId, createdAt])
+}
+
+// Assinatura paga no Mercado Pago (preapproval). O plano do usuário só muda pelo webhook,
+// depois de consultar a assinatura na API do Mercado Pago com o token do servidor.
+model Subscription {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String    @default("MERCADOPAGO")
+  externalId  String?   @unique // id do preapproval
+  plan        Plan
+  interval    String // MENSAL | ANUAL
+  amountCents Int
+  status      String    @default("PENDING") // PENDING | AUTHORIZED | PAUSED | CANCELLED
+  checkoutUrl String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+// Histórico diário da paridade de cada loja em cada programa (como a referência): o último valor
+// lido no dia e o máximo do dia. Fica mesmo que a oferta saia do catálogo.
+model ParityDay {
+  id                String   @id @default(cuid())
+  storeId           String
+  store             Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  programId         String
+  program           Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  source            String
+  day               DateTime @db.Date
+  pointsPerReal     Int // x100
+  maxPointsPerReal  Int // x100
+  clubPointsPerReal Int?
+  perDollar         Boolean  @default(false)
+  observedAt        DateTime
+  maxObservedAt     DateTime
+
+  @@unique([storeId, programId, source, day])
+  @@index([programId, day])
+}
+
+// CRM de pedidos de emissão (como o Quero Milhas): Kanban por etapa, captação pela página pública.
+enum OrderStage {
+  NEW // Novos pedidos
+  QUOTING // Pesquisa e cotação
+  QUOTE_SENT // Cotação enviada
+  NEGOTIATION // Negociação e emissão
+  ISSUED // Emitido
+  TRAVELING // Viagem em curso
+  DONE // Viagem concluída
+}
+
+model TravelOrder {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  number        Int // sequencial por usuário (Pedido 1, 2, ...)
+  customerId    String?
+  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName  String
+  customerPhone String?
+  customerEmail String?
+  stage         OrderStage @default(NEW)
+  position      Int        @default(0) // ordem dentro da coluna
+  tripType      String     @default("ONE_WAY") // ONE_WAY | ROUND_TRIP | MULTI
+  cabin         String     @default("ECONOMY") // ECONOMY | PREMIUM | BUSINESS | FIRST
+  segments      Json // [{ origin, destination, date }]
+  adults        Int        @default(1)
+  children      Int        @default(0)
+  infants       Int        @default(0)
+  flexibleDates Boolean    @default(false)
+  checkedBag    Boolean    @default(false)
+  priority      String     @default("MEDIUM") // LOW | MEDIUM | HIGH
+  budgetCents   Int?
+  notes         String?
+  source        String     @default("MANUAL") // MANUAL | PUBLIC
+  archivedAt    DateTime?
+  archiveReason String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  attachments OrderAttachment[]
+  events      OrderEvent[]
+  quotes      FlightQuote[]
+
+  @@unique([userId, number])
+  @@index([userId, stage])
+}
+
+model OrderAttachment {
+  id              String      @id @default(cuid())
+  orderId         String
+  order           TravelOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name            String
+  mime            String
+  size            Int
+  data            Bytes
+  visibleToClient Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+}
+
+model OrderEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     TravelOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      String // created | stage | archived | unarchived | quote | note
+  fromStage String?
+  toStage   String?
+  note      String?
+  createdAt DateTime    @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// Cotação anotada pelo usuário (comparador do buscador). Base do futuro tradutor de milhas.
+model FlightQuote {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId     String?
+  order       TravelOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  program     String // chave do programa do buscador (smiles, latam, azul, ...)
+  origin      String
+  destination String
+  departDate  DateTime     @db.Date
+  returnDate  DateTime?    @db.Date
+  cabin       String       @default("ECONOMY")
+  adults      Int          @default(1)
+  miles       Int?
+  taxesCents  Int?
+  cashCents   Int?
+  notes       String?
+  createdAt   DateTime     @default(now())
+
+  @@index([userId, origin, destination])
+}
+
+model FlightSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  params    Json // { origin, destination, departDate, returnDate, adults, children, infants, cabin }
+  programs  String[]
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Interessado em gestão de milhas, vindo da Central de Atendimento (página pública).
+model MilesLead {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  phone     String?
+  email     String?
+  message   String?
+  status    String   @default("NEW") // NEW | CONTACTED | CLIENT | DISCARDED
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}

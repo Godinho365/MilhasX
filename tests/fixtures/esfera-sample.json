@@ -1,0 +1,69 @@
+{
+ "totalResults": 8,
+ "items": [
+  {
+   "displayName": "C&A",
+   "active": true,
+   "esf_accumulationPrefix": "até",
+   "esf_accumulationValue": "6",
+   "esf_accumulationFactorValue": "1",
+   "esf_accumulationFactorDescription": "Real em Compra"
+  },
+  {
+   "displayName": "Nike",
+   "active": true,
+   "esf_accumulationPrefix": "Até",
+   "esf_accumulationValue": "1",
+   "esf_accumulationFactorValue": "1",
+   "esf_accumulationFactorDescription": "Real em compra"
+  },
+  {
+   "displayName": "Concha Y Toro",
+   "active": true,
+   "esf_accumulationPrefix": "Até",
+   "esf_accumulationValue": "16",
+   "esf_accumulationFactorValue": "1",
+   "esf_accumulationFactorDescription": "Real em compra"
+  },
+  {
+   "displayName": "Booking.com",
+   "active": true,
+   "esf_accumulationPrefix": null,
+   "esf_accumulationValue": "4",
+   "esf_accumulationFactorValue": "1",
+   "esf_accumulationFactorDescription": "dólar em compra"
+  },
+  {
+   "displayName": "Brastemp",
+   "active": true,
+   "esf_accumulationPrefix": "Até",
+   "esf_accumulationValue": "1",
+   "esf_accumulationFactorValue": "2",
+   "esf_accumulationFactorDescription": "Reais em compras"
+  },
+  {
+   "displayName": "Azul",
+   "active": true,
+   "esf_accumulationPrefix": null,
+   "esf_accumulationValue": "1",
+   "esf_accumulationFactorValue": "4",
+   "esf_accumulationFactorDescription": "Reais em compras"
+  },
+  {
+   "displayName": "Sem Pontuação",
+   "active": true,
+   "esf_accumulationPrefix": null,
+   "esf_accumulationValue": null,
+   "esf_accumulationFactorValue": "1",
+   "esf_accumulationFactorDescription": "Real em compra"
+  },
+  {
+   "displayName": "Assinatura Exemplo",
+   "active": true,
+   "esf_accumulationPrefix": "até",
+   "esf_accumulationValue": "15000",
+   "esf_accumulationFactorValue": null,
+   "esf_accumulationFactorDescription": "por assinatura"
+  }
+ ]
+}

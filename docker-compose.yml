@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: milheiro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-milheiro_dev}
+      POSTGRES_DB: milheiro
+    ports:
+      - "5444:5432"
+    volumes:
+      - milheiro_pg:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U milheiro"]
+      interval: 5s
+      retries: 10
+volumes:
+  milheiro_pg:

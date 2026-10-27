@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.env
+coverage/
+backups/
+*.tsbuildinfo
+next-env.d.ts
+.outbox/
+
+e2e/.results/
+e2e/screenshots/
+playwright-report/
+.next-e2e/
+e2e/.results-run*.txt
