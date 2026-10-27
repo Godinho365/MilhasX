@@ -9,7 +9,7 @@ import { fmtBRL, fmtDate, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { TripFields, emptyTrip, tripSegments, type Trip } from "@/components/trip-fields";
-import { ORDER_STAGES, STAGE_LABELS, TRIP_LABELS, PRIORITY_LABELS, ARCHIVE_REASONS, WHATSAPP_TEMPLATES, whatsappText, whatsappLink, type OrderStageKey } from "@/domain/orders";
+import { ORDER_STAGES, STAGE_LABELS, TRIP_LABELS, PRIORITY_LABELS, ARCHIVE_REASONS, WHATSAPP_TEMPLATES, whatsappText, whatsappLink, orderSummary, type OrderStageKey } from "@/domain/orders";
 import { CABIN_LABELS } from "@/domain/flight-search";
 import type { OrderView } from "@/server/services/orders";
 import { ClientPages } from "./client-pages";
@@ -223,6 +223,7 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
   const [o, setO] = useState<Detail | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [share, setShare] = useState<{ slug: string | null; token: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState<string>(ARCHIVE_REASONS[0]);
   const [archiving, setArchiving] = useState(false);
@@ -231,6 +232,8 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
     if (a.ok) setO(a.data.item);
     if (f.ok) setFiles(f.data.items);
     if (q.ok) setQuotes(q.data.items);
+    const s = await api<{ token: string; slug: string | null }>(`/api/orders/${id}/share`, "POST");
+    if (s.ok) setShare(s.data);
   };
   useEffect(() => {
     load();
@@ -348,7 +351,8 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
             <h3 className="kicker mb-2">Ações recomendadas</h3>
             <div className="flex flex-wrap gap-2">
               {WHATSAPP_TEMPLATES.map((t) => {
-                const link = whatsappLink(o.customerPhone, whatsappText(t.text, { customerName: o.customerName, route: o.route }));
+                const page = t.page && share?.slug ? `${window.location.origin}/p/${share.slug}/${t.page}/${share.token}` : null;
+                const link = whatsappLink(o.customerPhone, whatsappText(t.text, { customerName: o.customerName, route: o.route, summary: orderSummary(o), link: page }));
                 return link
                   ? <a key={t.key} href={link} target="_blank" rel="noopener noreferrer" className="btn-ghost h-9"><MessageCircle className="h-4 w-4 text-green-400" />{t.label}</a>
                   : <span key={t.key} className="btn-ghost h-9 opacity-50" title="Cadastre o WhatsApp do cliente">{t.label}</span>;

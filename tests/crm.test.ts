@@ -12,7 +12,7 @@ import * as publicOrder from "@/app/api/public/orders/[slug]/route";
 import * as salesProfile from "@/app/api/sales-profile/route";
 import { ordersDashboard } from "@/server/services/orders";
 import { PROGRAM_BY_KEY, SEARCH_PROGRAMS, validateSearch } from "@/domain/flight-search";
-import { whatsappLink, whatsappText, routeLabel } from "@/domain/orders";
+import { whatsappLink, whatsappText, routeLabel, orderSummary, WHATSAPP_TEMPLATES } from "@/domain/orders";
 import { prisma } from "@/server/db";
 
 let c: Client;
@@ -121,6 +121,21 @@ describe("buscador", () => {
     expect(whatsappLink("(21) 99999-0000", whatsappText("Olá, {nome}! {rota}", { customerName: "Ana Souza", route: "BSB → GIG" }))).toBe("https://wa.me/5521999990000?text=Ol%C3%A1%2C%20Ana!%20BSB%20%E2%86%92%20GIG");
     expect(whatsappLink("", "x")).toBeNull();
     expect(routeLabel([{ origin: "GRU", destination: "MIA", date: null }, { origin: "MIA", destination: "JFK", date: null }], "MULTI")).toBe("GRU → MIA → JFK");
+  });
+
+  it("mensagem de cotação leva o que o cliente pediu e o link da página", () => {
+    const pedido = orderSummary({ segments: [{ origin: "GRU", destination: "LIS", date: "2027-03-10" }, { origin: "LIS", destination: "GRU", date: "2027-03-20" }], tripType: "ROUND_TRIP", adults: 2, children: 1, infants: 0, cabin: "BUSINESS", flexibleDates: true, checkedBag: true });
+    expect(pedido).toBe("✈️ GRU → LIS · ida 10/03/2027 · volta 20/03/2027\n👥 2 adultos, 1 criança · Executiva\n📝 datas flexíveis · com bagagem despachada");
+    const tpl = WHATSAPP_TEMPLATES.find((t) => t.key === "cotacao")!.text;
+    const com = whatsappText(tpl, { customerName: "Maria Souza", route: "GRU ⇄ LIS", summary: pedido, link: "https://x.test/p/ana/cotacao/abc" });
+    expect(com).toContain("Olá, Maria!");
+    expect(com).toContain(pedido);
+    expect(com).toContain("Voos, valores e condições aqui: https://x.test/p/ana/cotacao/abc");
+    expect(com).toContain("4 últimos dígitos");
+    const sem = whatsappText(tpl, { customerName: "Maria Souza", route: "GRU ⇄ LIS", summary: pedido, link: null });
+    expect(sem).not.toContain("{link}");
+    expect(sem).not.toContain("4 últimos dígitos");
+    expect(sem).toContain(pedido);
   });
 });
 
