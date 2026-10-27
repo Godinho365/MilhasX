@@ -183,6 +183,10 @@ export function Shell(props: {
   // Atalhos de contas seguem o titular escolhido no seletor (todos, minhas contas ou um titular)
   const chosenHolder = props.holderId === "self" ? props.holders.find((h) => h.isSelf)?.id : props.holderId || undefined;
   const visibleAccounts = chosenHolder ? props.accounts.filter((a) => a.holderId === chosenHolder) : props.accounts;
+  // Novo lançamento: na página de uma conta, só as contas do mesmo titular (já com a conta escolhida);
+  // fora dela, as do titular escolhido no seletor
+  const pageAccount = path.startsWith("/app/programs/") ? props.accounts.find((a) => a.id === path.split("/")[3]) : undefined;
+  const formAccounts = pageAccount ? props.accounts.filter((a) => a.holderId === pageAccount.holderId) : visibleAccounts.length ? visibleAccounts : props.accounts;
   // Fixadas primeiro ("Fixar na barra lateral"); sem fixadas, as de maior saldo
   const pinnedAccounts = visibleAccounts.filter((a) => a.pinned);
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
@@ -323,7 +327,7 @@ export function Shell(props: {
           {(props.unreadNews > 0 || props.unread > 0) && <span className="absolute right-[30%] top-2 h-2 w-2 rounded-full bg-red-500" aria-hidden />}
         </button>
       </nav>
-      <EntryForms accounts={props.accounts} cards={props.cards} stores={props.stores} fab={fab} />
+      <EntryForms accounts={formAccounts} defaultAccountId={pageAccount?.id} cards={props.cards} stores={props.stores} fab={fab} />
     </div>
   );
 }

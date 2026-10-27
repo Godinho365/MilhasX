@@ -44,7 +44,9 @@ async function confirmDiscard(dirty: boolean) {
 /** Botão flutuante de outra ação da página (ex.: "Novo titular", "Simular"), no lugar do "Novo lançamento". */
 export type PageFab = { label: string; event: string; icon: React.ReactNode };
 
-export function EntryForms({ accounts, cards = [], stores = [], fab }: { accounts: AccountOpt[]; cards?: CardOpt[]; stores?: StoreOpt[]; fab?: PageFab | null }) {
+export function EntryForms({ accounts, defaultAccountId, cards = [], stores = [], fab }: { accounts: AccountOpt[]; defaultAccountId?: string; cards?: CardOpt[]; stores?: StoreOpt[]; fab?: PageFab | null }) {
+  // Conta já escolhida: a da página da conta ou, se o titular só tem uma, essa
+  const preset = defaultAccountId ?? (accounts.length === 1 ? accounts[0]!.id : undefined);
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<FormKind | null>(null);
   const [prefill, setPrefill] = useState<Prefill | undefined>();
@@ -117,9 +119,9 @@ export function EntryForms({ accounts, cards = [], stores = [], fab }: { account
         </button>
         )}
       </div>
-      {form === "credit" && <CreditForm accounts={accounts} cards={cards} stores={stores} onClose={close} prefill={prefill} />}
-      {form === "debit" && <DebitForm accounts={accounts} cards={cards} onClose={close} prefill={prefill} />}
-      {form === "transfer" && <TransferForm accounts={accounts} onClose={close} />}
+      {form === "credit" && <CreditForm accounts={accounts} cards={cards} stores={stores} onClose={close} prefill={prefill} preset={preset} />}
+      {form === "debit" && <DebitForm accounts={accounts} cards={cards} onClose={close} prefill={prefill} preset={preset} />}
+      {form === "transfer" && <TransferForm accounts={accounts} onClose={close} preset={preset} />}
       {form === "batch" && <BatchForm accounts={accounts} onClose={close} />}
     </>
   );
@@ -130,14 +132,14 @@ export function EntryForms({ accounts, cards = [], stores = [], fab }: { account
 type Recent = { accountId: string; type: EntryType; points: number; costCents: number; description: string; account: string };
 const FREQS = [["MONTHLY", "Mensal"], ["WEEKLY", "Semanal"], ["DAILY", "Diário"], ["YEARLY", "Anual"]] as const;
 
-function CreditForm({ accounts, cards, stores, onClose, prefill }: { accounts: AccountOpt[]; cards: CardOpt[]; stores: StoreOpt[]; onClose: () => void; prefill?: Prefill }) {
+function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { accounts: AccountOpt[]; cards: CardOpt[]; stores: StoreOpt[]; onClose: () => void; prefill?: Prefill; preset?: string }) {
   const router = useRouter();
   const [key] = useState(newKey);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState("");
   const [dirty, setDirty] = useState(false);
   const [recent, setRecent] = useState<Recent[]>([]);
-  const [f, setF] = useState({ accountId: prefill?.accountId ?? "", type: (prefill?.type ?? "") as EntryType | "", storeId: "", points: prefill ? fmtPts(prefill.points) : "", date: today(), description: prefill?.description ?? "" });
+  const [f, setF] = useState({ accountId: prefill?.accountId ?? preset ?? "", type: (prefill?.type ?? "") as EntryType | "", storeId: "", points: prefill ? fmtPts(prefill.points) : "", date: today(), description: prefill?.description ?? "" });
   const [costsOpen, setCostsOpen] = useState(!!prefill?.costs.length);
   const [costs, setCosts] = useState<CostRow[]>(() => toCostRows(prefill));
   const [repeat, setRepeat] = useState(false);
@@ -330,13 +332,13 @@ function AirportInput({ label, value, onChange }: { label: string; value: string
   );
 }
 
-function DebitForm({ accounts, cards, onClose, prefill }: { accounts: AccountOpt[]; cards: CardOpt[]; onClose: () => void; prefill?: Prefill }) {
+function DebitForm({ accounts, cards, onClose, prefill, preset }: { accounts: AccountOpt[]; cards: CardOpt[]; onClose: () => void; prefill?: Prefill; preset?: string }) {
   const router = useRouter();
   const [key] = useState(newKey);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [f, setF] = useState({ accountId: prefill?.accountId ?? "", type: (prefill?.type ?? "") as EntryType | "", points: prefill ? fmtPts(prefill.points) : "", date: today() });
+  const [f, setF] = useState({ accountId: prefill?.accountId ?? preset ?? "", type: (prefill?.type ?? "") as EntryType | "", points: prefill ? fmtPts(prefill.points) : "", date: today() });
   const [costsOpen, setCostsOpen] = useState(!!prefill?.costs.length);
   const [infoOpen, setInfoOpen] = useState(false);
   const [costs, setCosts] = useState<CostRow[]>(() => toCostRows(prefill));
@@ -454,13 +456,13 @@ function DebitForm({ accounts, cards, onClose, prefill }: { accounts: AccountOpt
 
 /* ============================== Transferência ============================== */
 
-function TransferForm({ accounts, onClose }: { accounts: AccountOpt[]; onClose: () => void }) {
+function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; onClose: () => void; preset?: string }) {
   const router = useRouter();
   const [key] = useState(newKey);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [f, setF] = useState({ from: "", to: "", points: "", bonus: "", date: today(), description: "" });
+  const [f, setF] = useState({ from: preset ?? "", to: "", points: "", bonus: "", date: today(), description: "" });
   const [adv, setAdv] = useState({ open: false, parityFrom: "1", parityTo: "1", fee: "", cart: false, cartPoints: "", cartPrice: "", applyAll: false, delivery: false, deliveryDate: "" });
   const update = (patch: Partial<typeof f>) => { setF({ ...f, ...patch }); setDirty(true); };
   const ua = (patch: Partial<typeof adv>) => { setAdv({ ...adv, ...patch }); setDirty(true); };
