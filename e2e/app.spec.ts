@@ -1036,6 +1036,7 @@ const PAGES = [
 ];
 
 test("responsivo: celular sem rolagem lateral, extrato em lista, botão redondo", async () => {
+  test.setTimeout(180_000); // percorre todas as páginas em mais de um tamanho de tela
   await page.setViewportSize({ width: 375, height: 812 });
   for (const p of PAGES) {
     await page.goto(p);
@@ -1066,6 +1067,7 @@ test("responsivo: celular sem rolagem lateral, extrato em lista, botão redondo"
 });
 
 test("responsivo: tablet e desktop", async () => {
+  test.setTimeout(180_000); // percorre todas as páginas em mais de um tamanho de tela
   for (const [w, h, tag] of [[768, 1024, "tablet"], [1280, 800, "desktop"]] as const) {
     await page.setViewportSize({ width: w, height: h });
     for (const p of PAGES) {
