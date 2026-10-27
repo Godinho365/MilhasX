@@ -124,4 +124,23 @@ describe("débitos e consistência", () => {
     expect(replayLedger([e({ accountId: "A", type: "CARD", points: -5 })]).ok).toBe(false);
     expect(replayLedger([e({ accountId: "A", type: "SALE", points: 5 })]).ok).toBe(false);
   });
+
+  // Caso real: compra e transferência no dia 27, mas a entrada no destino ficou com data 26.
+  // A entrada era processada antes da saída e chegava sem custo ("Orgânico").
+  it("transferência leva o custo mesmo com a entrada datada antes da saída", () => {
+    const groupId = "g1";
+    const at = new Date(1_700_000_100_000);
+    const r = replayLedger([
+      e({ accountId: "LIV", type: "OTHER_CREDIT", points: 5500, occurredAt: d(24) }),
+      e({ accountId: "LIV", type: "PURCHASE", points: 45000, inputCostCents: 139050, occurredAt: d(27) }),
+      e({ accountId: "LIV", type: "TRANSFER_OUT", points: -50000, occurredAt: d(27), createdAt: at, groupId }),
+      e({ accountId: "LAT", type: "TRANSFER_IN", points: 50000, occurredAt: d(26), createdAt: at, groupId }),
+      e({ accountId: "LAT", type: "TRANSFER_BONUS", points: 12500, occurredAt: d(26), createdAt: at, groupId }),
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const out = Math.round((139050 * 50000) / 50500);
+    expect(r.accounts.get("LAT")).toMatchObject({ balance: 62500, costCents: out });
+    expect(r.accounts.get("LIV")).toMatchObject({ balance: 500, costCents: 139050 - out });
+  });
 });

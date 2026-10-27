@@ -207,6 +207,7 @@ export async function createTransfer(userId: string, input: TransferInput) {
   if ((input.feeCents ?? 0) < 0) throw new DomainError(400, "Taxas inválidas");
   const amounts = transferAmounts(input.points, input.bonusPercent, pf, pt);
   if (amounts.base <= 0) throw new DomainError(400, "Com essa paridade nenhum ponto chega ao destino");
+  if (input.deliveryDate && input.deliveryDate < input.occurredAt) throw new DomainError(400, "A data de entrega no destino não pode ser anterior à data da transferência");
   const pendingDelivery = !!input.deliveryDate && input.deliveryDate > new Date();
   const existing = await findByKey(userId, input.idempotencyKey);
   if (existing) return { groupId: existing.groupId!, duplicated: true };

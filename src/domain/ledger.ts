@@ -109,9 +109,17 @@ function legOrder(e: LedgerEntry) {
 }
 
 export function sortForReplay(entries: LedgerEntry[]): LedgerEntry[] {
+  // A entrada (e o bônus) de uma transferência leva o custo que sai da origem; por isso nunca pode
+  // ser processada antes da saída, mesmo que a data de entrega informada seja anterior à da transferência.
+  const debitAt = new Map<string, number>();
+  for (const e of entries) if (e.groupId && e.type === "TRANSFER_OUT") debitAt.set(e.groupId, e.occurredAt.getTime());
+  const at = (e: LedgerEntry) => {
+    const t = e.occurredAt.getTime();
+    return e.groupId && (e.type === "TRANSFER_IN" || e.type === "TRANSFER_BONUS") ? Math.max(t, debitAt.get(e.groupId) ?? t) : t;
+  };
   return [...entries].sort(
     (a, b) =>
-      a.occurredAt.getTime() - b.occurredAt.getTime() ||
+      at(a) - at(b) ||
       a.createdAt.getTime() - b.createdAt.getTime() ||
       (a.groupId ?? "").localeCompare(b.groupId ?? "") ||
       legOrder(a) - legOrder(b) ||

@@ -499,6 +499,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     if (adv.fee && parseBRLToCents(adv.fee) === null) return setErro("Taxa inválida");
     if (adv.cart && (cartPts <= 0 || parseBRLToCents(adv.cartPrice) === null)) return setErro("Informe a quantidade e o preço da compra de pontos");
     if (adv.delivery && !adv.deliveryDate) return setErro("Informe a data de entrega no destino");
+    if (adv.delivery && adv.deliveryDate < f.date) return setErro("A data de entrega no destino não pode ser anterior à data da transferência");
     setBusy(true);
     setErro("");
     const r = await api("/api/transfers", "POST", {
@@ -566,7 +567,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
             </div>
             <div className="space-y-3 rounded-xl bg-panel2/60 p-3">
               <Switch checked={adv.delivery} onChange={(v) => ua({ delivery: v })} label="Previsão de entrega diferente" hint="Defina quando os pontos chegarão no programa de destino" />
-              {adv.delivery && <Field label="Data de entrega no destino" required><input className="input" type="date" value={adv.deliveryDate} onChange={(e) => ua({ deliveryDate: e.target.value })} /></Field>}
+              {adv.delivery && <Field label="Data de entrega no destino" required><input className="input" type="date" value={adv.deliveryDate} min={f.date} onChange={(e) => ua({ deliveryDate: e.target.value })} /></Field>}
             </div>
           </div>
         </Collapsible>
