@@ -902,6 +902,11 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   await det.getByRole("navigation", { name: "Etapa do pedido" }).getByRole("button", { name: "Cotação enviada" }).click();
   await expect(det.getByRole("navigation", { name: "Etapa do pedido" }).getByRole("button", { name: "Cotação enviada" })).toHaveAttribute("aria-pressed", "true");
   await expect(det.getByRole("link", { name: "Enviar cotação" })).toHaveAttribute("href", /^https:\/\/wa\.me\/5521988881111\?text=/);
+  // a mensagem leva o que o cliente pediu e o link da página da cotação
+  const msg = decodeURIComponent((await det.getByRole("link", { name: "Enviar cotação" }).getAttribute("href"))!.split("?text=")[1]!);
+  expect(msg).toContain("BSB → GIG · ida 23/01/2027 · volta 30/01/2027");
+  expect(msg).toContain("2 adultos");
+  expect(msg).toMatch(/\/p\/e2e-\d+\/cotacao\/[\w-]+/);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("region", { name: "Cotação enviada" }).getByRole("listitem", { name: /Cliente CRM E2E/ })).toBeVisible();
 

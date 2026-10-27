@@ -10,6 +10,8 @@ import * as cards from "@/app/api/cards/route";
 import * as invoices from "@/app/api/cards/[id]/invoices/route";
 import * as invoiceClose from "@/app/api/invoices/[id]/close/route";
 import * as invoice from "@/app/api/invoices/[id]/route";
+import * as card from "@/app/api/cards/[id]/route";
+import { simulateMonth, invoiceFeeCents } from "@/domain/cards";
 import * as entry from "@/app/api/entries/[id]/route";
 import * as summary from "@/app/api/summary/route";
 import * as alerts from "@/app/api/alerts/route";
@@ -86,6 +88,35 @@ describe("cartões e faturas", () => {
 
     expect((await a.call(invoice.DELETE, "DELETE", "/x", undefined, { id: inv.data.item.id })).status).toBe(200);
     expect((await a.call(summary.GET, "GET", "/s")).data.totals.balance).toBe(0);
+  });
+
+  it("anuidade: parcela mensal vira custo (CPM) dos pontos; gasto acima da isenção não paga", async () => {
+    // R$ 1.200/ano = R$ 100/mês; isenta gastando R$ 8.000 no mês
+    expect(simulateMonth({ pointsPerDollar: 220, dollarRateCents: 550, annualFeeCents: 120000, feeWaiverCents: 800000 }, 450000)).toEqual({ points: 1800, feeCents: 10000, cpmCents: 5556, waived: false });
+    expect(simulateMonth({ pointsPerDollar: 220, dollarRateCents: 550, annualFeeCents: 120000, feeWaiverCents: 800000 }, 800000)).toMatchObject({ feeCents: 0, cpmCents: 0, waived: true });
+    expect(invoiceFeeCents({ annualFeeCents: 120000, feeWaiverCents: null }, 9_999_999)).toBe(10000);
+
+    const base = { accountId: accA, name: "Black", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10 };
+    const c = (await a.call(cards.POST, "POST", "/c", { ...base, annualFeeCents: 120000, feeWaiverCents: 800000 })).data.item;
+    const low = (await a.call(invoices.POST, "POST", "/i", { closingDate: "2026-10-03", dueDate: "2026-10-10", amountCents: 450000 }, { id: c.id })).data.item;
+    const high = (await a.call(invoices.POST, "POST", "/i", { closingDate: "2026-11-03", dueDate: "2026-11-10", amountCents: 900000 }, { id: c.id })).data.item;
+    expect([low.feeCents, high.feeCents]).toEqual([10000, 0]);
+
+    // fechar e receber: a parcela da anuidade é o custo dos pontos da fatura
+    const closed = (await a.call(invoiceClose.POST, "POST", "/x", undefined, { id: low.id })).data.item;
+    await a.call(entry.PATCH, "PATCH", "/e", { status: "CONFIRMED" }, { id: closed.entryId });
+    const acc = await prisma.account.findUniqueOrThrow({ where: { id: accA } });
+    expect(acc).toMatchObject({ balance: 1800, costCents: 10000 });
+    const cost = await prisma.entryCost.findFirstOrThrow({ where: { entryId: closed.entryId } });
+    expect(cost).toMatchObject({ type: "ANUIDADE", amountCents: 10000, cardId: c.id });
+
+    // editar o cartão recalcula as faturas em aberto; outro usuário não edita
+    const up = await a.call(card.PUT, "PUT", "/x", { ...base, annualFeeCents: 240000, feeWaiverCents: 1_000_000 }, { id: c.id });
+    expect(up.status).toBe(200);
+    expect(up.data.item).toMatchObject({ annualFeeCents: 240000, feeWaiverCents: 1_000_000 });
+    expect((await prisma.cardInvoice.findUniqueOrThrow({ where: { id: high.id } })).feeCents).toBe(20000); // R$ 9.000 < R$ 10.000
+    expect((await prisma.cardInvoice.findUniqueOrThrow({ where: { id: low.id } })).feeCents).toBe(10000); // fechada: não muda
+    expect((await b.call(card.PUT, "PUT", "/x", { ...base, annualFeeCents: 0 }, { id: c.id })).status).toBe(404);
   });
 
   it("não cria cartão em conta de outro usuário", async () => {

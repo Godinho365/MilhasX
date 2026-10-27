@@ -554,6 +554,7 @@ model CreditCard {
   closingDay      Int // dia do fechamento
   dueDay          Int // dia do vencimento
   annualFeeCents  Int      @default(0)
+  feeWaiverCents  Int? // gasto mensal que isenta a parcela da anuidade (ex.: R$ 8.000)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
 
@@ -571,6 +572,7 @@ model CardInvoice {
   dueDate        DateTime
   amountCents    Int
   expectedPoints Int
+  feeCents       Int           @default(0) // parcela da anuidade nesta fatura (vira custo dos pontos)
   status         InvoiceStatus @default(OPEN)
   entryId        String?       @unique // lançamento "a receber" criado ao fechar a fatura
   entry          Entry?        @relation(fields: [entryId], references: [id], onDelete: SetNull)

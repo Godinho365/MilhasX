@@ -1,4 +1,5 @@
 // Fornecedores, cartões e faturas, promoções, guias, novidades, foto de perfil e painel de vendas.
+import { expectedCardPoints, invoiceFeeCents } from "@/domain/cards";
 import type { GuideKind, GuideLevel, PromotionKind, Prisma } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { assertFeature } from "./plan-limits";
@@ -77,10 +78,7 @@ export async function deleteSupplierAccount(userId: string, id: string) {
 /* ---------------- Cartões e faturas ---------------- */
 
 /** Pontos esperados: valor em R$ convertido para US$ pela cotação, vezes pontos por dólar. */
-export function expectedCardPoints(amountCents: number, pointsPerDollarX100: number, dollarRateCents: number) {
-  if (dollarRateCents <= 0) return 0;
-  return Math.floor((amountCents / dollarRateCents) * (pointsPerDollarX100 / 100));
-}
+export { expectedCardPoints };
 
 export interface CardInput {
   accountId: string;
@@ -91,12 +89,33 @@ export interface CardInput {
   closingDay: number;
   dueDay: number;
   annualFeeCents: number;
+  feeWaiverCents?: number | null;
 }
 
 export async function createCard(userId: string, input: CardInput) {
   const acc = await prisma.account.findFirst({ where: { id: input.accountId, userId } });
   if (!acc) throw new DomainError(404, "Conta não encontrada");
   return prisma.creditCard.create({ data: { ...input, userId, name: input.name.trim(), brand: input.brand?.trim() || null } });
+}
+
+/** Edita o cartão; as faturas em aberto são recalculadas (pontos e parcela da anuidade). */
+export async function updateCard(userId: string, id: string, input: CardInput) {
+  const card = await prisma.creditCard.findFirst({ where: { id, userId } });
+  if (!card) throw new DomainError(404, "Cartão não encontrado");
+  const acc = await prisma.account.findFirst({ where: { id: input.accountId, userId } });
+  if (!acc) throw new DomainError(404, "Conta não encontrada");
+  const hasClosed = await prisma.cardInvoice.count({ where: { cardId: id, status: "CLOSED" } });
+  if (hasClosed && input.accountId !== card.accountId) throw new DomainError(409, "O cartão já tem faturas fechadas nesta conta; a conta que recebe os pontos não pode mudar.");
+  const data = { ...input, name: input.name.trim(), brand: input.brand?.trim() || null, feeWaiverCents: input.feeWaiverCents || null };
+  const updated = await prisma.creditCard.update({ where: { id }, data });
+  const open = await prisma.cardInvoice.findMany({ where: { cardId: id, status: "OPEN" } });
+  for (const i of open) {
+    await prisma.cardInvoice.update({
+      where: { id: i.id },
+      data: { expectedPoints: expectedCardPoints(i.amountCents, updated.pointsPerDollar, updated.dollarRateCents), feeCents: invoiceFeeCents(updated, i.amountCents) },
+    });
+  }
+  return updated;
 }
 
 export async function deleteCard(userId: string, id: string) {
@@ -113,7 +132,7 @@ export async function addInvoice(userId: string, cardId: string, input: { closin
   const dup = await prisma.cardInvoice.findFirst({ where: { cardId, dueDate: input.dueDate } });
   if (dup) throw new DomainError(409, "Já existe fatura com esse vencimento");
   return prisma.cardInvoice.create({
-    data: { cardId, ...input, expectedPoints: expectedCardPoints(input.amountCents, card.pointsPerDollar, card.dollarRateCents) },
+    data: { cardId, ...input, expectedPoints: expectedCardPoints(input.amountCents, card.pointsPerDollar, card.dollarRateCents), feeCents: invoiceFeeCents(card, input.amountCents) },
   });
 }
 
@@ -131,6 +150,8 @@ export async function closeInvoice(userId: string, invoiceId: string) {
       occurredAt: inv.dueDate,
       description: `Fatura ${inv.card.name} (${inv.dueDate.toISOString().slice(0, 10).split("-").reverse().join("/")})`,
       status: "PENDING",
+      // A parcela da anuidade do mês é o custo destes pontos (entra no CPM quando caírem na conta)
+      costs: inv.feeCents > 0 ? [{ type: "ANUIDADE", amountCents: inv.feeCents, cardId: inv.cardId }] : undefined,
     });
     entryId = entry.id;
   }

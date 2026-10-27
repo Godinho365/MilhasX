@@ -2,15 +2,17 @@
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useState } from "react";
-import { CreditCard, Plus, Trash2, FileCheck2, CircleAlert, ReceiptText } from "lucide-react";
+import { CreditCard, Plus, Trash2, FileCheck2, CircleAlert, ReceiptText, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { ProgramDot } from "@/components/stat";
 import { toast, confirmDialog } from "@/components/feedback";
+import { feeCpmCents, simulateMonth } from "@/domain/cards";
 
-type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; status: "OPEN" | "CLOSED" | "RECEIVED" };
-type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; received: number; invoices: Invoice[] };
+type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; status: "OPEN" | "CLOSED" | "RECEIVED" };
+type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; received: number; invoices: Invoice[] };
+const money = (c: number | null | undefined) => (c ? (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "");
 
 const STATUS: Record<Invoice["status"], { label: string; cls: string }> = {
   OPEN: { label: "Aberta", cls: "bg-amber-500/15 text-amber-300" },
@@ -34,6 +36,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
   const [invFilter, setInvFilter] = useState<InvoiceFilter>("all");
   const go = (t: Tab, filter: InvoiceFilter = "all") => { setTab(t); setInvFilter(filter); };
   const [cardModal, setCardModal] = useState(false);
+  const [editing, setEditing] = useState<Card | null>(null);
   const [invoiceFor, setInvoiceFor] = useState<Card | null>(null);
   const [erro, setErro] = useState("");
 
@@ -43,15 +46,19 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     const rate = parseBRLToCents(String(f.get("rate") || "5,50"));
     const fee = parseBRLToCents(String(f.get("fee") || "0"));
     if (rate === null || fee === null) return setErro("Valor inválido");
-    const r = await api("/api/cards", "POST", {
+    const waiver = parseBRLToCents(String(f.get("waiver") || "0"));
+    if (waiver === null) return setErro("Valor inválido");
+    const body = {
       accountId: f.get("accountId"), name: f.get("name"), brand: f.get("brand") || null,
       pointsPerDollar: Math.round(Number(String(f.get("ppd")).replace(",", ".")) * 100), dollarRateCents: rate,
-      closingDay: Number(f.get("closing")), dueDay: Number(f.get("due")), annualFeeCents: fee,
-    });
+      closingDay: Number(f.get("closing")), dueDay: Number(f.get("due")), annualFeeCents: fee, feeWaiverCents: waiver || null,
+    };
+    const r = editing ? await api(`/api/cards/${editing.id}`, "PUT", body) : await api("/api/cards", "POST", body);
     if (!r.ok) return setErro(r.erro);
     setErro("");
     setCardModal(false);
-    toast("Cartão cadastrado");
+    toast(editing ? "Cartão atualizado" : "Cartão cadastrado");
+    setEditing(null);
     refreshSafe(router);
   }
   async function saveInvoice(e: React.FormEvent<HTMLFormElement>) {
@@ -132,7 +139,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
           ) : cards.length === 0 ? (
             <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
               <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
-              <button className="btn-primary" onClick={() => { setErro(""); setCardModal(true); }} disabled={accounts.length === 0}>Novo cartão</button>
+              <button className="btn-primary" onClick={() => { setErro(""); setEditing(null); setCardModal(true); }} disabled={accounts.length === 0}>Novo cartão</button>
             </Empty>
           ) : (
             <p className="card card-pad text-center text-sm text-muted">Tudo em dia: nenhuma fatura precisa de ação agora.</p>
@@ -162,6 +169,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[i.status].cls}`}>{STATUS[i.status].label}</span>
                   <span className="w-24 text-right font-medium tabular-nums">{fmtBRL(i.amountCents)}</span>
                   <span className="w-28 text-right text-sm tabular-nums text-muted">{fmtPts(i.expectedPoints)} pts</span>
+                  <span className="w-36 text-right text-xs tabular-nums text-muted" title="Parcela da anuidade nesta fatura e o custo por milheiro que ela gera">{i.feeCents > 0 ? <>Anuidade {fmtBRL(i.feeCents)}<br />CPM {fmtBRL(feeCpmCents(i.feeCents, i.expectedPoints))}</> : i.card.annualFeeCents > 0 ? "Anuidade isenta" : "Sem anuidade"}</span>
                   <span className="flex gap-1">
                     {i.status === "OPEN" && <button className="btn-ghost h-8" onClick={() => close(i.id)}>Fechar fatura</button>}
                     <button className="btn-subtle h-8 w-8 px-0" onClick={() => delInvoice(i.id)} aria-label="Excluir fatura"><Trash2 className="h-4 w-4" /></button>
@@ -175,7 +183,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
 
       {tab === "cartoes" && (
         <>
-          <div className="mb-3 flex justify-end"><button className="btn-primary" onClick={() => { setErro(""); setCardModal(true); }} disabled={accounts.length === 0}><Plus className="h-4 w-4" />Novo cartão</button></div>
+          <div className="mb-3 flex justify-end"><button className="btn-primary" onClick={() => { setErro(""); setEditing(null); setCardModal(true); }} disabled={accounts.length === 0}><Plus className="h-4 w-4" />Novo cartão</button></div>
           {cards.length === 0 ? (
             <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
               <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
@@ -184,7 +192,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="table-base">
-                  <thead><tr><th>Cartão</th><th className="text-right">Pontuação</th><th className="hidden text-right sm:table-cell">Fechamento / venc.</th><th className="hidden text-right md:table-cell">Recebido</th><th className="w-24 text-right">Ações</th></tr></thead>
+                  <thead><tr><th>Cartão</th><th className="text-right">Pontuação</th><th className="hidden text-right sm:table-cell">Fechamento / venc.</th><th className="hidden text-right lg:table-cell">Anuidade / CPM</th><th className="hidden text-right md:table-cell">Recebido</th><th className="w-28 text-right">Ações</th></tr></thead>
                   <tbody>
                     {cards.map((c) => (
                       <tr key={c.id}>
@@ -199,9 +207,11 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
                         </td>
                         <td className="whitespace-nowrap text-right tabular-nums">{c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</td>
                         <td className="hidden text-right tabular-nums text-muted sm:table-cell">dia {c.closingDay} / dia {c.dueDay}</td>
+                        <td className="hidden text-right text-xs tabular-nums lg:table-cell"><FeeSummary c={c} /></td>
                         <td className="hidden text-right tabular-nums md:table-cell">{c.received ? fmtPts(c.received) : "-"}</td>
                         <td className="whitespace-nowrap text-right">
                           <button className="btn-subtle h-8 w-8 px-0" onClick={() => { setErro(""); setInvoiceFor(c); }} aria-label={`Adicionar fatura de ${c.name}`} title="Adicionar fatura"><ReceiptText className="h-4 w-4" /></button>
+                          <button className="btn-subtle h-8 w-8 px-0" onClick={() => { setErro(""); setEditing(c); setCardModal(true); }} aria-label={`Editar ${c.name}`} title="Editar"><Pencil className="h-4 w-4" /></button>
                           <button className="btn-subtle h-8 w-8 px-0" onClick={() => delCard(c)} aria-label={`Excluir ${c.name}`}><Trash2 className="h-4 w-4" /></button>
                         </td>
                       </tr>
@@ -214,18 +224,8 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
         </>
       )}
 
-      <Modal open={cardModal} onClose={() => setCardModal(false)} title="Novo cartão" footer={<><button className="btn-ghost" onClick={() => setCardModal(false)}>Cancelar</button><button form="card-form" className="btn-primary">Salvar</button></>}>
-        <form id="card-form" onSubmit={saveCard} className="grid gap-4 sm:grid-cols-2">
-          {erro && <div className="sm:col-span-2"><Alert>{erro}</Alert></div>}
-          <Field label="Nome do cartão" required className="sm:col-span-2"><input className="input" name="name" required maxLength={80} placeholder="Ex.: Visa Infinite do banco X" /></Field>
-          <Field label="Conta que recebe os pontos" required><select className="input" name="accountId" required defaultValue=""><option value="" disabled>Selecione</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
-          <Field label="Bandeira"><input className="input" name="brand" maxLength={30} placeholder="Visa, Mastercard…" /></Field>
-          <Field label="Pontos por dólar" required><input className="input" name="ppd" inputMode="decimal" required placeholder="2,2" /></Field>
-          <Field label="Cotação do dólar (R$)" hint="Usada para estimar os pontos"><input className="input" name="rate" inputMode="decimal" defaultValue="5,50" /></Field>
-          <Field label="Dia do fechamento" required><input className="input" name="closing" type="number" min={1} max={31} required /></Field>
-          <Field label="Dia do vencimento" required><input className="input" name="due" type="number" min={1} max={31} required /></Field>
-          <Field label="Anuidade (R$)"><input className="input" name="fee" inputMode="decimal" placeholder="0,00" /></Field>
-        </form>
+      <Modal open={cardModal} onClose={() => { setCardModal(false); setEditing(null); }} title={editing ? `Editar ${editing.name}` : "Novo cartão"} footer={<><button className="btn-ghost" onClick={() => { setCardModal(false); setEditing(null); }}>Cancelar</button><button form="card-form" className="btn-primary">Salvar</button></>}>
+        <CardForm key={editing?.id ?? "novo"} card={editing} accounts={accounts} erro={erro} onSubmit={saveCard} />
       </Modal>
       <Modal open={!!invoiceFor} onClose={() => setInvoiceFor(null)} title={`Nova fatura · ${invoiceFor?.name ?? ""}`} size="sm" footer={<><button className="btn-ghost" onClick={() => setInvoiceFor(null)}>Cancelar</button><button form="invoice-form" className="btn-primary">Adicionar</button></>}>
         {invoiceFor && (
@@ -241,5 +241,64 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
         )}
       </Modal>
     </>
+  );
+}
+
+/** Resumo da anuidade do cartão: valor, isenção e o CPM que ela gera na fatura mais recente. */
+function FeeSummary({ c }: { c: Card }) {
+  if (c.annualFeeCents <= 0) return <span className="text-muted">Sem anuidade</span>;
+  const last = c.invoices[0];
+  const sim = last ? null : c.feeWaiverCents ? simulateMonth({ ...c, pointsPerDollar: Math.round(c.pointsPerDollar * 100) }, c.feeWaiverCents - 1) : null;
+  return (
+    <span className="block">
+      <span className="block">{fmtBRL(c.annualFeeCents)}/ano · {fmtBRL(Math.round(c.annualFeeCents / 12))}/mês</span>
+      {c.feeWaiverCents ? <span className="block text-muted">Isenta gastando {fmtBRL(c.feeWaiverCents)}/mês</span> : <span className="block text-muted">Sem isenção</span>}
+      {last ? (
+        <span className="block font-medium">{last.feeCents > 0 ? `CPM ${fmtBRL(feeCpmCents(last.feeCents, last.expectedPoints))} na última fatura` : "Última fatura isenta"}</span>
+      ) : sim && sim.cpmCents > 0 ? (
+        <span className="block font-medium">CPM até {fmtBRL(sim.cpmCents)} sem isentar</span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Formulário do cartão (novo ou edição) com simulação: gastando X no mês, quantos pontos e qual CPM da anuidade. */
+function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accounts: { id: string; label: string }[]; erro: string; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
+  const [ppd, setPpd] = useState(card ? String(card.pointsPerDollar).replace(".", ",") : "");
+  const [rate, setRate] = useState(card ? money(card.dollarRateCents) : "5,50");
+  const [fee, setFee] = useState(card ? money(card.annualFeeCents) : "");
+  const [waiver, setWaiver] = useState(card ? money(card.feeWaiverCents) : "");
+  const [spend, setSpend] = useState(card?.invoices[0] ? money(card.invoices[0].amountCents) : "5.000,00");
+  const rule = {
+    pointsPerDollar: Math.round((Number(ppd.replace(",", ".")) || 0) * 100),
+    dollarRateCents: parseBRLToCents(rate) ?? 0,
+    annualFeeCents: parseBRLToCents(fee) ?? 0,
+    feeWaiverCents: parseBRLToCents(waiver) || null,
+  };
+  const s = simulateMonth(rule, parseBRLToCents(spend) ?? 0);
+  return (
+    <form id="card-form" onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">
+      {erro && <div className="sm:col-span-2"><Alert>{erro}</Alert></div>}
+      <Field label="Nome do cartão" required className="sm:col-span-2"><input className="input" name="name" required maxLength={80} placeholder="Ex.: Visa Infinite do banco X" defaultValue={card?.name} /></Field>
+      <Field label="Conta que recebe os pontos" required><select className="input" name="accountId" required defaultValue={card?.accountId ?? ""}><option value="" disabled>Selecione</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
+      <Field label="Bandeira"><input className="input" name="brand" maxLength={30} placeholder="Visa, Mastercard…" defaultValue={card?.brand ?? ""} /></Field>
+      <Field label="Pontos por dólar" required><input className="input" name="ppd" inputMode="decimal" required placeholder="2,2" value={ppd} onChange={(e) => setPpd(e.target.value)} /></Field>
+      <Field label="Cotação do dólar (R$)" hint="Usada para estimar os pontos"><input className="input" name="rate" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
+      <Field label="Dia do fechamento" required><input className="input" name="closing" type="number" min={1} max={31} required defaultValue={card?.closingDay} /></Field>
+      <Field label="Dia do vencimento" required><input className="input" name="due" type="number" min={1} max={31} required defaultValue={card?.dueDay} /></Field>
+      <Field label="Anuidade (R$ por ano)" hint="Cobrada em 12 parcelas; cada parcela vira custo dos pontos da fatura"><input className="input" name="fee" inputMode="decimal" placeholder="0,00" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
+      <Field label="Isenta gastando (R$ por mês)" hint="Vazio: sem isenção. Ex.: 8.000,00"><input className="input" name="waiver" inputMode="decimal" placeholder="8.000,00" value={waiver} onChange={(e) => setWaiver(e.target.value)} /></Field>
+      <section className="rounded-xl border border-line bg-panel2 p-4 sm:col-span-2" aria-label="Simulação do mês">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Se eu gastar no mês (R$)" className="w-44"><input className="input" inputMode="decimal" value={spend} onChange={(e) => setSpend(e.target.value)} aria-label="Gasto no mês" /></Field>
+          <dl className="grid flex-1 grid-cols-3 gap-2 text-sm">
+            <div><dt className="kicker">Pontos</dt><dd className="font-semibold tabular-nums">{fmtPts(s.points)}</dd></div>
+            <div><dt className="kicker">Anuidade no mês</dt><dd className="font-semibold tabular-nums">{rule.annualFeeCents <= 0 ? "—" : s.waived ? "Isenta" : fmtBRL(s.feeCents)}</dd></div>
+            <div><dt className="kicker">CPM da anuidade</dt><dd className="font-semibold tabular-nums" aria-label="CPM da anuidade">{s.cpmCents > 0 ? fmtBRL(s.cpmCents) : "R$ 0,00"}</dd></div>
+          </dl>
+        </div>
+        {rule.annualFeeCents > 0 && rule.feeWaiverCents && !s.waived && <p className="mt-2 text-xs text-muted">Faltam {fmtBRL(rule.feeWaiverCents - (parseBRLToCents(spend) ?? 0))} no mês para isentar a anuidade.</p>}
+      </section>
+    </form>
   );
 }

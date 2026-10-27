@@ -301,6 +301,7 @@ export const cardSchema = z.object({
   closingDay: dayOfMonth,
   dueDay: dayOfMonth,
   annualFeeCents: cents.default(0),
+  feeWaiverCents: cents.nullable().default(null),
 });
 export const invoiceSchema = z.object({ closingDate: dateStr, dueDate: dateStr, amountCents: cents.refine((v) => v > 0, "Informe o valor da fatura") });
 export const promotionSchema = z.object({
