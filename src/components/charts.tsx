@@ -305,3 +305,27 @@ export function DailyParity({ data }: { data: { day: string; program: string; va
     </div>
   );
 }
+
+/** Série diária (máximo de cada dia) por programa ou portal, em pontos por real ou em %. */
+export function DailySeries({ data, unit }: { data: { day: string; series: string; value: number }[]; unit: "pts" | "%" }) {
+  if (data.length === 0) return <p className="py-10 text-center text-sm text-muted">Ainda sem histórico: ele começa na primeira leitura da fonte.</p>;
+  const names = [...new Set(data.map((d) => d.series))];
+  const days = [...new Set(data.map((d) => d.day))].sort();
+  const rows = days.map((day) => Object.fromEntries([["day", day], ...names.map((n) => [n, data.find((d) => d.day === day && d.series === n)?.value ?? null])]));
+  const fmt = (v: number) => (unit === "%" ? `${nf.format(v)}%` : `${nf.format(v)} pts/R$`);
+  return (
+    <div className="h-56 w-full" role="img" aria-label={unit === "%" ? "Gráfico do cashback por dia" : "Gráfico de pontos por real por dia"}>
+      <ResponsiveContainer>
+        <AreaChart data={rows} margin={{ left: 0, right: 8, top: 8 }}>
+          <defs>{names.map((n, i) => <linearGradient key={n} id={`ds-${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={SERIES[i % SERIES.length]} stopOpacity={0.25} /><stop offset="100%" stopColor={SERIES[i % SERIES.length]} stopOpacity={0} /></linearGradient>)}</defs>
+          <CartesianGrid stroke="rgb(var(--line))" vertical={false} />
+          <XAxis dataKey="day" tickFormatter={ddmm} tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={false} />
+          <YAxis tick={{ fill: "#a1a1aa", fontSize: 11 }} width={36} tickLine={false} axisLine={false} tickFormatter={(v: number) => (unit === "%" ? `${v}%` : String(v))} />
+          <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => ddmm(String(d))} formatter={(v: number, k) => [fmt(v), k]} />
+          <Legend iconType="circle" iconSize={8} formatter={(k: string) => <span className="text-xs text-zinc-300">{k}</span>} />
+          {names.map((n, i) => <Area key={n} type="monotone" dataKey={n} stroke={SERIES[i % SERIES.length]} fill={`url(#ds-${i})`} strokeWidth={2} connectNulls dot={rows.length === 1} isAnimationActive={false} />)}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

@@ -328,6 +328,15 @@ test("lojas, favoritos e alertas", async () => {
   const storeName = (await first.locator("h3").textContent())!;
   await first.getByRole("button", { name: `Favoritar ${storeName}` }).click();
   await toastSays("nos favoritos");
+  // painel lateral da loja, como na referência: abas e alerta
+  await first.getByRole("button", { name: `Detalhes de ${storeName}` }).click();
+  const drawer = page.getByRole("dialog", { name: storeName });
+  await expect(drawer.getByRole("tab", { name: "Visão geral" })).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/loja=/);
+  await drawer.getByRole("tab", { name: /^Pontos \(\d+\)$/ }).click();
+  await drawer.getByRole("tab", { name: "Histórico" }).click();
+  await drawer.getByRole("button", { name: "Fechar" }).click();
+  await expect(drawer).toBeHidden();
   // filtro "Mostrar somente favoritas" no painel de filtros
   await page.getByRole("button", { name: "Mais filtros" }).click();
   await expect(page.getByRole("dialog")).toContainText("Filtros de lojas");
@@ -1139,6 +1148,15 @@ test("painel administrativo completo", async ({ browser }) => {
   await toastSays(/1 lojas: 1 novas/);
   await expect(page.getByRole("cell", { name: `Planilha E2E ${stamp}` })).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(`Planilha E2E ${stamp}`) })).toContainText("até 2,5");
+  // Cuponomia: planilha de cashback enviada pelo admin; linha ruim vira sucesso parcial com relatório
+  const cup = page.getByRole("listitem", { name: "Fonte Cuponomia (cashback)" });
+  await cup.getByLabel("Enviar planilha da Cuponomia (cashback)").setInputFiles({ name: "cuponomia.csv", mimeType: "text/csv", buffer: Buffer.from(`loja;cashback\nCashback E2E ${stamp};4,5%\nLinha Ruim;abc\n`) });
+  await toastSays(/Importação parcial: 1 lojas: 1 novas/);
+  await expect(cup).toContainText("Sucesso parcial");
+  await cup.getByRole("button", { name: "Ver relatório" }).click();
+  await expect(page.getByRole("list", { name: "Itens ignorados" })).toContainText("cashback inválido");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listitem", { name: "Fonte Livelo" })).toContainText(/Aguardando arquivo|Sucesso|Falha/);
 
   await page.goto("/admin/audit?action=admin.");
   await expect(page.getByText("admin.user_disable").first()).toBeVisible();

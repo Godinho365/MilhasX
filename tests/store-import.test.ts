@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resetDb, Client, seedPrograms } from "./helpers";
 import * as register from "@/app/api/auth/register/route";
 import * as storeImport from "@/app/api/admin/store-import/route";
-import { parseEsfera, parseCsv, applyOffers, importFromSource, parseLiveloPage, storeParityHistory } from "@/server/services/store-import";
+import { parseEsfera, parseCsv, applyOffers, importFromSource, parseLiveloPage, storeParityHistory, parseMeliuzIndex, parseMeliuzStore, importMeliuz, storeKey, logoHostAllowed } from "@/server/services/store-import";
 import { listStores } from "@/server/services/market";
 import { prisma } from "@/server/db";
 
@@ -77,11 +77,13 @@ describe("gravação", () => {
 
   it("fonte com erro ou vazia não apaga nada", async () => {
     await applyOffers(null, esferaId, "esfera", parseEsfera(sample));
-    await prisma.auditLog.deleteMany();
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
     await expect(importFromSource(null, "esfera")).rejects.toThrow(/nenhuma loja/);
+    await prisma.storeImportRun.deleteMany(); // libera o intervalo mínimo
     vi.stubGlobal("fetch", async () => new Response("bloqueado", { status: 403 }));
     await expect(importFromSource(null, "esfera")).rejects.toThrow(/HTTP 403/);
+    // as duas tentativas ficam registradas como "fonte indisponível"
+    expect(await prisma.storeImportRun.findFirst({ where: { source: "esfera" } })).toMatchObject({ status: "UNAVAILABLE", message: expect.stringMatching(/HTTP 403/) });
     expect(await prisma.storeOffer.count({ where: { source: "esfera" } })).toBe(6);
   });
 });
@@ -128,5 +130,52 @@ describe("coletor como a referência", () => {
     const u = await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } });
     const list = await listStores(u.id, { q: "Asics" });
     expect(list.items[0]!.bestPoints).toMatchObject({ pointsPerReal: 5, club: 7, regular: 1, promotion: true, program: "Livelo" });
+  });
+});
+
+describe("cashback da Méliuz e logos", () => {
+  const INDEX = `<ul><li><a href="/desconto/cupom-desconto-mercado-livre">Mercado Livre</a></li><li><a href="/desconto/cupom-cea">C&amp;A</a></li><li><a href="/desconto/outra">Loja Que Não Existe Aqui</a></li></ul>`;
+  const page = (btn: string, logo = "https://s.staticz.com.br/app/img/partner/filled/x.png") =>
+    `<script type="application/ld+json">{"@type":"WebPage","primaryImageOfPage":{"@type":"ImageObject","url":"${logo}"}}</script>` +
+    `<p>Outra loja: 30% de cashback</p><div class="floating-signup-btn" hidden><p>Cupom</p><div>+</div><button class="a-red-btn">${btn}</button></div>`;
+
+  it("lê a lista e o botão da página da loja (não o cashback de outras lojas)", () => {
+    const idx = parseMeliuzIndex(INDEX);
+    expect(idx.get(storeKey("Mercado Livre"))).toEqual({ name: "Mercado Livre", path: "/desconto/cupom-desconto-mercado-livre" });
+    expect(idx.get(storeKey("C&A"))?.path).toBe("/desconto/cupom-cea");
+    expect(parseMeliuzStore(page("1,5% de cashback"))).toEqual({ percent: 1.5, upTo: false, logoUrl: "https://s.staticz.com.br/app/img/partner/filled/x.png" });
+    expect(parseMeliuzStore(page("Até 8% de cashback")).upTo).toBe(true);
+    expect(parseMeliuzStore("<p>30% de cashback</p>").percent).toBeNull();
+  });
+
+  it("logo só de servidores de imagem conhecidos, por https", () => {
+    expect(logoHostAllowed("https://s.staticz.com.br/app/img/x.png")).toBe(true);
+    expect(logoHostAllowed("https://static.livelo.com.br/logos/x.png")).toBe(true);
+    for (const bad of ["http://s.staticz.com.br/x.png", "https://127.0.0.1/x.png", "https://169.254.169.254/latest", "https://s.staticz.com.br.evil.com/x.png", "https://evil-livelo.com.br/x.png", "https://s.staticz.com.br:8443/x.png", "https://user@s.staticz.com.br/x.png", "nada"])
+      expect(logoHostAllowed(bad), bad).toBe(false);
+  });
+
+  it("grava o cashback só das lojas do catálogo, guarda histórico e baixa o logo", async () => {
+    await prisma.store.createMany({ data: [{ name: "Mercado Livre" }, { name: "C&A" }, { name: "Sem Méliuz" }] });
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(png, { headers: { "content-type": "image/png" } })));
+    const pages: Record<string, string> = { "/desconto": INDEX, "/desconto/cupom-desconto-mercado-livre": page("1,5% de cashback"), "/desconto/cupom-cea": page("Sem cashback agora") };
+    const get = vi.fn(async (p: string) => pages[p]!);
+    const r = await importMeliuz(null, { get, delayMs: 0 });
+    expect(r).toMatchObject({ total: 1, created: 1, status: "SUCCESS" });
+    expect(await prisma.storeLogo.count()).toBe(2);
+    expect(get).toHaveBeenCalledTimes(3); // lista + só as 2 lojas que existem aqui
+    const ml = await prisma.store.findUniqueOrThrow({ where: { name: "Mercado Livre" }, include: { offers: true, cashbackDays: true, logo: true } });
+    expect(ml.offers[0]).toMatchObject({ programId: null, source: "meliuz", portal: "Méliuz", cashbackBps: 150 });
+    expect(ml.cashbackDays[0]).toMatchObject({ bps: 150, maxBps: 150 });
+    expect(ml.logo?.mime).toBe("image/png");
+    expect(ml.logoUpdatedAt).not.toBeNull();
+    // intervalo mínimo de 6 horas
+    await expect(importMeliuz(null, { get, delayMs: 0 })).rejects.toThrow(/6 horas/);
+    // a loja aparece na lista com o melhor cashback e o logo
+    const list = await listStores("sem-usuario", { q: "Mercado" });
+    expect(list.items[0]).toMatchObject({ name: "Mercado Livre", bestCashback: { percent: 1.5, portal: "Méliuz" } });
+    expect(list.items[0]!.logo).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });

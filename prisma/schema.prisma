@@ -114,17 +114,17 @@ model User {
   simulations     Simulation[]
 
   // Assinatura: o plano só muda pela administração (sem cobrança real)
-  plan                Plan          @default(PESSOAL)
+  plan                Plan                @default(PESSOAL)
   planInterval        String?
   trialEndsAt         DateTime?
   planRequest         Plan?
   planRequestInterval String?
   planRequestedAt     DateTime?
   deletionRequestedAt DateTime?
-  referralCode        String?       @unique
+  referralCode        String?             @unique
   referredById        String?
-  referredBy          User?         @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
-  referrals           User[]        @relation("Referrals")
+  referredBy          User?               @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals           User[]              @relation("Referrals")
   salesProfile        SalesProfile?
   subscriptions       Subscription[]
   travelOrders        TravelOrder[]
@@ -141,25 +141,25 @@ enum Plan {
 }
 
 model SalesProfile {
-  userId      String   @id
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  slug        String   @unique
-  displayName String
-  bio         String?
-  whatsapp    String?
-  instagram   String?
-  email       String?
-  programIds  String[]
-  published   Boolean  @default(false)
-  acceptsOrders Boolean @default(true) // formulário "Pedir cotação" na página pública
-  acceptsLeads  Boolean @default(true) // formulário "Interesse em gestão de milhas"
-  headline      String? // frase de abertura da Central de Atendimento
-  views         Int     @default(0)
-  design        Json? // personalização da página (domain/page-design.ts)
+  userId          String    @id
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug            String    @unique
+  displayName     String
+  bio             String?
+  whatsapp        String?
+  instagram       String?
+  email           String?
+  programIds      String[]
+  published       Boolean   @default(false)
+  acceptsOrders   Boolean   @default(true) // formulário "Pedir cotação" na página pública
+  acceptsLeads    Boolean   @default(true) // formulário "Interesse em gestão de milhas"
+  headline        String? // frase de abertura da Central de Atendimento
+  views           Int       @default(0)
+  design          Json? // personalização da página (domain/page-design.ts)
   banner          Bytes?
   bannerMime      String?
   bannerUpdatedAt DateTime?
-  updatedAt   DateTime @updatedAt
+  updatedAt       DateTime  @updatedAt
 }
 
 model Session {
@@ -213,7 +213,7 @@ model Program {
   supplierAccounts SupplierAccount[]
   promotionsFrom   Promotion[]       @relation("PromoFrom")
   promotionsTo     Promotion[]       @relation("PromoTo")
-  parityDays ParityDay[]
+  parityDays       ParityDay[]
 }
 
 // Titular: pessoa dona de contas nos programas
@@ -242,26 +242,26 @@ model Holder {
 
 // Carteira: um titular em um programa
 model Account {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  holderId      String
-  holder        Holder   @relation(fields: [holderId], references: [id], onDelete: Cascade)
-  programId     String
-  program       Program  @relation(fields: [programId], references: [id])
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holderId          String
+  holder            Holder   @relation(fields: [holderId], references: [id], onDelete: Cascade)
+  programId         String
+  program           Program  @relation(fields: [programId], references: [id])
   // Campos derivados do extrato (recalculados por replay)
-  balance       Int      @default(0)
-  costCents     Int      @default(0) // custo do saldo atual
-  investedCents Int      @default(0) // total investido em créditos com custo
-  nickname      String? // nome da conta (em branco: programa + titular)
-  pinned        Boolean  @default(false) // fixada na barra lateral
-  archived      Boolean  @default(false)
-  tags          String[] @default([])
-  cpfAvailable  Int? // CPFs (passageiros) que ainda podem ser emitidos
+  balance           Int      @default(0)
+  costCents         Int      @default(0) // custo do saldo atual
+  investedCents     Int      @default(0) // total investido em créditos com custo
+  nickname          String? // nome da conta (em branco: programa + titular)
+  pinned            Boolean  @default(false) // fixada na barra lateral
+  archived          Boolean  @default(false)
+  tags              String[] @default([])
+  cpfAvailable      Int? // CPFs (passageiros) que ainda podem ser emitidos
   beneficiaryLimit  Int? // limite de beneficiários (CPFs distintos) do programa; vazio = sugestão do programa
-  beneficiaryWindow String  @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  beneficiaryWindow String   @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   entries        Entry[]
   sales          Sale[]
@@ -301,7 +301,7 @@ model Entry {
 
   saleItem      SaleItem?
   invoice       CardInvoice?
-  cardBalance   CreditCard?  @relation("CardBalance")
+  cardBalance   CreditCard?    @relation("CardBalance")
   bonusPurchase BonusPurchase?
   costs         EntryCost[]
 
@@ -326,7 +326,7 @@ model Customer {
   createdAt DateTime @default(now())
 
   sales     Sale[]
-  saleItems SaleItem[] @relation("SaleItemCustomers")
+  saleItems SaleItem[]    @relation("SaleItemCustomers")
   orders    TravelOrder[]
 
   @@index([userId])
@@ -352,8 +352,8 @@ model Sale {
   occurredAt        DateTime
   createdAt         DateTime         @default(now())
 
-  items       SaleItem[]
-  attachments SaleAttachment[]
+  items         SaleItem[]
+  attachments   SaleAttachment[]
   beneficiaries AccountBeneficiary[]
 
   @@index([userId, occurredAt])
@@ -406,6 +406,9 @@ model Store {
   id             String          @id @default(cuid())
   name           String          @unique
   active         Boolean         @default(true)
+  logoUpdatedAt  DateTime? // versão da imagem (cache); os bytes ficam em StoreLogo
+  logo           StoreLogo?
+  cashbackDays   CashbackDay[]
   offers         StoreOffer[]
   parityDays     ParityDay[]
   favorites      FavoriteStore[]
@@ -414,24 +417,24 @@ model Store {
 }
 
 model StoreOffer {
-  id            String   @id @default(cuid())
-  storeId       String
-  store         Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  programId     String?
-  program       Program? @relation(fields: [programId], references: [id], onDelete: Cascade)
-  pointsPerReal Int      @default(0) // x100 (1,5 pts/R$ = 150)
-  cashbackBps   Int      @default(0) // pontos-base (1,5% = 150)
-  portal        String? // nome do portal de cashback
-  source        String? // importada de uma fonte (ex.: "esfera", "csv"); null = cadastro manual
-  upTo          Boolean  @default(false) // "até N pontos": o valor é o máximo
-  perDollar     Boolean  @default(false) // pontos por dólar gasto, não por real
+  id                   String    @id @default(cuid())
+  storeId              String
+  store                Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  programId            String?
+  program              Program?  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  pointsPerReal        Int       @default(0) // x100 (1,5 pts/R$ = 150)
+  cashbackBps          Int       @default(0) // pontos-base (1,5% = 150)
+  portal               String? // nome do portal de cashback
+  source               String? // importada de uma fonte (ex.: "esfera", "csv"); null = cadastro manual
+  upTo                 Boolean   @default(false) // "até N pontos": o valor é o máximo
+  perDollar            Boolean   @default(false) // pontos por dólar gasto, não por real
   clubPointsPerReal    Int? // x100, para assinantes do clube do programa
   regularPointsPerReal Int? // x100, valor fora da promoção ("Era N")
   promotion            Boolean   @default(false)
   promoEndsAt          DateTime?
   partnerLink          String? // página do parceiro no site do programa
   observedAt           DateTime? // última leitura na fonte
-  updatedAt     DateTime @updatedAt
+  updatedAt            DateTime  @updatedAt
 
   @@index([storeId])
 }
@@ -477,17 +480,17 @@ model Notification {
 }
 
 model UserPreference {
-  userId          String    @id
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  showValues      Boolean   @default(true)
-  checklistHidden Boolean   @default(false)
-  dashboardView   String    @default("gestao")
-  newsReadAt      DateTime?
-  soundEffects       Boolean @default(true)
-  usageAnalytics     Boolean @default(true)
-  hideVideoTutorials Boolean @default(false)
-  valuesMode         String  @default("VISIBLE")
-  notifications      Json    @default("{}")
+  userId             String    @id
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showValues         Boolean   @default(true)
+  checklistHidden    Boolean   @default(false)
+  dashboardView      String    @default("gestao")
+  newsReadAt         DateTime?
+  soundEffects       Boolean   @default(true)
+  usageAnalytics     Boolean   @default(true)
+  hideVideoTutorials Boolean   @default(false)
+  valuesMode         String    @default("VISIBLE")
+  notifications      Json      @default("{}")
 }
 
 model AuditLog {
@@ -801,18 +804,18 @@ model HolderAccess {
 // Assinatura paga no Mercado Pago (preapproval). O plano do usuário só muda pelo webhook,
 // depois de consultar a assinatura na API do Mercado Pago com o token do servidor.
 model Subscription {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider    String    @default("MERCADOPAGO")
-  externalId  String?   @unique // id do preapproval
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   @default("MERCADOPAGO")
+  externalId  String?  @unique // id do preapproval
   plan        Plan
   interval    String // MENSAL | ANUAL
   amountCents Int
-  status      String    @default("PENDING") // PENDING | AUTHORIZED | PAUSED | CANCELLED
+  status      String   @default("PENDING") // PENDING | AUTHORIZED | PAUSED | CANCELLED
   checkoutUrl String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([userId, createdAt])
 }
@@ -954,18 +957,18 @@ model FlightSearch {
 
 // Interessado em gestão de milhas, vindo da Central de Atendimento (página pública).
 model MilesLead {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  phone     String?
-  email     String?
-  message   String?
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  phone       String?
+  email       String?
+  message     String?
   programs    String[] @default([])
   incomeRange String?
-  status    String   @default("NEW") // NEW | CONTACTED | CLIENT | DISCARDED
-  ipHash    String?
-  createdAt DateTime @default(now())
+  status      String   @default("NEW") // NEW | CONTACTED | CLIENT | DISCARDED
+  ipHash      String?
+  createdAt   DateTime @default(now())
 
   @@index([userId, createdAt])
 }
@@ -973,9 +976,9 @@ model MilesLead {
 // "Assinatura de contrato" da página pública: o cliente lê os termos de gestão de milhas e aceita.
 // Guarda uma cópia dos termos aceitos para não depender de edições posteriores.
 model ContractSignature {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   orderId   String?
   order     TravelOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
   name      String
@@ -986,7 +989,7 @@ model ContractSignature {
   address   String?
   terms     String
   ipHash    String?
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
 
   @@index([userId, createdAt])
 }
@@ -1019,4 +1022,49 @@ model AccountBeneficiary {
   createdAt DateTime @default(now())
 
   @@index([accountId, usedAt])
+}
+
+// Logo da loja, baixado da fonte (Esfera, Méliuz) e servido pelo próprio app (sem hotlink)
+model StoreLogo {
+  storeId   String   @id
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  mime      String
+  data      Bytes
+  sourceUrl String? // de onde veio: só baixa de novo se mudar
+  updatedAt DateTime @updatedAt
+}
+
+// Histórico diário do cashback de cada portal (como ParityDay, mas em % e sem programa)
+model CashbackDay {
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  source     String // ex.: "meliuz"
+  portal     String
+  day        DateTime @db.Date
+  bps        Int // 1,5% = 150
+  maxBps     Int
+  observedAt DateTime
+
+  @@unique([storeId, source, day])
+}
+
+// Cada tentativa de importação de lojas (automática ou do admin), com o relatório da execução
+model StoreImportRun {
+  id         String   @id @default(cuid())
+  source     String // esfera, meliuz, livelo, cuponomia, csv
+  status     String // SUCCESS | PARTIAL | UNAVAILABLE | FAILED
+  actorId    String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime @default(now())
+  total      Int      @default(0)
+  created    Int      @default(0)
+  updated    Int      @default(0)
+  unchanged  Int      @default(0)
+  ignored    Int      @default(0)
+  removed    Int      @default(0)
+  message    String?
+  report     Json? // { issues: [{ item, reason }] } (até 200)
+
+  @@index([source, startedAt])
 }

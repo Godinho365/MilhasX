@@ -10,10 +10,13 @@ export type StoreSort = "popular" | "points" | "cashback" | "name";
  * Lojas com a melhor oferta de pontos (do programa filtrado, se houver) e de cashback.
  * "Mais populares" = mais favoritadas e mais usadas em compras.
  */
-type OfferRow = { pointsPerReal: number; upTo: boolean; perDollar: boolean; clubPointsPerReal: number | null; regularPointsPerReal: number | null; promotion: boolean; promoEndsAt: Date | null; partnerLink: string | null; observedAt: Date | null; program: { name: string } | null };
+type OfferRow = { pointsPerReal: number; upTo: boolean; perDollar: boolean; clubPointsPerReal: number | null; regularPointsPerReal: number | null; promotion: boolean; promoEndsAt: Date | null; partnerLink: string | null; observedAt: Date | null; cashbackBps: number; portal: string | null; program: { id: string; name: string; color: string; logoUpdatedAt: Date | null } | null };
 const pointsView = (o: OfferRow) => ({
   pointsPerReal: o.pointsPerReal / 100,
   program: o.program!.name,
+  programId: o.program!.id,
+  programColor: o.program!.color,
+  programLogo: o.program!.logoUpdatedAt?.getTime().toString() ?? null,
   upTo: o.upTo,
   perDollar: o.perDollar,
   club: o.clubPointsPerReal != null && o.clubPointsPerReal > o.pointsPerReal ? o.clubPointsPerReal / 100 : null,
@@ -21,6 +24,14 @@ const pointsView = (o: OfferRow) => ({
   promotion: o.promotion,
   promoEndsAt: o.promoEndsAt?.toISOString() ?? null,
   // Só links http(s) do próprio programa vão para a tela
+  link: o.partnerLink && /^https:\/\//.test(o.partnerLink) ? o.partnerLink : null,
+  observedAt: o.observedAt?.toISOString() ?? null,
+});
+
+const cashView = (o: OfferRow) => ({
+  percent: o.cashbackBps / 100,
+  portal: o.portal ?? "",
+  upTo: o.upTo,
   link: o.partnerLink && /^https:\/\//.test(o.partnerLink) ? o.partnerLink : null,
   observedAt: o.observedAt?.toISOString() ?? null,
 });
@@ -45,11 +56,13 @@ export async function listStores(userId: string, opts: { q?: string; favorites?:
     return {
       id: st.id,
       name: st.name,
+      logo: st.logoUpdatedAt?.getTime().toString() ?? null,
       favorite: favSet.has(st.id),
       popularity: st._count.favorites * 2 + st._count.bonusPurchases,
       bestPoints: points[0] ? pointsView(points[0]) : null,
       programs: points.map(pointsView),
-      bestCashback: cash[0] ? { percent: cash[0].cashbackBps / 100, portal: cash[0].portal ?? "" } : null,
+      bestCashback: cash[0] ? cashView(cash[0]) : null,
+      cashbacks: cash.map(cashView),
     };
   });
   const sort = opts.sort ?? "popular";

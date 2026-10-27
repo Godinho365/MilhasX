@@ -10,7 +10,7 @@ import { StoresGrid, StoresToolbar, AlertsPanel } from "./client";
 import { PurchasesPanel } from "./purchases";
 import { listPurchases } from "@/server/services/accounts";
 
-export default async function PurchasesPage({ searchParams }: { searchParams: Promise<{ tab?: string; q?: string; fav?: string; page?: string; programa?: string; ordem?: string }> }) {
+export default async function PurchasesPage({ searchParams }: { searchParams: Promise<{ tab?: string; q?: string; fav?: string; page?: string; programa?: string; ordem?: string; loja?: string }> }) {
   const user = await requirePageUser();
   const sp = await searchParams;
   const tab = sp.tab === "alertas" ? "alertas" : sp.tab === "compras" ? "compras" : "lojas";
@@ -23,7 +23,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: Pr
   );
 }
 
-async function Stores({ userId, sp }: { userId: string; sp: { q?: string; fav?: string; page?: string; programa?: string; ordem?: string } }) {
+async function Stores({ userId, sp }: { userId: string; sp: { q?: string; fav?: string; page?: string; programa?: string; ordem?: string; loja?: string } }) {
   const sort = (["popular", "points", "cashback", "name"] as const).find((x) => x === sp.ordem) ?? "popular";
   const [data, programs] = await Promise.all([
     listStores(userId, { q: sp.q, favorites: sp.fav === "1", page: Number(sp.page) || 1, programId: sp.programa || undefined, sort }),
@@ -33,9 +33,9 @@ async function Stores({ userId, sp }: { userId: string; sp: { q?: string; fav?: 
   return (
     <>
       <StoresToolbar q={sp.q ?? ""} fav={sp.fav === "1"} programId={sp.programa ?? ""} sort={sort} programs={programs.map((p) => ({ id: p.id, name: p.name }))} />
-      <StoresGrid items={data.items} />
+      <StoresGrid items={data.items} openId={sp.loja} />
       <Pagination page={data.page} pages={data.pages} total={data.total} pageSize={18} href={href} />
-      <p className="mt-4 text-xs text-muted">Ofertas cadastradas pelo administrador. Confira sempre no site da loja ou do programa antes de comprar.</p>
+      <p className="mt-4 text-xs text-muted">Pontos e cashback lidos automaticamente nos sites dos programas e portais que permitem (Esfera, Méliuz) e nas páginas enviadas pelo administrador (Livelo). Confira sempre no site antes de comprar.</p>
     </>
   );
 }
