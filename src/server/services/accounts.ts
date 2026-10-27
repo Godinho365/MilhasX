@@ -1,4 +1,5 @@
 // Detalhe da conta: recorrências (clubes), compras bonificadas pendentes e credenciais criptografadas.
+import { beneficiaryExpiry, beneficiaryKey, countDistinct, effectiveLimit, holderCpf, windowStart, withoutHolder, type BeneficiaryWindow } from "@/domain/beneficiaries";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { EntryType, RecurrenceFrequency } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
@@ -362,3 +363,62 @@ export async function deleteCredential(userId: string, accountId: string) {
 }
 
 export { utcDate };
+
+/* ---------------- Limite de beneficiários ---------------- */
+
+export async function beneficiaryState(userId: string, accountId: string, now = new Date()) {
+  const acc = await prisma.account.findFirst({ where: { id: accountId, userId }, include: { program: { select: { code: true } }, holder: { select: { name: true, documents: true } } } });
+  if (!acc) throw new DomainError(404, "Conta não encontrada");
+  const eff = effectiveLimit(acc, acc.program.code);
+  const since = windowStart(eff.window, now);
+  const list = await prisma.accountBeneficiary.findMany({ where: { accountId }, orderBy: { usedAt: "desc" }, take: 500 });
+  // O titular está sempre vinculado à conta e não gasta vaga
+  const holder = { name: acc.holder.name, document: holderCpf(acc.holder.documents) };
+  const others = withoutHolder(list, holder);
+  const hk = beneficiaryKey(holder);
+  return {
+    limit: eff.limit,
+    window: eff.window,
+    suggested: eff.suggested,
+    used: countDistinct(others, since),
+    since: since.toISOString(),
+    holder,
+    items: list.map((b) => ({
+      id: b.id, name: b.name, document: b.document, usedAt: b.usedAt.toISOString(), fromSale: !!b.saleId,
+      inWindow: b.usedAt >= since, expiresAt: beneficiaryExpiry(eff.window, b.usedAt).toISOString(),
+      isHolder: !others.includes(b) || beneficiaryKey(b) === hk,
+    })),
+  };
+}
+
+export async function setBeneficiaryLimit(userId: string, accountId: string, input: { limit: number | null; window: BeneficiaryWindow }) {
+  const { count } = await prisma.account.updateMany({ where: { id: accountId, userId }, data: { beneficiaryLimit: input.limit, beneficiaryWindow: input.window } });
+  if (!count) throw new DomainError(404, "Conta não encontrada");
+}
+
+export async function addBeneficiary(userId: string, accountId: string, input: { name: string; document?: string | null; usedAt: Date }) {
+  const acc = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { id: true } });
+  if (!acc) throw new DomainError(404, "Conta não encontrada");
+  return prisma.accountBeneficiary.create({ data: { userId, accountId, name: input.name.trim(), document: input.document?.replace(/\D/g, "") || null, usedAt: input.usedAt } });
+}
+
+export async function removeBeneficiary(userId: string, accountId: string, id: string) {
+  const b = await prisma.accountBeneficiary.findFirst({ where: { id, accountId, userId } });
+  if (!b) throw new DomainError(404, "Beneficiário não encontrado");
+  if (b.saleId) throw new DomainError(409, "Este beneficiário veio de uma venda; exclua a venda para tirá-lo da lista.");
+  await prisma.accountBeneficiary.delete({ where: { id } });
+}
+
+/** CPFs usados na janela de cada conta (para a coluna "CPFs" da lista de programas). */
+export async function beneficiaryUsage(userId: string, now = new Date()) {
+  const accs = await prisma.account.findMany({ where: { userId }, select: { id: true, beneficiaryLimit: true, beneficiaryWindow: true, program: { select: { code: true } }, holder: { select: { name: true, documents: true } } } });
+  const rows = await prisma.accountBeneficiary.findMany({ where: { userId, usedAt: { gte: new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)) } }, select: { accountId: true, name: true, document: true, usedAt: true } });
+  const out: Record<string, { used: number; limit: number | null }> = {};
+  for (const a of accs) {
+    const eff = effectiveLimit(a, a.program.code);
+    if (eff.limit == null) continue;
+    const mine = withoutHolder(rows.filter((r) => r.accountId === a.id), { name: a.holder.name, document: holderCpf(a.holder.documents) });
+    out[a.id] = { used: countDistinct(mine, windowStart(eff.window, now)), limit: eff.limit };
+  }
+  return out;
+}

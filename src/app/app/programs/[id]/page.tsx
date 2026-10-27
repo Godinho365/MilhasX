@@ -9,6 +9,7 @@ import { fmtBRL, fmtPts, fmtSignedPts } from "@/lib/format";
 import { ENTRY_LABELS } from "@/domain/ledger";
 import { ProgramDot } from "@/components/stat";
 import { Recurrences, PendingPurchases, Credentials } from "./client";
+import { BeneficiaryLimit } from "./beneficiaries";
 
 const dm = (d: Date) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "");
 
@@ -61,12 +62,16 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
+      {(a.program.kind === "MILES" || a.beneficiaryLimit != null) && <div className="mb-4"><BeneficiaryLimit accountId={a.id} /></div>}
+
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <IconStat label="Saldo atual" value={fmtPts(stats.balance)} icon={<Wallet className="h-5 w-5" />} />
         <IconStat label="Custo do milheiro" value={money(stats.cpmCents)} icon={<Target className="h-5 w-5" />} />
         <IconStat label="Pontos a receber" value={fmtPts(stats.pendingPoints)} icon={<Package className="h-5 w-5" />} />
         <IconStat label="Valor em reais" value={money(stats.marketValueCents)} icon={<DollarSign className="h-5 w-5" />} />
       </div>
+
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
         <section className="card card-pad">

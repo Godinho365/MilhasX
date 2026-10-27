@@ -15,7 +15,7 @@ import { Modal, Field, Alert, Empty, SegmentedButtons } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { HoldersTab, HolderDialog, type HolderFull } from "./holders";
 
-type Acc = { cards?: string[]; id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; updatedAt: string };
+type Acc = { cards?: string[]; cpf?: { used: number; limit: number | null } | null; id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; updatedAt: string };
 type P = { id: string; name: string; balance: number; costCents: number; cpmCents: number | null; color: string; logo?: string | null; holders: number };
 
 export function ProgramsClient(props: { view: "programas" | "titulares"; holders: HolderFull[]; programs: { id: string; name: string; color: string }[]; accounts: Acc[]; byProgram: P[] }) {
@@ -138,7 +138,7 @@ export function ProgramsClient(props: { view: "programas" | "titulares"; holders
                             </td>
                             <td className="text-right tabular-nums">{fmtPts(a.balance)}</td>
                             <td className="text-right tabular-nums">{a.cpmCents != null ? fmtBRL(a.cpmCents) : "-"}</td>
-                            <td className="hidden text-right tabular-nums sm:table-cell">{a.cpfAvailable ?? "-"}</td>
+                            <td className="hidden text-right tabular-nums sm:table-cell" title={a.cpf ? "CPFs usados / limite do programa" : undefined}>{a.cpf ? <span className={a.cpf.limit != null && a.cpf.used >= a.cpf.limit ? "text-red-300" : ""}>{a.cpf.used} / {a.cpf.limit}</span> : a.cpfAvailable ?? "-"}</td>
                             <td className="hidden text-muted md:table-cell">{fmtDate(a.updatedAt)}</td>
                             <td className="whitespace-nowrap text-right">
                               <button className={`btn-subtle h-8 w-8 px-0 ${a.pinned ? "text-accent-light" : ""}`} onClick={() => run(api(`/api/accounts/${a.id}`, "PATCH", { pinned: !a.pinned }), a.pinned ? "Conta tirada da barra lateral" : "Conta fixada na barra lateral")} aria-pressed={a.pinned} aria-label={a.pinned ? `Desafixar ${a.label} da barra lateral` : `Fixar ${a.label} na barra lateral`} title={a.pinned ? "Desafixar da barra lateral" : "Fixar na barra lateral"} disabled={a.archived}>

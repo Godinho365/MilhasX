@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar, Legend, PieChart, Pie, Cell } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar, Legend, PieChart, Pie, Cell, LabelList } from "recharts";
 import { seriesColor } from "@/lib/colors";
 import { SegmentedButtons } from "./ui";
 
@@ -53,13 +53,16 @@ export function HolderEvolution({ holders, points, costs }: { holders: { id: str
 export function HBar({ data, unit = "pts" }: { data: { name: string; value: number; color?: string }[]; unit?: string }) {
   if (data.length === 0) return <p className="py-8 text-center text-sm text-muted">Sem dados no período.</p>;
   return (
-    <div className="chart-strong w-full" style={{ height: Math.max(120, data.length * 38) }} role="img" aria-label="Gráfico de barras">
+    <div className="chart-strong w-full" style={{ height: Math.max(96, data.length * 44) }} role="img" aria-label="Gráfico de barras">
       <ResponsiveContainer>
-        <BarChart data={data} layout="vertical" margin={{ left: 0, right: 16 }}>
+        <BarChart data={data} layout="vertical" margin={{ left: 0, right: 56, top: 4, bottom: 4 }}>
           <XAxis type="number" hide />
           <YAxis type="category" dataKey="name" width={150} tick={{ fill: "#d4d4d8", fontSize: 12 }} tickLine={false} axisLine={false} />
           <Tooltip cursor={{ fill: "#18181b" }} contentStyle={tooltipStyle} formatter={(v: number) => [`${nf.format(v)} ${unit}`, ""]} />
-          <Bar dataKey="value" fill="#60a5fa" radius={[0, 6, 6, 0]} isAnimationActive={false} barSize={18} />
+          <Bar dataKey="value" fill="#60a5fa" radius={[0, 6, 6, 0]} isAnimationActive={false} barSize={22} background={{ fill: "rgb(var(--panel2))", radius: 6 }}>
+            {data.map((d, i) => <Cell key={d.name} fill={d.color ?? DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+            <LabelList dataKey="value" position="right" formatter={(v: number) => nf.format(v)} className="fill-zinc-300 text-xs font-semibold tabular-nums" />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -140,15 +143,19 @@ export function Donut({ data, unit = "pts", money = false, label }: { data: { na
   const pct = (v: number) => `${((v / total) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
   return (
     <div>
-      <div className="h-64 w-full" role="img" aria-label={label}>
+      <div className="relative h-60 w-full" role="img" aria-label={label}>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-[11px] uppercase tracking-wider text-muted">Total</span>
+          <span className="text-base font-semibold tabular-nums">{fmt(total)}</span>
+        </div>
         <ResponsiveContainer>
           <PieChart>
             <Pie
               data={colored}
               dataKey="value"
               nameKey="name"
-              innerRadius="52%"
-              outerRadius="78%"
+              innerRadius="62%"
+              outerRadius="80%"
               paddingAngle={1}
               stroke="rgb(var(--panel))"
               strokeWidth={2}

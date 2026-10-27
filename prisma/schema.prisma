@@ -258,12 +258,15 @@ model Account {
   archived      Boolean  @default(false)
   tags          String[] @default([])
   cpfAvailable  Int? // CPFs (passageiros) que ainda podem ser emitidos
+  beneficiaryLimit  Int? // limite de beneficiários (CPFs distintos) do programa; vazio = sugestão do programa
+  beneficiaryWindow String  @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   entries        Entry[]
   sales          Sale[]
   alerts         Alert[]
+  beneficiaries  AccountBeneficiary[]
   cards          CreditCard[]
   recurrences    Recurrence[]
   bonusPurchases BonusPurchase[]
@@ -351,6 +354,7 @@ model Sale {
 
   items       SaleItem[]
   attachments SaleAttachment[]
+  beneficiaries AccountBeneficiary[]
 
   @@index([userId, occurredAt])
 }
@@ -998,4 +1002,21 @@ model OrderAccess {
   createdAt   DateTime    @default(now())
 
   @@index([orderId])
+}
+
+// Beneficiário (CPF) que recebeu uma emissão com os pontos da conta. Vem das vendas (clientes do
+// item) ou é informado à mão; conta para o limite de beneficiários do programa.
+model AccountBeneficiary {
+  id        String   @id @default(cuid())
+  userId    String
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  saleId    String?
+  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  name      String
+  document  String? // CPF só com dígitos
+  usedAt    DateTime
+  createdAt DateTime @default(now())
+
+  @@index([accountId, usedAt])
 }

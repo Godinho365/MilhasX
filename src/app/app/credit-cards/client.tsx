@@ -1,17 +1,18 @@
 "use client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
-import { useState } from "react";
-import { CreditCard, Plus, Trash2, FileCheck2, CircleAlert, ReceiptText, Pencil } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CreditCard, Trash2, ReceiptText, Pencil, Trophy, MoreHorizontal, ChevronsUpDown, ChevronRight, Wallet } from "lucide-react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
-import { ProgramDot } from "@/components/stat";
+import { ProgramLogo } from "@/components/program-logo";
 import { toast, confirmDialog } from "@/components/feedback";
 import { feeCpmCents, simulateMonth } from "@/domain/cards";
 
 type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; pointsIncluded: boolean; status: "OPEN" | "CLOSED" | "RECEIVED" };
-type Card = { id: string; name: string; brand: string | null; program: string; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; accountCpmCents: number | null; accountBalance: number; openFeeCents: number; received: number; invoices: Invoice[] };
+type Card = { id: string; name: string; brand: string | null; program: string; programId: string; logo: string | null; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; accountCpmCents: number | null; accountBalance: number; openFeeCents: number; received: number; invoices: Invoice[] };
 const money = (c: number | null | undefined) => (c ? (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "");
 
 const STATUS: Record<Invoice["status"], { label: string; cls: string }> = {
@@ -27,33 +28,28 @@ function nextDate(day: number, after = new Date()) {
 }
 
 type Stats = { activePoints: number; expectedPoints: number; openCents: number; receivedPoints: number; actionCards: number; totalCards: number };
-type Tab = "resumo" | "faturas" | "cartoes";
-type InvoiceFilter = "all" | "OPEN" | "CLOSED" | "RECEIVED";
 
 export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]; accounts: { id: string; label: string }[]; actions: { cardId: string; card: string; invoiceId: string; dueDate: string; amountCents: number }[]; stats: Stats }) {
   const router = useRouter();
-  // A aba fica no endereço (?tab=) para sobreviver a um recarregamento depois de salvar
-  const params = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => (["resumo", "faturas", "cartoes"] as const).find((t) => t === params.get("tab")) ?? "resumo");
-  const [invFilter, setInvFilter] = useState<InvoiceFilter>("all");
-  const go = (t: Tab, filter: InvoiceFilter = "all") => {
-    setTab(t);
-    setInvFilter(filter);
-    window.history.replaceState(null, "", t === "resumo" ? window.location.pathname : `?tab=${t}`);
-  };
   const [cardModal, setCardModal] = useState(false);
   const [editing, setEditing] = useState<Card | null>(null);
   const [invoiceFor, setInvoiceFor] = useState<Card | null>(null);
+  const [registering, setRegistering] = useState<(Invoice & { card: Card }) | null>(null);
+  const [showPast, setShowPast] = useState(false);
   const [erro, setErro] = useState("");
+  const newCard = () => { setErro(""); setEditing(null); setCardModal(true); };
+  useEffect(() => {
+    window.addEventListener("mm:new-card", newCard);
+    return () => window.removeEventListener("mm:new-card", newCard);
+  }, []);
 
   async function saveCard(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const rate = parseBRLToCents(String(f.get("rate") || "5,50"));
     const fee = parseBRLToCents(String(f.get("fee") || "0"));
-    if (rate === null || fee === null) return setErro("Valor inválido");
     const waiver = parseBRLToCents(String(f.get("waiver") || "0"));
-    if (waiver === null) return setErro("Valor inválido");
+    if (rate === null || fee === null || waiver === null) return setErro("Valor inválido");
     const body = {
       accountId: f.get("accountId"), name: f.get("name"), brand: f.get("brand") || null,
       pointsPerDollar: Math.round(Number(String(f.get("ppd")).replace(",", ".")) * 100), dollarRateCents: rate,
@@ -87,12 +83,16 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     toast("Fatura adicionada");
     refreshSafe(router);
   }
-  async function close(invoiceId: string) {
-    const ok = await confirmDialog({ title: "Fechar fatura?", body: "Os pontos esperados entram no extrato como “a receber”. Quando caírem na conta, marque como recebidos no extrato.", confirmLabel: "Fechar fatura" });
-    if (!ok) return;
-    const r = await api(`/api/invoices/${invoiceId}/close`, "POST");
-    if (!r.ok) return toast(r.erro, "error");
-    toast("Fatura fechada");
+  async function register(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!registering) return;
+    const f = new FormData(e.currentTarget);
+    const points = Number(String(f.get("points") || "0").replace(/\D/g, ""));
+    const r = await api(`/api/invoices/${registering.id}/register`, "POST", { points, date: f.get("date") });
+    if (!r.ok) return setErro(r.erro);
+    setErro("");
+    setRegistering(null);
+    toast("Pontos registrados");
     refreshSafe(router);
   }
   async function markIncluded(id: string) {
@@ -103,8 +103,14 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     toast("Fatura marcada como incluída no saldo");
     refreshSafe(router);
   }
+  async function setIncluded(id: string, included: boolean) {
+    const r = await api(`/api/invoices/${id}`, "PATCH", { pointsIncluded: included });
+    if (!r.ok) return toast(r.erro, "error");
+    toast(included ? "Fatura marcada como incluída no saldo" : "Os pontos desta fatura serão lançados à parte");
+    refreshSafe(router);
+  }
   async function delInvoice(id: string) {
-    if (!(await confirmDialog({ title: "Excluir fatura?", body: "Se ela já foi fechada, o lançamento de pontos também é excluído.", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirmDialog({ title: "Excluir fatura?", body: "Se os pontos já foram lançados, o lançamento também é excluído.", confirmLabel: "Excluir", danger: true }))) return;
     const r = await api(`/api/invoices/${id}`, "DELETE");
     if (!r.ok) return toast(r.erro, "error");
     toast("Fatura excluída");
@@ -118,135 +124,124 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     refreshSafe(router);
   }
 
-  const invoices = cards.flatMap((c) => c.invoices.map((i) => ({ ...i, card: c }))).sort((a, b) => b.dueDate.localeCompare(a.dueDate)).filter((i) => invFilter === "all" || i.status === invFilter);
-  const kpi = (label: string, value: string, hint: string, onClick: () => void) => (
-    <button type="button" onClick={onClick} className="card card-pad text-left transition-colors hover:border-zinc-500" aria-label={`${label}: ${value}`}>
-      <p className="kicker">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums tracking-tight sm:text-[28px]">{value}</p>
-      <p className="mt-1 text-xs text-muted">{hint}</p>
-    </button>
+  const now = Date.now();
+  const all = cards.flatMap((c) => c.invoices.map((i) => ({ ...i, card: c }))).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const upcoming = all.filter((i) => i.status !== "RECEIVED" && !(i.pointsIncluded && i.status === "CLOSED"));
+  const past = all.filter((i) => !upcoming.includes(i)).reverse();
+  const needsAction = (c: Card) => c.invoices.some((i) => invoiceState(i, now).action === "register");
+  const first = actions[0] ?? (() => { const i = upcoming.find((x) => invoiceState(x, now).action === "register"); return i ? { cardId: i.card.id, card: i.card.name, invoiceId: i.id, dueDate: i.dueDate, amountCents: i.amountCents } : null; })();
+  const kpi = (label: string, value: string, hint: string, tone: string) => (
+    <div className={`card card-pad bg-gradient-to-br ${tone}`} aria-label={`${label}: ${value}`}>
+      <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted">{label}<ChevronsUpDown className="h-3.5 w-3.5" aria-hidden /></p>
+      <p className="mt-2 text-[28px] font-semibold tabular-nums tracking-tight">{value}</p>
+      <p className="mt-1 text-sm text-muted">{hint}</p>
+    </div>
   );
+  const invoiceRow = (i: Invoice & { card: Card }) => {
+    const st = invoiceState(i, now);
+    return (
+      <tr key={i.id}>
+        <td><span className="flex items-center gap-2 font-medium"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: i.card.color }} aria-hidden />{i.card.name}</span></td>
+        <td className="whitespace-nowrap"><span className="flex items-center gap-2" title={`Fecha ${fmtDate(i.closingDate)} · vence ${fmtDate(i.dueDate)}`}><span className={`h-2 w-2 rounded-full ${Date.parse(i.dueDate) < now && st.action === "register" ? "bg-red-400" : "bg-zinc-500"}`} aria-hidden />{shortDate(i.dueDate)}</span></td>
+        <td><span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${st.cls}`}>{st.label}</span></td>
+        <td className="whitespace-nowrap font-semibold tabular-nums">{fmtBRL(i.amountCents)}</td>
+        <td className="tabular-nums">{i.expectedPoints > 0 ? <>{fmtPts(i.expectedPoints)}{i.pointsIncluded && <span className="block text-[11px] text-muted">já no saldo</span>}</> : "--"}</td>
+        <td className="whitespace-nowrap">
+          <span className="flex items-center justify-end gap-1.5">
+            {st.action === "register" && <button type="button" className="btn-ghost h-8 px-3 text-xs" onClick={() => { setErro(""); setRegistering(i); }}><Trophy className="h-3.5 w-3.5" />Registrar pontos</button>}
+            {st.action === "unmark" && <button type="button" className="btn-ghost h-8 px-3 text-xs" onClick={() => setIncluded(i.id, false)} title="Os pontos desta fatura ainda não estão no saldo do cartão">Lançar pontos à parte</button>}
+            {st.action === "none" && i.status === "RECEIVED" && <Link href="/app/entries" className="btn-ghost h-8 px-3 text-xs">Ver no extrato</Link>}
+            {st.action === "none" && i.status !== "RECEIVED" && <span className="px-3 text-xs text-muted">Nada a fazer</span>}
+            <RowMenu label={`Ações da fatura de ${shortDate(i.dueDate)}`} items={[
+              ...(st.action === "register" ? [{ label: "Pontos já estão no saldo", icon: <Wallet className="h-4 w-4" />, onClick: () => markIncluded(i.id) }] : []),
+              { label: "Excluir fatura", icon: <Trash2 className="h-4 w-4" />, onClick: () => delInvoice(i.id), danger: true },
+            ]} />
+          </span>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <>
-      <div className="mb-5 flex justify-center">
-        <nav className="inline-flex gap-1 rounded-xl border border-line bg-panel p-1" role="tablist" aria-label="Cartões">
-          {([["resumo", "Resumo"], ["faturas", "Faturas"], ["cartoes", "Cartões"]] as const).map(([k, l]) => (
-            <button key={k} role="tab" aria-selected={tab === k} onClick={() => go(k)} className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${tab === k ? "bg-panel2 text-white shadow-sm" : "text-muted hover:text-zinc-100"}`}>{l}</button>
-          ))}
-        </nav>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {kpi("Pontos esperados", fmtPts(stats.expectedPoints), "Próximas faturas", "from-panel to-panel")}
+        {kpi("Valor em aberto", fmtBRL(stats.openCents), "Próximas faturas", "from-panel to-panel")}
+        {kpi("Pontos recebidos", fmtPts(stats.receivedPoints), "De todas as faturas", "from-panel to-panel")}
+        {kpi("Ação necessária", `${stats.actionCards} de ${stats.totalCards}`, stats.actionCards ? (stats.actionCards === 1 ? "cartão precisa de atenção" : "cartões precisam de atenção") : "tudo em dia", stats.actionCards ? "from-panel to-amber-500/10" : "from-panel to-panel")}
       </div>
 
-      {tab === "resumo" && (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5 [&>*:first-child]:col-span-2 lg:[&>*:first-child]:col-span-1">
-            {kpi("Pontos ativos no cartão", fmtPts(stats.activePoints), stats.activePoints ? "Já acumulados nos cartões" : "Informe em Cartões › editar", () => go("cartoes"))}
-            {kpi("Pontos esperados", fmtPts(stats.expectedPoints), "Próximas faturas", () => go("faturas", "OPEN"))}
-            {kpi("Valor em aberto", fmtBRL(stats.openCents), "Próximas faturas", () => go("faturas", "OPEN"))}
-            {kpi("Pontos recebidos", fmtPts(stats.receivedPoints), "De todas as faturas", () => go("faturas", "RECEIVED"))}
-            {kpi("Ação necessária", `${stats.actionCards} de ${stats.totalCards}`, stats.actionCards ? "cartão precisa de atenção" : "tudo em dia", () => go(stats.actionCards ? "resumo" : "cartoes"))}
+      {first && (
+        <section className="card mb-4 flex flex-wrap items-center gap-3 bg-gradient-to-r from-accent-soft/60 to-panel px-5 py-4" aria-label="Próximo passo">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Próximo passo</p>
+            <p className="truncate text-sm text-muted">{first.card} · Fatura de {new Date(first.dueDate).toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })} · {fmtBRL(first.amountCents)}</p>
           </div>
-          {actions.length > 0 ? (
-            <section className="card overflow-hidden" aria-label="Próximo passo">
-              <h2 className="flex items-center gap-2 border-b border-line px-5 py-4 font-semibold"><CircleAlert className="h-5 w-5 text-amber-300" />Próximo passo</h2>
-              <ul className="divide-y divide-line">
-                {actions.map((a) => (
-                  <li key={a.invoiceId} className="flex flex-wrap items-center gap-3 px-5 py-3">
-                    <p className="min-w-0 flex-1 truncate text-sm">{a.card} · Fatura de {new Date(a.dueDate).toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })} · {fmtBRL(a.amountCents)}</p>
-                    <button className="btn-ghost h-8" onClick={() => close(a.invoiceId)}><FileCheck2 className="h-4 w-4" />Fechar fatura</button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : cards.length === 0 ? (
-            <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
-              <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
-              <button className="btn-primary" onClick={() => { setErro(""); setEditing(null); setCardModal(true); }} disabled={accounts.length === 0}>Novo cartão</button>
-            </Empty>
-          ) : (
-            <p className="card card-pad text-center text-sm text-muted">Tudo em dia: nenhuma fatura precisa de ação agora.</p>
-          )}
-        </>
-      )}
-
-      {tab === "faturas" && (
-        <section className="card overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-3">
-            <h2 className="mr-auto text-lg font-semibold">Faturas</h2>
-            <select className="input h-9 w-44" value={invFilter} onChange={(e) => setInvFilter(e.target.value as InvoiceFilter)} aria-label="Situação da fatura">
-              <option value="all">Todas</option>
-              <option value="OPEN">Em aberto</option>
-              <option value="CLOSED">Fechadas (a receber)</option>
-              <option value="RECEIVED">Recebidas</option>
-            </select>
-          </div>
-          {invoices.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{cards.length ? "Nenhuma fatura nessa situação. Adicione faturas na aba Cartões." : "Cadastre um cartão na aba Cartões."}</p> : (
-            <ul className="divide-y divide-line">
-              {invoices.map((i) => (
-                <li key={i.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{i.card.name}</p>
-                    <p className="text-xs text-muted">Fecha {fmtDate(i.closingDate)} · vence {fmtDate(i.dueDate)}</p>
-                  </div>
-                  {i.pointsIncluded ? <span className="rounded-full bg-panel2 px-2 py-0.5 text-xs font-medium text-muted">Pontos já no saldo do cartão</span> : <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS[i.status].cls}`}>{STATUS[i.status].label}</span>}
-                  <span className="w-24 text-right font-medium tabular-nums">{fmtBRL(i.amountCents)}</span>
-                  <span className="w-28 text-right text-sm tabular-nums text-muted">{fmtPts(i.expectedPoints)} pts</span>
-                  <span className="w-36 text-right text-xs tabular-nums text-muted" title="Parcela da anuidade nesta fatura e o custo por milheiro que ela gera">{i.feeCents > 0 ? <>Anuidade {fmtBRL(i.feeCents)}<br />CPM {fmtBRL(feeCpmCents(i.feeCents, i.expectedPoints))}</> : i.card.annualFeeCents > 0 ? "Anuidade isenta" : "Sem anuidade"}</span>
-                  <span className="flex gap-1">
-                    {i.status === "OPEN" && <button className="btn-ghost h-8" onClick={() => close(i.id)}>Fechar fatura</button>}
-                    {!i.pointsIncluded && i.status !== "RECEIVED" && <button className="btn-subtle h-8 px-2 text-xs" onClick={() => markIncluded(i.id)} title="Os pontos desta fatura já estão no saldo acumulado do cartão">Já no saldo</button>}
-                    <button className="btn-subtle h-8 w-8 px-0" onClick={() => delInvoice(i.id)} aria-label="Excluir fatura"><Trash2 className="h-4 w-4" /></button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <button type="button" className="btn-ghost h-9 bg-panel" onClick={() => { const i = all.find((x) => x.id === first.invoiceId); if (i) { setErro(""); setRegistering(i); } }}><Trophy className="h-4 w-4" />Registrar pontos</button>
         </section>
       )}
 
-      {tab === "cartoes" && (
-        <>
-          <div className="mb-3 flex justify-end"><button className="btn-primary" onClick={() => { setErro(""); setEditing(null); setCardModal(true); }} disabled={accounts.length === 0}><Plus className="h-4 w-4" />Novo cartão</button></div>
-          {cards.length === 0 ? (
-            <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
-              <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
-            </Empty>
-          ) : (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="table-base">
-                  <thead><tr><th>Cartão</th><th className="text-right">Pontuação</th><th className="hidden text-right sm:table-cell">Fechamento / venc.</th><th className="hidden text-right lg:table-cell">Anuidade / CPM</th><th className="hidden text-right md:table-cell">Recebido</th><th className="w-28 text-right">Ações</th></tr></thead>
-                  <tbody>
-                    {cards.map((c) => (
-                      <tr key={c.id}>
-                        <td>
-                          <span className="flex items-center gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${c.color}26`, color: c.color }}><CreditCard className="h-4 w-4" /></span>
-                            <span className="min-w-0">
-                              <span className="block truncate font-semibold">{c.name}</span>
-                              <span className="flex items-center gap-1.5 truncate text-xs text-muted"><ProgramDot color={c.color} />{c.program} · {c.holder}{c.brand && ` · ${c.brand}`}</span>
-                              {c.balancePoints > 0 && <span className="block text-xs font-medium text-accent-light">{fmtPts(c.balancePoints)} pts acumulados no cartão</span>}
-                              <span className="block text-xs text-muted">Saldo {fmtPts(c.accountBalance)} pts · CPM atual {c.accountCpmCents != null ? `${fmtBRL(c.accountCpmCents)}/mil` : "R$ 0,00 (orgânico)"}{c.openFeeCents > 0 && ` (com ${fmtBRL(c.openFeeCents)} de anuidade do mês)`}</span>
-                            </span>
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap text-right tabular-nums">{c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</td>
-                        <td className="hidden text-right tabular-nums text-muted sm:table-cell">dia {c.closingDay} / dia {c.dueDay}</td>
-                        <td className="hidden text-right text-xs tabular-nums lg:table-cell"><FeeSummary c={c} /></td>
-                        <td className="hidden text-right tabular-nums md:table-cell">{c.received ? fmtPts(c.received) : "-"}</td>
-                        <td className="whitespace-nowrap text-right">
-                          <button className="btn-subtle h-8 w-8 px-0" onClick={() => { setErro(""); setInvoiceFor(c); }} aria-label={`Adicionar fatura de ${c.name}`} title="Adicionar fatura"><ReceiptText className="h-4 w-4" /></button>
-                          <button className="btn-subtle h-8 w-8 px-0" onClick={() => { setErro(""); setEditing(c); setCardModal(true); }} aria-label={`Editar ${c.name}`} title="Editar"><Pencil className="h-4 w-4" /></button>
-                          <button className="btn-subtle h-8 w-8 px-0" onClick={() => delCard(c)} aria-label={`Excluir ${c.name}`}><Trash2 className="h-4 w-4" /></button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+      {cards.length === 0 ? (
+        <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
+          <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
+          <button className="btn-primary" onClick={newCard} disabled={accounts.length === 0}>Novo cartão</button>
+        </Empty>
+      ) : (
+        <section className="card mb-4 overflow-visible" aria-label="Cartões">
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead><tr><th>Cartão</th><th>Pontuação</th><th className="hidden md:table-cell">Acumulado · CPM</th><th>Status</th><th className="w-12" /></tr></thead>
+              <tbody>
+                {cards.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <span className="flex items-center gap-3">
+                        <ProgramLogo programId={c.programId} name={c.program} color={c.color} version={c.logo} size={36} />
+                        <span className="min-w-0">
+                          <span className="flex flex-wrap items-center gap-2"><span className="truncate font-semibold">{c.name}</span>{c.brand && <span className="rounded border border-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">{c.brand}</span>}</span>
+                          <span className="block truncate text-xs text-muted">{c.program} · {c.holder}</span>
+                        </span>
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap tabular-nums">{c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</td>
+                    <td className="hidden tabular-nums md:table-cell">
+                      <span className="font-medium">{c.balancePoints > 0 ? `${fmtPts(c.balancePoints)} pts` : "--"}</span>
+                      <span className="block text-[11px] text-muted">CPM {c.accountCpmCents != null ? fmtBRL(c.accountCpmCents) : "R$ 0,00"}{c.annualFeeCents > 0 ? ` · anuidade ${fmtBRL(Math.round(c.annualFeeCents / 12))}/mês` : ""}</span>
+                    </td>
+                                        <td className="whitespace-nowrap text-sm">{needsAction(c) ? <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-400" aria-hidden />Registrar pontos</span> : <span className="flex items-center gap-1.5 text-muted"><span className="h-2 w-2 rounded-full bg-zinc-500" aria-hidden />Em dia</span>}</td>
+                    <td className="text-right">
+                      <RowMenu label={`Ações de ${c.name}`} items={[
+                        { label: "Adicionar fatura", icon: <ReceiptText className="h-4 w-4" />, onClick: () => { setErro(""); setInvoiceFor(c); } },
+                        { label: "Editar cartão", icon: <Pencil className="h-4 w-4" />, onClick: () => { setErro(""); setEditing(c); setCardModal(true); } },
+                        { label: "Excluir", icon: <Trash2 className="h-4 w-4" />, onClick: () => delCard(c), danger: true },
+                      ]} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {cards.length > 0 && (
+        <section className="card overflow-hidden" aria-label="Próximas faturas">
+          <h2 className="border-b border-line px-5 py-4 font-semibold">Próximas faturas</h2>
+          {upcoming.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">Nenhuma fatura pendente. Use ⋯ › Adicionar fatura no cartão.</p> : (
+            <div className="overflow-x-auto">
+              <table className="table-base">
+                <thead><tr><th>Cartão</th><th>Datas</th><th>Status</th><th>Valor</th><th>Esperado</th><th className="text-right">Ação</th></tr></thead>
+                <tbody>{upcoming.map(invoiceRow)}</tbody>
+              </table>
             </div>
           )}
-        </>
+          {past.length > 0 && (
+            <div className="border-t border-line">
+              <button type="button" className="flex w-full items-center gap-2 px-5 py-3 text-sm text-muted hover:text-zinc-100" onClick={() => setShowPast(!showPast)} aria-expanded={showPast}><ChevronRight className={`h-4 w-4 transition-transform ${showPast ? "rotate-90" : ""}`} />Faturas anteriores ({past.length})</button>
+              {showPast && <div className="overflow-x-auto"><table className="table-base"><tbody>{past.map(invoiceRow)}</tbody></table></div>}
+            </div>
+          )}
+        </section>
       )}
 
       <Modal open={cardModal} onClose={() => { setCardModal(false); setEditing(null); }} title={editing ? `Editar ${editing.name}` : "Novo cartão"} footer={<><button className="btn-ghost" onClick={() => { setCardModal(false); setEditing(null); }}>Cancelar</button><button form="card-form" className="btn-primary">Salvar</button></>}>
@@ -266,27 +261,32 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
           </form>
         )}
       </Modal>
+      <Modal open={!!registering} onClose={() => setRegistering(null)} title="Registrar pontos" size="sm" footer={<><button className="btn-ghost" onClick={() => setRegistering(null)}>Cancelar</button><button form="register-form" className="btn-primary">Registrar</button></>}>
+        {registering && (
+          <form id="register-form" onSubmit={register} className="space-y-4">
+            {erro && <Alert>{erro}</Alert>}
+            <p className="text-sm text-muted">{registering.card.name} · fatura de {fmtDate(registering.dueDate)} · {fmtBRL(registering.amountCents)}. Informe quantos pontos caíram na conta {registering.card.program} · {registering.card.holder}.</p>
+            <Field label="Pontos recebidos" required hint={registering.expectedPoints > 0 ? `Estimado: ${fmtPts(registering.expectedPoints)} pts` : undefined}><input className="input tabular-nums" name="points" inputMode="numeric" required defaultValue={registering.expectedPoints > 0 ? fmtPts(registering.expectedPoints) : ""} placeholder="0" /></Field>
+            <Field label="Data do crédito" required><input className="input" type="date" name="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+            {registering.feeCents > 0 && <p className="text-xs text-muted">A parcela da anuidade desta fatura ({fmtBRL(registering.feeCents)}) entra como custo destes pontos.</p>}
+          </form>
+        )}
+      </Modal>
     </>
   );
 }
 
-/** Resumo da anuidade do cartão: valor, isenção e o CPM que ela gera na fatura mais recente. */
-function FeeSummary({ c }: { c: Card }) {
-  if (c.annualFeeCents <= 0) return <span className="text-muted">Sem anuidade</span>;
-  const last = c.invoices[0];
-  const sim = last ? null : c.feeWaiverCents ? simulateMonth({ ...c, pointsPerDollar: Math.round(c.pointsPerDollar * 100) }, c.feeWaiverCents - 1) : null;
-  return (
-    <span className="block">
-      <span className="block">{fmtBRL(c.annualFeeCents)}/ano · {fmtBRL(Math.round(c.annualFeeCents / 12))}/mês</span>
-      {c.feeWaiverCents ? <span className="block text-muted">Isenta gastando {fmtBRL(c.feeWaiverCents)}/mês</span> : <span className="block text-muted">Sem isenção</span>}
-      {last ? (
-        <span className="block font-medium">{last.feeCents <= 0 ? "Última fatura isenta" : last.pointsIncluded ? `${fmtBRL(last.feeCents)} de anuidade no CPM do saldo` : `CPM ${fmtBRL(feeCpmCents(last.feeCents, last.expectedPoints))} na última fatura`}</span>
-      ) : sim && sim.cpmCents > 0 ? (
-        <span className="block font-medium">CPM até {fmtBRL(sim.cpmCents)} sem isentar</span>
-      ) : null}
-    </span>
-  );
+/** Situação da fatura como na referência: aberta, fechada, paga (vencida sem pontos), a receber ou recebida. */
+function invoiceState(i: Invoice, now: number): { label: string; cls: string; action: "register" | "unmark" | "none" } {
+  if (i.status === "RECEIVED") return { label: "Pontos recebidos", cls: "bg-green-500/15 text-green-300", action: "none" };
+  if (i.pointsIncluded) return { label: "No saldo do cartão", cls: "bg-panel2 text-muted", action: i.status === "OPEN" ? "unmark" : "none" };
+  if (i.status === "CLOSED") return { label: "A receber", cls: "bg-blue-500/15 text-blue-300", action: "register" };
+  if (Date.parse(i.dueDate) < now) return { label: "Paga", cls: "bg-green-500/15 text-green-300", action: "register" };
+  if (Date.parse(i.closingDate) < now) return { label: "Fechada", cls: "bg-amber-500/15 text-amber-300", action: "register" };
+  return { label: "Aberta", cls: "bg-panel2 text-zinc-300", action: "register" };
 }
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
+
 
 /** Formulário do cartão (novo ou edição) com simulação: gastando X no mês, quantos pontos e qual CPM da anuidade. */
 function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accounts: { id: string; label: string }[]; erro: string; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
@@ -328,5 +328,45 @@ function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accou
         {rule.annualFeeCents > 0 && rule.feeWaiverCents && !s.waived && <p className="mt-2 text-xs text-muted">Faltam {fmtBRL(rule.feeWaiverCents - (parseBRLToCents(spend) ?? 0))} no mês para isentar a anuidade.</p>}
       </section>
     </form>
+  );
+}
+
+type MenuItem = { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean };
+
+/** Menu ⋯ da linha: abre flutuando sobre a página (fixed), então a rolagem da tabela não corta. */
+function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const place = () => {
+    const r = btn.current!.getBoundingClientRect();
+    const h = items.length * 40 + 10;
+    setPos({ top: r.bottom + 4 + h > window.innerHeight ? r.top - h - 4 : r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+  };
+  const open = !!pos;
+  useEffect(() => {
+    if (!open) return;
+    // fecha ao clicar fora; ao rolar, acompanha o botão
+    const close = () => setPos(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  function toggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (pos) return setPos(null);
+    place();
+  }
+  return (
+    <>
+      <button ref={btn} type="button" className="btn-subtle h-8 w-8 px-0" onClick={toggle} aria-label={label} aria-haspopup="menu" aria-expanded={!!pos}><MoreHorizontal className="h-4 w-4" /></button>
+      {pos && (
+        <div role="menu" className="fixed z-50 w-56 rounded-xl border border-line bg-panel p-1 text-left shadow-xl" style={{ top: pos.top, right: pos.right }}>
+          {items.map((it) => (
+            <button key={it.label} role="menuitem" type="button" className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-panel2 ${it.danger ? "text-red-300" : ""}`} onClick={() => { setPos(null); it.onClick(); }}>{it.icon}{it.label}</button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

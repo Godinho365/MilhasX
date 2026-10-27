@@ -1,4 +1,5 @@
 "use client";
+import { BrandMark } from "@/components/brand";
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { watchLinkClicks, refreshSafe } from "@/lib/nav";
@@ -101,6 +102,8 @@ export function Shell(props: {
           ? { label: "Criar nova compra", event: "mm:new-purchase", icon: <ShoppingBag className="h-5 w-5" /> }
         : path === "/app/crm" && search.get("view") !== "dashboard"
           ? { label: "Novo pedido", event: "mm:new-order", icon: <FilePlus2 className="h-5 w-5" /> }
+        : path === "/app/credit-cards"
+          ? { label: "Novo cartão", event: "mm:new-card", icon: <CreditCard className="h-5 w-5" /> }
         : path === "/app/sales" && search.get("tab") !== "clientes"
           ? { label: "Registrar venda", event: "mm:new-sale", icon: <HandCoins className="h-5 w-5" /> }
           : null;
@@ -183,11 +186,11 @@ export function Shell(props: {
   };
 
   const navLink = (href: string, label: string, Icon: Icon, badge?: number, external?: boolean) => {
-    const cls = `relative flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.5px] font-semibold transition-colors ${!external && active(href) ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`;
+    const cls = `relative flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${!external && active(href) ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`;
     const inner = (
       <>
-        {!external && active(href) && <span className="absolute -left-3 top-1.5 h-6 w-[3px] rounded-r bg-accent-light" aria-hidden />}
-        <Icon className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
+        {!external && active(href) && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent-light" aria-hidden />}
+        <Icon className="h-[17px] w-[17px] shrink-0 text-zinc-400" />
         <span className="truncate">{label}</span>
         {!!badge && <span className="ml-auto rounded-full bg-red-500/20 px-1.5 text-[11px] font-semibold text-red-300">{badge > 9 ? "9+" : badge}</span>}
       </>
@@ -219,28 +222,28 @@ export function Shell(props: {
   const pinnedAccounts = visibleAccounts.filter((a) => a.pinned);
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
   const flightsBlock = (
-    <div key="voos" className="space-y-0.5">
+    <div key="voos" className="space-y-px">
       <button
         type="button"
         onClick={toggleFlights}
         aria-expanded={flightsOpen}
         aria-controls="nav-voos"
-        className={`flex w-full items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.5px] font-semibold transition-colors ${inFlights && !flightsOpen ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${inFlights && !flightsOpen ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}
       >
-        <Plane className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
+        <Plane className="h-[17px] w-[17px] shrink-0 text-zinc-400" />
         <span className="truncate">Voos</span>
         <ChevronDown className={`ml-auto h-4 w-4 text-zinc-400 transition-transform ${flightsOpen ? "rotate-180" : ""}`} aria-hidden />
       </button>
       {flightsOpen && (
-        <div id="nav-voos" className="space-y-0.5">
+        <div id="nav-voos" className="space-y-px">
           {FLIGHTS.map((f) => (
             <Link
               key={f.href}
               href={f.href}
               aria-current={active(f.href) ? "page" : undefined}
-              className={`relative block rounded-[10px] py-2 pl-[42px] pr-2.5 text-[13.5px] font-medium transition-colors ${active(f.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
+              className={`relative block rounded-lg py-[6px] pl-[37px] pr-2.5 text-[13px] font-medium transition-colors ${active(f.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
             >
-              {active(f.href) && <span className="absolute -left-3 top-1.5 h-6 w-[3px] rounded-r bg-accent-light" aria-hidden />}
+              {active(f.href) && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent-light" aria-hidden />}
               {f.label}
             </Link>
           ))}
@@ -252,23 +255,22 @@ export function Shell(props: {
 
   const sidebar = (
     <div className="flex h-full flex-col">
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-5">
-        <Link href="/app" className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-400 to-violet-500 text-[13px] font-bold text-white">M</span>
-          {props.appName}
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4">
+        <Link href="/app" className="flex items-center text-[17px]" aria-label={`${props.appName} - início`}>
+          <BrandMark name={props.appName} size={30} />
         </Link>
         <button className="btn-subtle ml-auto h-8 w-8 px-0 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Fechar menu"><X className="h-4 w-4" /></button>
       </div>
-      <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Menu principal">
-        {NAV.map((g) => (
+      <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3" aria-label="Menu principal">
+        {NAV.map((g, i) => (
           <div key={g.group}>
-            <p className="kicker mb-1.5 px-2.5">{g.group}</p>
-            <div className="space-y-0.5">{g.items.map((it) => navLink(it.href, it.label, it.icon))}</div>
+            <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.group}</p>
+            <div className="space-y-px">{g.items.map((it) => navLink(it.href, it.label, it.icon))}{i === 1 && flightsBlock}</div>
           </div>
-        )).flatMap((el, i) => (i === 1 ? [el, flightsBlock] : [el]))}
+        ))}
         <div>
-          <div className="mb-2 flex items-center px-2.5">
-            <p className="kicker">Programas</p>
+          <div className="mb-1.5 flex items-center px-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Programas</p>
             <Link href="/app/programs" className="ml-auto text-xs font-medium text-muted hover:text-white">Ver todos ({visibleAccounts.length})</Link>
           </div>
           {/* Atalhos das contas (titular × programa), maiores saldos primeiro, como na referência */}
@@ -285,7 +287,7 @@ export function Shell(props: {
           </div>
         </div>
       </nav>
-      <div className="space-y-0.5 border-t border-line px-3 py-3">
+      <div className="space-y-px border-t border-line px-3 py-2">
         {navLink("/editor", `Sua ${props.brand}`, Palette)}
         {navLink("/app/guides", "Guias", GraduationCap)}
         {navLink("/app/news", "Novidades", Megaphone, props.unreadNews)}
@@ -372,7 +374,7 @@ export function Shell(props: {
         </div>
       </header>
       {/* O Kanban do CRM usa a largura toda da tela; as outras páginas ficam centralizadas */}
-      <main className={`mx-auto ${path.startsWith("/app/crm") ? "max-w-[1800px]" : "max-w-6xl"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
+      <main className={`mx-auto ${path.startsWith("/app/crm") ? "max-w-[1800px]" : "max-w-[1560px]"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
 
       {/* Barra inferior no celular */}
       <nav aria-label="Navegação rápida" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">

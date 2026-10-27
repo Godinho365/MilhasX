@@ -204,6 +204,31 @@ export async function closeInvoice(userId: string, invoiceId: string) {
   return prisma.cardInvoice.update({ where: { id: inv.id }, data: { status: "CLOSED", entryId } });
 }
 
+/**
+ * "Registrar pontos": os pontos da fatura caíram na conta. Confirma o lançamento (ou cria, se a fatura
+ * ainda não tinha sido fechada) com a quantidade que realmente entrou; a parcela da anuidade é o custo.
+ */
+export async function registerInvoicePoints(userId: string, invoiceId: string, input: { points: number; date: Date }) {
+  const inv = await prisma.cardInvoice.findFirst({ where: { id: invoiceId, card: { userId } }, include: { card: true, entry: { select: { id: true, status: true } } } });
+  if (!inv) throw new DomainError(404, "Fatura não encontrada");
+  if (inv.pointsIncluded) throw new DomainError(409, "Os pontos desta fatura já estão no saldo acumulado do cartão");
+  if (inv.entry?.status === "CONFIRMED") throw new DomainError(409, "Os pontos desta fatura já foram registrados");
+  if (!Number.isInteger(input.points) || input.points <= 0) throw new DomainError(400, "Informe os pontos recebidos");
+  if (inv.entry) {
+    await updateEntry(userId, inv.entry.id, { points: input.points, occurredAt: input.date, status: "CONFIRMED" });
+    return prisma.cardInvoice.update({ where: { id: inv.id }, data: { status: "CLOSED" } });
+  }
+  const { entry } = await createEntry(userId, {
+    accountId: inv.card.accountId,
+    type: "CARD",
+    points: input.points,
+    occurredAt: input.date,
+    description: `Fatura ${inv.card.name} (${inv.dueDate.toISOString().slice(0, 10).split("-").reverse().join("/")})`,
+    costs: inv.feeCents > 0 ? [{ type: "ANUIDADE", amountCents: inv.feeCents, cardId: inv.cardId }] : undefined,
+  });
+  return prisma.cardInvoice.update({ where: { id: inv.id }, data: { status: "CLOSED", entryId: entry.id } });
+}
+
 export async function deleteInvoice(userId: string, invoiceId: string) {
   const inv = await prisma.cardInvoice.findFirst({ where: { id: invoiceId, card: { userId } } });
   if (!inv) throw new DomainError(404, "Fatura não encontrada");
@@ -211,9 +236,10 @@ export async function deleteInvoice(userId: string, invoiceId: string) {
   await prisma.cardInvoice.delete({ where: { id: inv.id } });
 }
 
-export async function cardsOverview(userId: string) {
+export async function cardsOverview(userId: string, holderId?: string) {
   const cards = await prisma.creditCard.findMany({
-    where: { userId },
+    // com um titular marcado, só os cartões que pontuam em contas dele
+    where: { userId, ...(holderId ? { account: { holderId } } : {}) },
     include: {
       account: { include: { program: true, holder: true } },
       balanceEntry: { select: { points: true, occurredAt: true } },

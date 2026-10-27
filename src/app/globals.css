@@ -108,3 +108,8 @@ body { @apply bg-bg font-sans text-zinc-50 antialiased; font-feature-settings: "
 /* Visibilidade dos valores: "Oculto" borra números do conteúdo (passe o mouse para ver) */
 html[data-values="hidden"] main .tabular-nums { filter: blur(7px); transition: filter 0.15s; }
 html[data-values="hidden"] main .tabular-nums:hover { filter: none; }
+
+/* Peças só de um tema (ex.: o logotipo de letras escuras só no claro) */
+[data-theme="dark"] .only-light, [data-theme="light"] .only-dark, [data-theme="client"] .only-dark { display: none; }
+@media (prefers-color-scheme: dark) { [data-theme="system"] .only-light { display: none; } }
+@media (prefers-color-scheme: light) { [data-theme="system"] .only-dark { display: none; } }

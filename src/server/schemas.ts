@@ -442,3 +442,7 @@ export const orderClientInfoSchema = z.object({
   reservation: z.record(z.unknown()).refine((d) => JSON.stringify(d).length <= 5_000, "Reserva grande demais").nullable().optional(),
 });
 export const orderAccessSchema = z.object({ digits: z.string().trim().regex(/^\d{4}$/, "Informe os 4 últimos dígitos") });
+
+export const beneficiaryLimitSchema = z.object({ limit: z.number().int().min(1).max(1000).nullable(), window: z.enum(["ROLLING_12M", "CALENDAR_YEAR"]) });
+export const beneficiarySchema = z.object({ name: z.string().trim().min(2, "Informe o nome").max(120), document: z.string().trim().max(20).nullable().optional(), usedAt: dateStr });
+export const registerPointsSchema = z.object({ points: z.number().int().min(1).max(100_000_000), date: dateStr });

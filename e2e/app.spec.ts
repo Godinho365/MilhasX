@@ -578,11 +578,10 @@ test("promoções: lista, encerradas, filtros e alerta", async () => {
   await expect(page.getByText("Bônus a partir de 30%")).toBeVisible();
 });
 
-test("cartões: cadastro, fatura e fechamento gera pontos a receber", async () => {
+test("cartões: cadastro, fatura e registro de pontos", async () => {
   await page.goto("/app/credit-cards");
-  // abas como na referência: Resumo, Faturas e Cartões
-  await expect(page.getByRole("tab", { name: "Resumo" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "Cartões" }).click();
+  // página única como na referência: indicadores, cartões e próximas faturas
+  await expect(page.getByLabel(/^Ação necessária/)).toBeVisible();
   await page.getByRole("button", { name: "Novo cartão" }).first().click();
   const d = page.getByRole("dialog");
   await d.getByLabel(/Nome do cartão/).fill("Cartão E2E");
@@ -593,27 +592,28 @@ test("cartões: cadastro, fatura e fechamento gera pontos a receber", async () =
   await d.getByRole("button", { name: "Salvar" }).click();
   await toastSays("Cartão cadastrado");
 
-  await page.getByRole("button", { name: "Adicionar fatura de Cartão E2E" }).click();
+  await page.getByRole("button", { name: "Ações de Cartão E2E" }).click();
+  await page.getByRole("menuitem", { name: "Adicionar fatura" }).click();
   const f = page.getByRole("dialog");
   await f.getByLabel(/Valor da fatura/).fill("4.500,00");
   await f.getByLabel(/^Fechamento/).fill("2026-10-03");
   await f.getByLabel(/^Vencimento/).fill("2026-10-10");
+  await f.getByLabel(/já estão no saldo/).setChecked(false);
   await f.getByRole("button", { name: "Adicionar" }).click();
   await toastSays("Fatura adicionada");
-  // indicador clicável leva às faturas em aberto
-  await page.getByRole("tab", { name: "Resumo" }).click();
-  await expect(page.getByRole("region", { name: "Próximo passo" })).toContainText("Cartão E2E");
-  await page.getByRole("button", { name: /^Pontos esperados/ }).click();
-  await expect(page.getByRole("tab", { name: "Faturas" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText("1.800 pts").first()).toBeVisible();
+  const faturas = page.getByRole("region", { name: "Próximas faturas" });
+  await expect(faturas).toContainText("Cartão E2E");
+  await expect(faturas.getByText("1.800").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Fechar fatura" }).first().click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Fechar fatura" }).click();
-  await toastSays("Fatura fechada");
-  // fechada, sai do filtro "Em aberto" e aparece em "Fechadas"
-  await page.getByLabel("Situação da fatura").selectOption("CLOSED");
-  await expect(page.getByText("Pontos a receber").first()).toBeVisible();
-  await page.goto("/app/entries?status=PENDING");
+  // próximo passo: registrar os pontos que caíram
+  await expect(page.getByRole("region", { name: "Próximo passo" })).toContainText("Cartão E2E");
+  await page.getByRole("region", { name: "Próximo passo" }).getByRole("button", { name: "Registrar pontos" }).click();
+  const r = page.getByRole("dialog");
+  await expect(r.getByLabel(/Pontos recebidos/)).toHaveValue("1.800");
+  await r.getByRole("button", { name: "Registrar" }).click();
+  await toastSays("Pontos registrados");
+  await expect(page.getByLabel(/^Pontos recebidos/)).toContainText("1.800");
+  await page.goto("/app/entries");
   await expect(page.getByRole("cell", { name: /Fatura Cartão E2E/ }).first()).toBeVisible();
 });
 

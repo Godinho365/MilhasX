@@ -1,4 +1,4 @@
-import { requirePageUser } from "@/server/session";
+import { requirePageUser, selectedHolderId, holderScopeLabel } from "@/server/session";
 import { cardsOverview } from "@/server/services/extras";
 import { listAccounts } from "@/server/services/wallet";
 import { PageHeader } from "@/components/stat";
@@ -19,16 +19,18 @@ function currentCpm(c: { account: { balance: number; costCents: number }; invoic
 
 export default async function CreditCardsPage() {
   const user = await requirePageUser();
-  const [o, accounts] = await Promise.all([cardsOverview(user.id), listAccounts(user.id)]);
+  // Titular marcado no topo: cartões e contas do formulário só dele
+  const holderId = await selectedHolderId(user.id);
+  const [o, accounts, scope] = await Promise.all([cardsOverview(user.id, holderId), listAccounts(user.id, holderId), holderScopeLabel(holderId)]);
   return (
     <>
-      <PageHeader title="Cartões de Crédito" subtitle="Faturas, pontuação esperada e pontos recebidos de cada cartão" />
+      <PageHeader title="Cartões de Crédito" subtitle={`Faturas, pontuação esperada e pontos recebidos de cada cartão · ${scope}`} />
       <CardsClient
         stats={o.stats}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} · ${a.holder.name}` }))}
         actions={o.actions.map((a) => ({ ...a, dueDate: a.dueDate.toISOString() }))}
         cards={o.cards.map((c) => ({
-          id: c.id, name: c.name, brand: c.brand, program: c.account.program.name, color: c.account.program.color, holder: c.account.holder.name, accountId: c.accountId,
+          id: c.id, name: c.name, brand: c.brand, program: c.account.program.name, programId: c.account.programId, logo: c.account.program.logoUpdatedAt?.getTime().toString() ?? null, color: c.account.program.color, holder: c.account.holder.name, accountId: c.accountId,
           pointsPerDollar: c.pointsPerDollar / 100, dollarRateCents: c.dollarRateCents, closingDay: c.closingDay, dueDay: c.dueDay,
           annualFeeCents: c.annualFeeCents, feeWaiverCents: c.feeWaiverCents,
           ...currentCpm(c),

@@ -194,6 +194,14 @@ export async function createSale(userId: string, input: SaleInput) {
       });
     }
     void programLabel;
+    // Beneficiários: os clientes dos itens emitidos com pontos próprios contam no limite de CPFs da conta
+    if (input.origin === "OWN") {
+      const ids = [...new Set(input.items.filter((i) => i.issuedWith === "POINTS").flatMap((i) => i.customerIds ?? []))];
+      if (ids.length) {
+        const cs = await tx.customer.findMany({ where: { id: { in: ids }, userId }, select: { name: true, docNumber: true } });
+        await tx.accountBeneficiary.createMany({ data: cs.map((c) => ({ userId, accountId: accountId!, saleId: created.id, name: c.name, document: c.docNumber?.replace(/\D/g, "") || null, usedAt: input.occurredAt })) });
+      }
+    }
     return created;
   });
   return { sale, duplicated: false };
