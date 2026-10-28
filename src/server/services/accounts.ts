@@ -372,7 +372,7 @@ export async function beneficiaryState(userId: string, accountId: string, now = 
   const eff = effectiveLimit(acc, acc.program.code);
   const since = windowStart(eff.window, now);
   const list = await prisma.accountBeneficiary.findMany({ where: { accountId }, orderBy: { usedAt: "desc" }, take: 500 });
-  // O titular está sempre vinculado à conta e não gasta vaga
+  // O titular está sempre vinculado à conta e ocupa uma vaga fixa, que não vence
   const holder = { name: acc.holder.name, document: holderCpf(acc.holder.documents) };
   const others = withoutHolder(list, holder);
   const hk = beneficiaryKey(holder);
@@ -380,7 +380,7 @@ export async function beneficiaryState(userId: string, accountId: string, now = 
     limit: eff.limit,
     window: eff.window,
     suggested: eff.suggested,
-    used: countDistinct(others, since),
+    used: countDistinct(others, since) + 1,
     since: since.toISOString(),
     holder,
     items: list.map((b) => ({
@@ -418,7 +418,7 @@ export async function beneficiaryUsage(userId: string, now = new Date()) {
     const eff = effectiveLimit(a, a.program.code);
     if (eff.limit == null) continue;
     const mine = withoutHolder(rows.filter((r) => r.accountId === a.id), { name: a.holder.name, document: holderCpf(a.holder.documents) });
-    out[a.id] = { used: countDistinct(mine, windowStart(eff.window, now)), limit: eff.limit };
+    out[a.id] = { used: countDistinct(mine, windowStart(eff.window, now)) + 1, limit: eff.limit }; // + titular
   }
   return out;
 }

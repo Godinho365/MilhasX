@@ -52,7 +52,7 @@ export function holderCpf(documents: unknown): string | null {
   return cpf?.number?.replace(/\D/g, "") || null;
 }
 
-/** O titular emite para si sem gastar vaga: tira da lista quem é o próprio titular. */
+/** O titular ocupa sempre uma vaga fixa (contada à parte): tira da lista quem é o próprio titular para não contar duas vezes. */
 export function withoutHolder<T extends { name: string; document: string | null }>(list: T[], holder: { name: string; document: string | null }) {
   const hk = beneficiaryKey(holder);
   const hn = beneficiaryKey({ name: holder.name, document: null });

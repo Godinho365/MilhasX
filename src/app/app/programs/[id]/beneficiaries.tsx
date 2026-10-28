@@ -49,7 +49,7 @@ export function BeneficiaryLimit({ accountId }: { accountId: string }) {
         const next = s.items.filter((b) => b.inWindow && !b.isHolder).map((b) => b.expiresAt).sort()[0];
         return (
           <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-            <span className="flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />{s.holder.name} (titular) sempre liberado</span>
+            <span className="flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />{s.holder.name} (titular) ocupa 1 vaga fixa</span>
             {next && <span>· Próxima vaga libera em {fmtDate(next)}</span>}
           </p>
         );
@@ -84,7 +84,7 @@ function HistoryDialog({ accountId, s, onClose, onChange }: { accountId: string;
       <p className="mb-3 text-sm text-muted">Quem já recebeu emissões com os pontos desta conta. Vem das vendas (clientes do item) e do que você informar aqui. Contam os CPFs desde {fmtDate(s.since)}; cada CPF libera a vaga {s.window === "CALENDAR_YEAR" ? "na virada do ano" : "12 meses depois da emissão"}.</p>
       <ul className="divide-y divide-line rounded-xl border border-line text-sm" aria-label="Beneficiários">
         <li className="flex items-center gap-3 bg-accent-soft/30 px-3 py-2">
-          <span className="min-w-0 flex-1"><span className="flex items-center gap-2 font-medium"><span className="truncate">{s.holder.name}</span><span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-light">Titular</span></span><span className="text-xs text-muted">{cpfMask(s.holder.document) || "CPF no cadastro do titular"} · vinculado à conta, não gasta vaga</span></span>
+          <span className="min-w-0 flex-1"><span className="flex items-center gap-2 font-medium"><span className="truncate">{s.holder.name}</span><span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-light">Titular</span></span><span className="text-xs text-muted">{cpfMask(s.holder.document) || "CPF no cadastro do titular"} · vinculado à conta, ocupa 1 vaga fixa</span></span>
           <Link2 className="h-4 w-4 text-muted" aria-hidden />
         </li>
         {s.items.filter((b) => !b.isHolder).map((b) => {
