@@ -5,7 +5,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { watchLinkClicks, refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, ReceiptText, Contact, Bell, Settings,
+  LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Palette, Plane, ChevronDown,
 } from "lucide-react";
@@ -35,6 +35,7 @@ const NAV: { group: string; items: { href: string; label: string; icon: Icon }[]
   ] },
   { group: "Ferramentas", items: [
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
+    { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
     { href: "/app/sales", label: "Vendas", icon: ReceiptText },
     { href: "/app/management", label: "Fornecedores", icon: Contact },
   ] },

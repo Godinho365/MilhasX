@@ -446,3 +446,19 @@ export const orderAccessSchema = z.object({ digits: z.string().trim().regex(/^\d
 export const beneficiaryLimitSchema = z.object({ limit: z.number().int().min(1).max(1000).nullable(), window: z.enum(["ROLLING_12M", "CALENDAR_YEAR"]) });
 export const beneficiarySchema = z.object({ name: z.string().trim().min(2, "Informe o nome").max(120), document: z.string().trim().max(20).nullable().optional(), usedAt: dateStr });
 export const registerPointsSchema = z.object({ points: z.number().int().min(1).max(100_000_000), date: dateStr });
+export const partnerSchema = z.object({
+  fromProgramId: id,
+  toProgramId: id,
+  fromUnits: z.number().positive().max(1000),
+  toUnits: z.number().positive().max(1000),
+  active: z.boolean(),
+});
+export const clubPlanSchema = z.object({
+  programId: id,
+  name: z.string().trim().min(2).max(80),
+  modality: z.string().trim().max(40),
+  miles: z.number().int().min(1).max(10_000_000),
+  monthlyCents: z.number().int().min(0).max(100_000_000),
+  signupBonus: z.number().int().min(0).max(10_000_000),
+  active: z.boolean(),
+});

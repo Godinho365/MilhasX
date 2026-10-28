@@ -214,6 +214,9 @@ model Program {
   promotionsFrom   Promotion[]       @relation("PromoFrom")
   promotionsTo     Promotion[]       @relation("PromoTo")
   parityDays       ParityDay[]
+  partnersFrom     TransferPartner[] @relation("PartnerFrom")
+  partnersTo       TransferPartner[] @relation("PartnerTo")
+  clubPlans        ClubPlan[]
 }
 
 // Titular: pessoa dona de contas nos programas
@@ -1067,4 +1070,35 @@ model StoreImportRun {
   report     Json? // { issues: [{ item, reason }] } (até 200)
 
   @@index([source, startedAt])
+}
+
+// Parcerias de transferência entre programas (calculadora de rotas). Paridade origem:destino, ex.: 1:1, 3:1, 1:5,5.
+model TransferPartner {
+  id            String   @id @default(cuid())
+  fromProgramId String
+  fromProgram   Program  @relation("PartnerFrom", fields: [fromProgramId], references: [id], onDelete: Cascade)
+  toProgramId   String
+  toProgram     Program  @relation("PartnerTo", fields: [toProgramId], references: [id], onDelete: Cascade)
+  fromUnits     Float    @default(1)
+  toUnits       Float    @default(1)
+  active        Boolean  @default(true)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([fromProgramId, toProgramId])
+}
+
+// Catálogo de clubes (simulador de assinatura), mantido pelo admin.
+model ClubPlan {
+  id           String   @id @default(cuid())
+  programId    String
+  program      Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  name         String
+  modality     String   @default("Mensal")
+  miles        Int
+  monthlyCents Int
+  signupBonus  Int      @default(0)
+  active       Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([programId, name, modality])
 }

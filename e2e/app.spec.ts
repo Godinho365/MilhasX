@@ -436,6 +436,96 @@ test("simuladores e relatórios", async () => {
   expect(await csv.text()).toContain("titular;programa");
 });
 
+test("calculadoras: as 7 funcionando", async () => {
+  await page.goto("/app/calculadoras");
+  // 1. Comparador: duas cotações, a mais barata ganha o selo e gera o texto
+  const cmp = page.getByRole("region", { name: "Comparador de Cotações" });
+  const q1 = cmp.getByRole("group", { name: "Cotação 1" });
+  await q1.getByLabel("Pontos").fill("50000");
+  await q1.getByLabel("CPM", { exact: true }).fill("16,00");
+  await q1.getByLabel("Embarque", { exact: true }).fill("100,00");
+  await q1.getByLabel("Outras taxas", { exact: true }).fill("20,00");
+  await q1.getByLabel("Venda (cliente)").fill("1500,00");
+  await expect(q1).toContainText("R$ 920,00");
+  await expect(q1).toContainText("R$ 580,00 (38,7%)");
+  await cmp.getByRole("button", { name: "Adicionar outra cotação para comparar" }).click();
+  const q2 = cmp.getByRole("group", { name: "Cotação 2" });
+  await q2.getByLabel("Pontos").fill("40000");
+  await q2.getByLabel("CPM", { exact: true }).fill("16,00");
+  await q2.getByLabel("Embarque: alternar entre real e dólar").click();
+  await q2.getByLabel("Embarque", { exact: true }).fill("20,00");
+  await cmp.getByLabel("Dólar turismo").fill("5,50");
+  await expect(q2).toContainText("R$ 113,85"); // US$ 20 × 5,50 × 1,035
+  await expect(q2).toContainText("Menor custo");
+  await cmp.getByRole("button", { name: "Gerar cotação" }).click();
+  await expect(page.getByLabel("Texto da cotação")).toContainText("40.000 pontos");
+  await page.keyboard.press("Escape");
+
+  // 2. Rotas: parcerias cadastradas pela migração (Livelo → Smiles 1:1)
+  await page.getByRole("button", { name: /Rotas de Transferência/ }).click();
+  const rotas = page.getByRole("region", { name: "Rotas de Transferência" });
+  await rotas.getByLabel("Programa de destino").selectOption({ label: "Smiles" });
+  await rotas.getByLabel("Pontos na origem").fill("10000");
+  await expect(rotas.getByRole("list", { name: "Rotas encontradas" })).toContainText("Livelo");
+  await expect(rotas.getByRole("list", { name: "Rotas encontradas" })).toContainText("10.000 no destino");
+
+  // 3. Assinatura: preenchimento manual com bônus de adesão e desconto
+  await page.getByRole("button", { name: /Simulador de Assinatura/ }).click();
+  const clube = page.getByRole("region", { name: "Simulador de Assinatura" });
+  await clube.getByLabel("Milhas do plano (sem bônus)").fill("1000");
+  await clube.getByLabel("Valor da mensalidade").fill("50,00");
+  await clube.getByLabel("Permanecer no plano por (meses)").fill("3");
+  await clube.getByLabel("Milhas bônus ao assinar").check();
+  await clube.getByLabel("Milhas ao assinar").fill("1000");
+  await expect(clube.getByRole("table", { name: "Projeção mês a mês" }).locator("tbody tr")).toHaveCount(3);
+  await expect(clube).toContainText("4.000"); // total de milhas
+  await expect(clube).toContainText("R$ 37,50"); // R$ 150 / 4 milheiros
+
+  // 4. Transferência bonificada
+  await page.getByRole("button", { name: /Transferência Bonificada/ }).click();
+  const tb = page.getByRole("region", { name: "Transferência Bonificada" });
+  await tb.getByLabel("Quantas milhas você irá transferir?").fill("50000");
+  await tb.getByRole("button", { name: "+80%" }).click();
+  await tb.getByLabel("Pointsback").fill("10");
+  await tb.getByLabel("Custo do milheiro (CPM)").fill("30,00");
+  await expect(tb).toContainText("90.000");
+  await expect(tb).toContainText("R$ 15,00");
+
+  // 5. CPM da compra direta
+  await page.getByRole("button", { name: /Custo do Milheiro \(CPM\)/ }).click();
+  const cpm = page.getByRole("region", { name: "Custo do Milheiro (CPM)" });
+  await cpm.getByLabel("Quantas milhas você está comprando?").fill("10000");
+  await cpm.getByLabel("Valor total a pagar").fill("150,00");
+  await expect(cpm).toContainText("R$ 15,00 / milheiro");
+
+  // 6. Limite de bonificação
+  await page.getByRole("button", { name: /Limite de Bonificação/ }).click();
+  const lim = page.getByRole("region", { name: "Limite de Bonificação" });
+  await lim.getByLabel("Limite de bonificação máxima").fill("300000");
+  await lim.getByRole("button", { name: "+80%" }).click();
+  await expect(lim).toContainText("375.000 pts");
+
+  // 7. Bug do carrinho
+  await page.getByRole("button", { name: /Bug do carrinho/ }).click();
+  const bug = page.getByRole("region", { name: "Bug do carrinho" });
+  await bug.getByLabel("Milhas a transferir").fill("20000");
+  await bug.getByRole("button", { name: "+100%" }).click();
+  await bug.getByLabel("Pontos usados", { exact: true }).fill("10000");
+  await bug.getByLabel("CPM dos pontos usados").fill("20,00");
+  await bug.getByLabel("Dinheiro pago").fill("200,00");
+  await expect(bug).toContainText("40.000");
+  await expect(bug).toContainText("R$ 10,00");
+
+  // filtro e busca
+  await page.getByRole("tab", { name: "Clubes & Assinaturas" }).click();
+  await expect(page.getByRole("region", { name: "Bug do carrinho" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Todas" }).click();
+  await page.getByLabel("Buscar calculadora").fill("carrinho");
+  await expect(page.getByRole("region", { name: "Comparador de Cotações" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Bug do carrinho" })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/calculadoras.png`, fullPage: true });
+});
+
 test("preferências e troca de senha", async () => {
   await page.goto("/app/settings");
   const values = page.getByRole("radiogroup", { name: "Visibilidade dos valores" });
@@ -1179,6 +1269,24 @@ test("painel administrativo completo", async ({ browser }) => {
   await page.goto("/app/notifications");
   await expect(page.getByText(`Promo E2E ${stamp}`)).toBeVisible();
 
+  await page.goto("/admin/calculators");
+  await expect(page.getByRole("region", { name: "Parcerias de transferência" })).toContainText("Livelo");
+  await page.getByRole("button", { name: "Novo plano" }).click();
+  const cd = page.getByRole("dialog");
+  await cd.getByLabel(/^Programa/).selectOption({ label: "LATAM Pass" });
+  await cd.getByLabel(/^Plano/).fill(`Clube E2E ${stamp}`);
+  await cd.getByLabel(/^Milhas por mês/).fill("2000");
+  await cd.getByLabel(/^Mensalidade/).fill("80,00");
+  await cd.getByLabel(/^Bônus ao assinar/).fill("5000");
+  await cd.getByRole("button", { name: "Salvar" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Plano salvo" })).toBeVisible();
+  await page.goto("/app/calculadoras#assinatura");
+  const clubCalc = page.getByRole("region", { name: "Simulador de Assinatura" });
+  await clubCalc.getByLabel("Programa do clube").selectOption({ label: "LATAM Pass" });
+  await clubCalc.getByLabel("Plano do clube").selectOption(`Clube E2E ${stamp}`);
+  await expect(clubCalc.getByLabel("Milhas do plano (sem bônus)")).toHaveValue("2.000");
+  await expect(clubCalc.getByLabel("Milhas ao assinar")).toHaveValue("5.000");
+
   await page.goto("/admin/news");
   await page.getByRole("button", { name: "Nova publicação" }).click();
   await page.getByRole("dialog").getByLabel(/Título/).fill(`Novidade E2E ${stamp}`);
@@ -1199,7 +1307,7 @@ test("painel administrativo completo", async ({ browser }) => {
   await expect(page.getByRole("heading", { name: "Seção" })).toBeVisible();
 
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const p of ["/admin", "/admin/users", "/admin/programs", "/admin/offers", "/admin/promotions", "/admin/guides", "/admin/news", "/admin/audit", "/admin/settings"]) {
+  for (const p of ["/admin", "/admin/users", "/admin/programs", "/admin/offers", "/admin/promotions", "/admin/calculators", "/admin/guides", "/admin/news", "/admin/audit", "/admin/settings"]) {
     await page.goto(p);
     await expect(page.locator("main h1")).toBeVisible();
     await noHorizontalScroll();
@@ -1208,6 +1316,7 @@ test("painel administrativo completo", async ({ browser }) => {
 
   // limpa: oferta de teste e rebaixa o usuário
   await prisma.store.deleteMany({ where: { name: `Loja E2E ${stamp}` } });
+  await prisma.clubPlan.deleteMany({ where: { name: `Clube E2E ${stamp}` } });
   await prisma.promotion.deleteMany({ where: { title: `Promo E2E ${stamp}` } });
   await prisma.newsPost.deleteMany({ where: { title: `Novidade E2E ${stamp}` } });
   await prisma.guide.deleteMany({ where: { slug: `guia-e2e-${stamp}` } });
