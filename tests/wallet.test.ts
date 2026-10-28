@@ -104,6 +104,18 @@ describe("carteiras e movimentações", () => {
     await assertConsistent();
   });
 
+  it("excluir a transferência pelo destino leva junto a compra de pontos do carrinho na origem", async () => {
+    await add({ accountId: liv, type: "CARD", points: 1000 });
+    await c.call(transfers.POST, "POST", "/api/transfers", { fromAccountId: liv, toAccountId: lat, points: 10000, bonusPercent: 30, occurredAt: "2026-10-22", purchase: { points: 9000, priceCents: 27000 } });
+    expect(await prisma.entry.count()).toBe(5);
+    const inLatam = await prisma.entry.findFirstOrThrow({ where: { type: "TRANSFER_IN" } });
+    const d = await c.call(entry.DELETE, "DELETE", "/x", undefined, { id: inLatam.id });
+    expect(d.data.deleted).toBe(4);
+    expect(await prisma.entry.findMany({ select: { type: true } })).toEqual([{ type: "CARD" }]);
+    expect(await prisma.account.findUniqueOrThrow({ where: { id: liv } })).toMatchObject({ balance: 1000 });
+    await assertConsistent();
+  });
+
   it("pontos a receber aparecem separados do saldo", async () => {
     await add({ accountId: liv, type: "PURCHASE", points: 5000, costCents: 10000, status: "PENDING" });
     const s = await c.call(summary.GET, "GET", "/api/summary");

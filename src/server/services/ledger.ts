@@ -218,11 +218,13 @@ export async function createTransfer(userId: string, input: TransferInput) {
       const from = await ownAccount(tx, userId, input.fromAccountId);
       const to = await ownAccount(tx, userId, input.toAccountId);
       const base = { userId, occurredAt: input.occurredAt, createdAt, groupId };
-      // Compra de pontos no carrinho: entra na origem um instante antes da transferência
+      // Compra de pontos no carrinho: entra na origem um instante antes da transferência, no mesmo grupo
+      // (excluir a transferência leva a compra junto)
       if (input.purchase) {
         await tx.entry.create({
           data: {
             userId,
+            groupId,
             accountId: from.id,
             type: "PURCHASE",
             points: input.purchase.points,
