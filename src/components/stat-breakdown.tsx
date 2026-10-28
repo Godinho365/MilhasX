@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronsUpDown } from "lucide-react";
 import { Avatar } from "./stat";
 
-export type BreakdownRow = { label: string; value: string; color?: string };
+export type BreakdownRow = { label: string; note?: string; value: string; color?: string };
 export type BreakdownGroup = { name: string; count?: number; value?: string; rows: BreakdownRow[] };
 export type Breakdown = { title: string; groups: BreakdownGroup[]; footer?: { label: string; value: string }; empty?: string };
 
@@ -76,7 +76,10 @@ export function StatBreakdown({ label, value, hint, breakdown }: { label: string
                       {g.rows.map((r, i) => (
                         <li key={i} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-panel2">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: r.color ?? "transparent" }} aria-hidden />
-                          <span className="min-w-0 flex-1 truncate">{r.label}</span>
+                          <span className="min-w-0 flex-1 truncate">
+                            {r.label}
+                            {r.note && <span className="ml-1.5 text-xs text-muted">· {r.note}</span>}
+                          </span>
                           <span className="font-semibold tabular-nums">{r.value}</span>
                         </li>
                       ))}

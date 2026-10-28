@@ -4,6 +4,7 @@ import { HandCoins, TrendingUp, Scale, ScrollText, ShoppingBag } from "lucide-re
 import { requirePageUser, selectedHolderId } from "@/server/session";
 import { walletSummary, evolutionByHolder, activationProgress, pendingBreakdown, overviewData } from "@/server/services/wallet";
 import { salesDashboard } from "@/server/services/extras";
+import { beneficiaryUsage } from "@/server/services/accounts";
 import { prisma } from "@/server/db";
 import { Stat, PageHeader } from "@/components/stat";
 import { StatBreakdown, type Breakdown } from "@/components/stat-breakdown";
@@ -42,20 +43,28 @@ type Summary = Awaited<ReturnType<typeof walletSummary>>;
 type Pending = Awaited<ReturnType<typeof pendingBreakdown>>;
 const pts = (n: number) => `${fmtPts(n)} pts`;
 
+/** CPFs que ainda dá para emitir na conta: limite do programa menos os usados na janela, ou o número informado à mão. */
+function cpfFree(a: Summary["accounts"][number], usage: Awaited<ReturnType<typeof beneficiaryUsage>>) {
+  const u = usage[a.id];
+  const free = u?.limit != null ? Math.max(0, u.limit - u.used) : a.cpfAvailable;
+  return free == null ? undefined : `${free} ${free === 1 ? "CPF livre" : "CPFs livres"}`;
+}
+
 /** Os 4 indicadores; o ⇕ de cada um abre o detalhamento por titular e programa (como na referência). */
-function WalletStats({ s, pending, money }: { s: Summary; pending: Pending; money: Money }) {
-  const byHolder = (value: (a: Summary["accounts"][number]) => string | null, groupValue?: (h: Summary["holders"][number]) => string) =>
+async function WalletStats({ userId, s, pending, money }: { userId: string; s: Summary; pending: Pending; money: Money }) {
+  const usage = await beneficiaryUsage(userId);
+  const byHolder = (value: (a: Summary["accounts"][number]) => string | null, groupValue?: (h: Summary["holders"][number]) => string, withCpf = false) =>
     s.holders.map((h) => {
       const rows = s.accounts
         .filter((a) => a.holderId === h.id)
         .flatMap((a) => {
           const v = value(a);
-          return v == null ? [] : [{ label: `${a.programName} ${a.holderName}`, value: v, color: a.programColor }];
+          return v == null ? [] : [{ label: `${a.programName} ${a.holderName}`, note: withCpf ? cpfFree(a, usage) : undefined, value: v, color: a.programColor }];
         });
       return { name: h.name, count: rows.length, value: groupValue?.(h), rows };
     }).filter((g) => g.rows.length > 0);
 
-  const balance: Breakdown = { title: "Saldo por programa", groups: byHolder((a) => pts(a.balance), (h) => pts(h.balance)), footer: { label: "Total", value: pts(s.totals.balance) }, empty: "Nenhuma conta ainda." };
+  const balance: Breakdown = { title: "Saldo por programa", groups: byHolder((a) => pts(a.balance), (h) => pts(h.balance), true), footer: { label: "Total", value: pts(s.totals.balance) }, empty: "Nenhuma conta ainda." };
   const cost: Breakdown = { title: "Custo por programa", groups: byHolder((a) => (a.cpmCents == null || a.costCents === 0 ? null : money(a.cpmCents))), footer: { label: "Média ponderada", value: money(s.totals.cpmCents) }, empty: "Nenhuma conta com custo." };
   const value: Breakdown = { title: "Valor por programa", groups: byHolder((a) => money(a.marketValueCents), (h) => money(h.marketValueCents)), footer: { label: "Total", value: money(s.totals.marketValueCents) } };
   const toReceive: Breakdown = {
@@ -99,7 +108,7 @@ async function ManagementView({ userId, holderId, money, hide }: { userId: strin
   const [s, evo, pending] = await Promise.all([walletSummary(userId, holderId), evolutionByHolder(userId, { holderId, from }), pendingBreakdown(userId, holderId)]);
   return (
     <>
-      <WalletStats s={s} pending={pending} money={money} />
+      <WalletStats userId={userId} s={s} pending={pending} money={money} />
       <div className="mt-4">
         {s.holders.length === 0 ? (
           <div className="card card-pad text-sm text-muted">
@@ -137,7 +146,7 @@ async function OverviewView({ userId, holderId, money }: { userId: string; holde
   const total = evo.points.map((p) => ({ date: String(p.date), balance: evo.holders.reduce((sum, h) => sum + Number(p[h.id] ?? 0), 0) }));
   return (
     <MobileTabs tabs={[["geral", "Visão Geral"], ["evolucao", "Evolução"], ["recentes", "Recentes"]]}>
-      <MobileTab k="geral"><WalletStats s={s} pending={pending} money={money} /></MobileTab>
+      <MobileTab k="geral"><WalletStats userId={userId} s={s} pending={pending} money={money} /></MobileTab>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <MobileTab k="evolucao"><Panel icon={<TrendingUp className="h-5 w-5" />} tone="bg-blue-500/15 text-blue-400" title="Evolução do Saldo" subtitle="Histórico de saldo nos últimos 3 meses">
           <TotalEvolution data={total} />
