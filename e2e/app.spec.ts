@@ -303,7 +303,7 @@ test("vendas e clientes", async () => {
   const d = page.getByRole("dialog");
   await d.getByLabel("Programa").selectOption({ label: "LATAM Pass Ana E2E (25.000)" });
   await d.getByLabel("Pontos da emissão do item 1").fill("10000");
-  await d.getByLabel("Valor dos pontos do item 1").fill("280,00");
+  await d.getByLabel("Valor do milheiro do item 1").fill("28,00"); // 10.000 pts × R$ 28 = R$ 280
   await d.getByRole("button", { name: /Taxas e custos repassados/ }).click();
   await d.getByLabel("Valor do custo 1 do item 1").fill("100,00");
   await d.getByLabel("Clientes do item 1").click();

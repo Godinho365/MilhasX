@@ -34,7 +34,7 @@ type Item = {
   issuedWith: "POINTS" | "CASH";
   points: string;
   price: string; // valor dos pontos (R$)
-  byCpm: boolean; // "Informar valor do milheiro"
+  byCpm: boolean; // padrão: digita o valor do milheiro e o total sai da conta
   cpm: string;
   cashCost: string;
   costs: CostRow[];
@@ -52,7 +52,7 @@ type Item = {
 };
 const emptyCost = (): CostRow => ({ type: "TAXA_EMBARQUE", amount: "", cardId: "" });
 const newItem = (kind: Kind = "FLIGHT"): Item => ({
-  kind, issuedWith: "POINTS", points: "", price: "", byCpm: false, cpm: "", cashCost: "", costs: [emptyCost()], clientType: "FINAL", customerIds: [],
+  kind, issuedWith: "POINTS", points: "", price: "", byCpm: true, cpm: "", cashCost: "", costs: [emptyCost()], clientType: "FINAL", customerIds: [],
   passengers: kind === "FLIGHT" ? "1" : "", reservation: "", origin: "", destination: "", departure: "", ret: "", description: "", observation: "",
   open: { costs: false, client: true, travel: kind === "FLIGHT", other: false },
 });
@@ -264,11 +264,11 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Pontos da emissão" required><PointsInput label={`Pontos da emissão do item ${i + 1}`} value={it.points} onChange={(v) => setItem(i, { points: v })} /></Field>
                 {it.byCpm ? (
-                  <Field label="Valor do milheiro (R$)" required hint={`Valor dos pontos: ${fmtBRL(itemPrice(it))}`}>
+                  <Field label="Valor do milheiro (R$)" required hint={`Total dos pontos: ${fmtBRL(itemPrice(it))}`}>
                     <input className="input" inputMode="decimal" placeholder="R$ 0,00" value={it.cpm} onChange={(e) => setItem(i, { cpm: e.target.value })} aria-label={`Valor do milheiro do item ${i + 1}`} />
                   </Field>
                 ) : (
-                  <Field label="Valor dos pontos (R$)" required>
+                  <Field label="Valor total dos pontos (R$)" required>
                     <input className="input" inputMode="decimal" placeholder="R$ 0,00" value={it.price} onChange={(e) => setItem(i, { price: e.target.value })} aria-label={`Valor dos pontos do item ${i + 1}`} />
                   </Field>
                 )}
