@@ -22,6 +22,7 @@ export function BuscadorClient({ orders, initialOrderId }: { orders: OrderOpt[];
   const [programs, setPrograms] = useState<string[]>(DEFAULT_PROGRAMS);
   const [erro, setErro] = useState("");
   const [links, setLinks] = useState<{ key: string; label: string; url: string }[]>([]);
+  const [blocked, setBlocked] = useState(0);
   const [panel, setPanel] = useState<"historico" | "comparar" | null>(null);
   const set = (patch: Partial<SearchParams>) => { setP((x) => ({ ...x, ...patch })); setErro(""); };
 
@@ -56,9 +57,18 @@ export function BuscadorClient({ orders, initialOrderId }: { orders: OrderOpt[];
     if (programs.length === 0) return setErro("Selecione ao menos um site");
     const list = programs.map((k) => ({ key: k, label: PROGRAM_BY_KEY[k]!.label, url: PROGRAM_BY_KEY[k]!.build(p) }));
     setLinks(list);
-    // Primeira aba já no clique (o navegador permite); as demais a cada 2 segundos
-    list.forEach((l, i) => (i === 0 ? window.open(l.url, "_blank", "noopener") : window.setTimeout(() => window.open(l.url, "_blank", "noopener"), i * 2000)));
-    toast(`Abrindo ${list.length} ${list.length === 1 ? "site" : "sites"}, uma aba a cada 2 segundos…`);
+    // Todas as abas no próprio clique: abertas depois (setTimeout) o navegador trata como pop-up não
+    // pedido e bloqueia. Sem "noopener" no window.open para saber se abriu (com ele, volta sempre null).
+    let open = 0;
+    for (const l of list) {
+      const w = window.open(l.url, "_blank");
+      if (w) {
+        w.opener = null;
+        open++;
+      }
+    }
+    setBlocked(list.length - open);
+    if (open) toast(`${open} ${open === 1 ? "aba aberta" : "abas abertas"}`);
     await api("/api/flight-searches", "POST", { params: p, programs });
   }
 
@@ -135,7 +145,11 @@ export function BuscadorClient({ orders, initialOrderId }: { orders: OrderOpt[];
           ))}
         </div>
         <button className="btn-primary w-full" onClick={search}><Search className="h-4 w-4" />Buscar em todos os sites selecionados</button>
-        <p className="text-center text-xs text-muted">Abrimos uma aba por site, com intervalo de 2 segundos. Se o navegador bloquear alguma, permita pop-ups para este site ou use os links abaixo.</p>
+        {blocked > 0 ? (
+          <Alert>O navegador bloqueou {blocked === 1 ? "1 aba" : `${blocked} abas`}. Permita pop-ups para este site (ícone na barra de endereço) e busque de novo, ou abra pelos links abaixo.</Alert>
+        ) : (
+          <p className="text-center text-xs text-muted">Abrimos uma aba por site. Se o navegador bloquear alguma, permita pop-ups para este site ou use os links abaixo.</p>
+        )}
         {links.length > 0 && (
           <ul className="flex flex-wrap gap-2" aria-label="Links da busca">
             {links.map((l) => <li key={l.key}><a href={l.url} target="_blank" rel="noopener noreferrer" className="btn-ghost h-8 text-xs">{l.label}<ExternalLink className="h-3.5 w-3.5" /></a></li>)}
