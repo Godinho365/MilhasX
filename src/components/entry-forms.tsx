@@ -263,7 +263,7 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
             right={!costsOpen && totalCost > 0 ? <span className="text-sm font-semibold tabular-nums">{fmtBRL(totalCost)}</span> : undefined}
           >
             <CostRows rows={costs} setRows={(r) => { setCosts(r); setDirty(true); }} types={types} cards={cards} />
-            {nominalCost > 0 && <div className="mt-3"><PaymentFields totalCents={nominalCost} value={pay} onChange={(p) => { setPay(p); setDirty(true); }} /></div>}
+            <div className="mt-3"><PaymentFields totalCents={nominalCost} value={pay} onChange={(p) => { setPay(p); setDirty(true); }} /></div>
           </Collapsible>
         )}
 
@@ -575,7 +575,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
                     <Field label="Quantidade" required><input className="input tabular-nums" inputMode="numeric" placeholder="Ex: 8000" value={adv.cartPoints} onChange={(e) => ua({ cartPoints: e.target.value ? fmtPts(parsePts(e.target.value)) : "" })} /></Field>
                     <Field label="Preço da compra (R$)" required><input className="input" inputMode="decimal" placeholder="R$ 0,00" value={adv.cartPrice} onChange={(e) => ua({ cartPrice: e.target.value })} /></Field>
                   </div>
-                  {cartNominal > 0 && <PaymentFields label="Pagamento da compra" totalCents={cartNominal} value={cartPay} onChange={(p) => { setCartPay(p); setDirty(true); }} />}
+                  <PaymentFields label="Pagamento da compra" totalCents={cartNominal} value={cartPay} onChange={(p) => { setCartPay(p); setDirty(true); }} />
                   <Switch checked={adv.applyAll} onChange={(v) => ua({ applyAll: v })} label="Aplicar todos os pontos comprados na transferência" hint="Prioriza os pontos comprados, em vez de usar o custo médio da conta" />
                 </>
               )}
