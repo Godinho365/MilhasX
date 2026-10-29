@@ -67,6 +67,16 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
   const balance: Breakdown = { title: "Saldo por programa", groups: byHolder((a) => pts(a.balance), (h) => pts(h.balance), true), footer: { label: "Total", value: pts(s.totals.balance) }, empty: "Nenhuma conta ainda." };
   const cost: Breakdown = { title: "Custo por programa", groups: byHolder((a) => (a.cpmCents == null || a.costCents === 0 ? null : money(a.cpmCents))), footer: { label: "Média ponderada", value: money(s.totals.cpmCents) }, empty: "Nenhuma conta com custo." };
   const value: Breakdown = { title: "Valor por programa", groups: byHolder((a) => money(a.marketValueCents), (h) => money(h.marketValueCents)), footer: { label: "Total", value: money(s.totals.marketValueCents) } };
+  // CPFs usados / limite nas contas com limite de beneficiários (o titular ocupa 1 vaga)
+  const limited = s.accounts.filter((a) => usage[a.id]?.limit != null);
+  const cpfUsed = limited.reduce((t, a) => t + usage[a.id].used, 0);
+  const cpfLimit = limited.reduce((t, a) => t + (usage[a.id].limit ?? 0), 0);
+  const cpfs: Breakdown = {
+    title: "CPFs usados por conta",
+    groups: byHolder((a) => (usage[a.id]?.limit != null ? `${usage[a.id].used}/${usage[a.id].limit}` : null)),
+    footer: { label: "Total", value: `${cpfUsed}/${cpfLimit}` },
+    empty: "Nenhuma conta com limite de CPFs.",
+  };
   const toReceive: Breakdown = {
     title: "Detalhamento",
     groups: [
@@ -77,11 +87,12 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
     footer: { label: "Total", value: pts(pending.total) },
   };
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
       <StatBreakdown label="Saldo total" value={fmtPts(s.totals.balance)} breakdown={balance} />
       <StatBreakdown label="Custo do milheiro" value={money(s.totals.cpmCents)} breakdown={cost} />
       <StatBreakdown label="Pontos a receber" value={fmtPts(pending.total)} breakdown={toReceive} />
       <StatBreakdown label="Valor em reais" value={money(s.totals.marketValueCents)} breakdown={value} />
+      <StatBreakdown label="CPFs usados" value={limited.length ? `${cpfUsed}/${cpfLimit}` : "-"} hint={limited.length ? `${cpfLimit - cpfUsed} livres · titular conta 1` : undefined} breakdown={cpfs} />
     </div>
   );
 }
