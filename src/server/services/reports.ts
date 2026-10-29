@@ -4,6 +4,7 @@ import { prisma } from "../db";
 import { ENTRY_LABELS } from "@/domain/ledger";
 import { listSales as listSalesView } from "./sales";
 import { beneficiaryUsage } from "./accounts";
+import { programPotential } from "@/domain/potential";
 
 export const REPORT_TABS = ["overview", "purchases", "credit-cards", "savings", "evolution", "sales", "assets"] as const;
 export type ReportTab = (typeof REPORT_TABS)[number];
@@ -336,6 +337,45 @@ export async function evolutionReport(f: ReportFilter) {
 }
 
 /* ---------------- Vendas ---------------- */
+
+/** Potencial de lucro por programa: o histórico de vendas do período (de todos os titulares: o preço é de mercado)
+ *  aplicado ao saldo, ao custo médio e aos CPFs livres das contas do filtro. */
+export async function profitPotential(f: ReportFilter) {
+  const [sales, accounts, usage] = await Promise.all([
+    listSalesView(f.userId, { from: f.period.from, to: f.period.to, programId: f.programId }),
+    prisma.account.findMany({ where: { userId: f.userId, archived: false, balance: { gt: 0 }, ...accountWhere(f) }, select: { id: true, balance: true, costCents: true, program: { select: { id: true, name: true, color: true, kind: true } } } }),
+    beneficiaryUsage(f.userId),
+  ]);
+  const byProgram = new Map<string, { id: string; name: string; color: string; kind: string; points: number; costCents: number; cpfFree: number | null }>();
+  for (const a of accounts) {
+    const p = byProgram.get(a.program.id) ?? { ...a.program, points: 0, costCents: 0, cpfFree: null };
+    p.points += a.balance;
+    p.costCents += a.costCents;
+    const u = usage[a.id];
+    if (u?.limit != null) p.cpfFree = (p.cpfFree ?? 0) + Math.max(0, u.limit - u.used);
+    byProgram.set(a.program.id, p);
+  }
+  const rows = [...byProgram.values()].map((p) => {
+    const mine = sales.filter((s) => s.programName === p.name);
+    const hist = {
+      points: mine.reduce((t, s) => t + s.points, 0),
+      pointsValueCents: mine.reduce((t, s) => t + s.pointsValueCents, 0),
+      cpfs: mine.reduce((t, s) => t + s.cpfs, 0),
+      sales: mine.length,
+    };
+    return { id: p.id, name: p.name, color: p.color, bank: p.kind === "POINTS", stockPoints: p.points, cpfFree: p.cpfFree, sales: hist.sales, ...programPotential({ stockPoints: p.points, stockCostCents: p.costCents, cpfFree: p.cpfFree, hist }) };
+  }).sort((a, b) => (b.profitCents ?? -Infinity) - (a.profitCents ?? -Infinity) || b.stockPoints - a.stockPoints);
+  const priced = rows.filter((r) => r.profitCents != null);
+  return {
+    rows,
+    totals: {
+      profitCents: priced.reduce((t, r) => t + (r.profitCents ?? 0), 0),
+      revenueCents: priced.reduce((t, r) => t + (r.revenueCents ?? 0), 0),
+      emissions: priced.reduce((t, r) => t + (r.emissions ?? 0), 0),
+      sales: sales.length,
+    },
+  };
+}
 
 /** CPFs que ainda dá para emitir nas contas do filtro (só as que têm limite de beneficiários). */
 async function freeCpfs(f: ReportFilter) {

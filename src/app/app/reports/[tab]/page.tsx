@@ -6,7 +6,7 @@ import { requirePageUser, selectedHolderId, holderScopeLabel } from "@/server/se
 import { listPrograms } from "@/server/services/admin";
 import {
   REPORT_TABS, type ReportTab, type ReportFilter, resolvePeriod,
-  overviewReport, purchasesReport, cardsReport, savingsReport, evolutionReport, salesReport, assetsReport,
+  overviewReport, purchasesReport, cardsReport, savingsReport, evolutionReport, salesReport, assetsReport, profitPotential,
 } from "@/server/services/reports";
 import { PageHeader, Stat } from "@/components/stat";
 import { Donut, MonthlyMoney, MonthlySales, HBar, CreditsDebits, SeriesLines, StackedMonthly, ExpectedVsReceived } from "@/components/charts";
@@ -263,10 +263,56 @@ async function Sales({ f }: { f: ReportFilter }) {
           <List items={r.beneficiaries.map((b) => ({ name: b.name, hint: `${b.count} ${b.count === 1 ? "venda" : "vendas"}`, value: fmtBRL(b.value) }))} empty="Sem dados para o período selecionado" />
         </Card>
       </div>
+      <Potential f={f} />
       <Card title="Evolução de vendas" subtitle="Receita e lucro de vendas ao longo do tempo.">
         {r.totals.count ? <MonthlySales data={r.monthly} /> : <Empty text="Sem dados para o período selecionado" />}
       </Card>
     </div>
+  );
+}
+
+const pctTxt = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
+
+/** Potencial de lucro: o histórico de vendas aplicado ao estoque de cada programa. */
+async function Potential({ f }: { f: ReportFilter }) {
+  const p = await profitPotential(f);
+  return (
+    <Card title="Potencial de lucro" subtitle={`Quanto o saldo atual ainda pode render, pelo preço e pelos pontos por CPF das vendas do período (${p.totals.sales} ${p.totals.sales === 1 ? "venda" : "vendas"}).`}>
+      {p.rows.length === 0 ? <Empty text="Nenhuma conta com saldo." /> : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Lucro potencial</p><p className={`text-xl font-semibold tabular-nums ${p.totals.profitCents >= 0 ? "text-ok" : "text-bad"}`} aria-label="Lucro potencial">{fmtBRL(p.totals.profitCents)}</p></div>
+            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Faturamento necessário</p><p className="text-xl font-semibold tabular-nums">{fmtBRL(p.totals.revenueCents)}</p></div>
+            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Emissões possíveis</p><p className="text-xl font-semibold tabular-nums">≈ {p.totals.emissions}</p></div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
+                <tr><th>Programa</th><th className="text-right">Saldo</th><th className="text-right">Custo atual</th><th className="text-right">Venda média</th><th className="text-right">Lucro/milheiro</th><th className="text-right">CPFs livres</th><th className="text-right">Emissões</th><th>Gargalo</th><th className="text-right">ROE</th><th className="text-right">Margem</th><th className="text-right">Potencial</th></tr>
+              </thead>
+              <tbody>
+                {p.rows.map((r) => (
+                  <tr key={r.id}>
+                    <td><span className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: r.color }} aria-hidden /><span className="font-medium">{r.name}</span></span></td>
+                    <td className="text-right tabular-nums">{fmtPts(r.stockPoints)}</td>
+                    <td className="text-right tabular-nums" title="Preço mínimo do milheiro para não ter prejuízo">{r.costCpmCents ? fmtBRL(r.costCpmCents) : "-"}</td>
+                    <td className="text-right tabular-nums">{r.saleCpmCents == null ? "-" : fmtBRL(r.saleCpmCents)}</td>
+                    <td className={`text-right tabular-nums ${(r.profitPerMilCents ?? 0) >= 0 ? "" : "text-bad"}`}>{r.profitPerMilCents == null ? "-" : fmtBRL(r.profitPerMilCents)}</td>
+                    <td className="text-right tabular-nums">{r.cpfFree ?? "sem limite"}</td>
+                    <td className="text-right tabular-nums">{r.emissions == null ? "-" : `≈ ${r.emissions}`}</td>
+                    <td className="text-xs">{r.bottleneck === "CPFS" ? "CPFs" : r.bottleneck === "PONTOS" ? "Pontos" : <span className="text-muted">{r.bank ? "Sem vendas: transfira para uma aérea" : "Sem vendas no período"}</span>}</td>
+                    <td className="text-right tabular-nums">{pctTxt(r.roePct)}</td>
+                    <td className="text-right tabular-nums">{pctTxt(r.marginPct)}</td>
+                    <td className={`text-right font-semibold tabular-nums ${r.profitCents == null ? "" : r.profitCents >= 0 ? "text-ok" : "text-bad"}`}>{r.profitCents == null ? "-" : fmtBRL(r.profitCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted">Custo atual = preço mínimo do milheiro para não ter prejuízo. Com poucas vendas no período a estimativa é menos confiável; escolha um período maior para usar mais histórico.</p>
+        </div>
+      )}
+    </Card>
   );
 }
 
