@@ -296,4 +296,20 @@ describe("compra parcelada com antecipação", () => {
     expect((cart.details as { payment: { paidCents: number } }).payment.paidCents).toBe(14000);
     await assertConsistent();
   });
+
+  it("editar: grava o parcelamento num lançamento antigo e depois volta para à vista", async () => {
+    const r = await add({ accountId: lat, type: "PURCHASE", points: 85000, costs: [{ type: "PONTOS", amountCents: 261800 }], idempotencyKey: randomUUID() });
+    const id = r.data.item.id as string;
+    const payment = { installments: 12, anticipated: true, nominalCents: 261800, paidCents: 250000, discountCents: 11800 };
+    const p = await c.call(entry.PATCH, "PATCH", "/x", { costs: [{ type: "PONTOS", amountCents: 250000 }], payment }, { id });
+    expect(p.status).toBe(200);
+    let e = await prisma.entry.findUniqueOrThrow({ where: { id } });
+    expect(e.costCents).toBe(250000);
+    expect((e.details as { payment: unknown }).payment).toEqual(payment);
+    await c.call(entry.PATCH, "PATCH", "/x", { costs: [{ type: "PONTOS", amountCents: 261800 }], payment: null }, { id });
+    e = await prisma.entry.findUniqueOrThrow({ where: { id } });
+    expect(e.costCents).toBe(261800);
+    expect((e.details as { payment?: unknown } | null)?.payment).toBeUndefined();
+    await assertConsistent();
+  });
 });

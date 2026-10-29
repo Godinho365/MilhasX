@@ -11,7 +11,8 @@ import { airportLabel } from "@/domain/airports";
 import { EntryIcon } from "@/components/entry-meta";
 import { ProgramDot } from "@/components/stat";
 import { openEntryForm } from "@/components/entry-forms";
-import { CostRows, costsPayload, emptyCost, type CostRow, type CardOpt } from "@/components/form-parts";
+import { CostRows, costsPayload, emptyCost, PaymentFields, emptyPay, toPlan, paymentDetail, type CostRow, type CardOpt, type PayState } from "@/components/form-parts";
+import { planCost, scaleCosts } from "@/domain/installments";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 
@@ -513,11 +514,20 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
   const [busy, setBusy] = useState(false);
   const types = costTypesFor(row.type);
   const [costs, setCosts] = useState<CostRow[] | null>(types.length ? null : []);
+  const [pay, setPay] = useState<PayState>(emptyPay);
+  const credit = row.points > 0;
   useEffect(() => {
     if (!types.length) return;
     api<Detail>(`/api/entries/${row.id}`).then((r) => {
       if (!r.ok) return setErro(r.erro);
-      const list = r.data.entry.costs;
+      let list = r.data.entry.costs;
+      // Compra parcelada: mostra o valor cheio nas linhas e refaz o parcelamento salvo
+      const p = (r.data.entry.details as { payment?: { installments: number; anticipated: boolean; nominalCents: number; paidCents: number } } | null)?.payment;
+      if (credit && p) {
+        list = scaleCosts(list, p.nominalCents);
+        const first = planCost(p.nominalCents, { installments: p.installments, anticipate: false, payoffCents: null }).firstCents;
+        setPay({ installments: p.installments, anticipate: p.anticipated, payoff: p.anticipated ? ((p.paidCents - first) / 100).toFixed(2).replace(".", ",") : "" });
+      }
       // Lançamento antigo sem itens: o custo vira uma linha "Outros" para não se perder
       if (!list.length && row.points > 0 && row.inputCostCents > 0) return setCosts([{ type: types.includes("OUTROS") ? "OUTROS" : types[0]!, amount: (row.inputCostCents / 100).toFixed(2).replace(".", ","), cardId: "" }]);
       setCosts(list.length ? list.map((c) => ({ type: c.type as CostType, amount: (c.amountCents / 100).toFixed(2).replace(".", ","), cardId: c.card?.id ?? "" })) : [emptyCost()]);
@@ -532,6 +542,14 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
       const c = costsPayload(costs);
       if (c.erro) return setErro(c.erro);
       body.costs = c.items;
+      if (credit) {
+        const nominal = c.items.reduce((t, x) => t + x.amountCents, 0);
+        const plan = toPlan(pay);
+        const r = planCost(nominal, plan);
+        if (pay.installments > 1 && pay.anticipate && (plan.payoffCents == null || plan.payoffCents > r.restCents)) return setErro("Valor para quitar as parcelas inválido");
+        body.costs = scaleCosts(c.items, r.effectiveCents);
+        body.payment = paymentDetail(pay, nominal);
+      }
     }
     setBusy(true);
     const res = await api(`/api/entries/${row.id}`, "PATCH", body);
@@ -558,6 +576,7 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
           <div className="sm:col-span-2">
             <span className="label">{row.points > 0 ? "Custos" : "Custos do resgate"}</span>
             {costs ? <CostRows rows={costs} setRows={setCosts} types={types} cards={cards} /> : <p className="text-sm text-muted">Carregando custos…</p>}
+            {costs && credit && <div className="mt-3"><PaymentFields totalCents={costsPayload(costs).items.reduce((t, x) => t + x.amountCents, 0)} value={pay} onChange={setPay} /></div>}
           </div>
         )}
       </form>

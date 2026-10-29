@@ -65,6 +65,8 @@ export const accountPatchSchema = z.object({
 const COST_ENUM = ["PONTOS", "IOF", "OUTROS", "FRETE", "MARKUP", "MENSALIDADE", "ANUIDADE", "TAXA_EMBARQUE", "COMPLETAR_PONTOS"] as const;
 export const costItemSchema = z.object({ type: z.enum(COST_ENUM), amountCents: z.number().int().min(0).max(100_000_000_00), cardId: id.optional().nullable() });
 const optDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable().or(z.literal(""));
+// compra parcelada: valor cheio, quanto de fato foi pago (com antecipação) e o desconto
+export const paymentSchema = z.object({ installments: z.number().int().min(2).max(12), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents }).strict();
 export const detailsSchema = z
   .object({
     cashReferenceCents: z.number().int().min(0).max(100_000_000_00).optional().nullable(),
@@ -74,12 +76,7 @@ export const detailsSchema = z
     destination: z.string().trim().regex(/^[A-Z]{3}$/, "Aeroporto inválido").optional().nullable().or(z.literal("")),
     startDate: optDate,
     endDate: optDate,
-    // compra parcelada: valor cheio, quanto de fato foi pago (com antecipação) e o desconto
-    payment: z
-      .object({ installments: z.number().int().min(2).max(12), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents })
-      .strict()
-      .optional()
-      .nullable(),
+    payment: paymentSchema.optional().nullable(),
   })
   .strict();
 export const recurrenceOptionsSchema = z.object({
@@ -109,6 +106,7 @@ export const entryPatchSchema = z.object({
   points: points.optional(),
   costCents: cents.optional(),
   costs: z.array(costItemSchema).max(20).optional(),
+  payment: paymentSchema.optional().nullable(), // null = deixou de ser parcelado
   occurredAt: dateStr.optional(),
   description: z.string().trim().max(200).optional(),
   status: z.enum(["CONFIRMED", "PENDING"]).optional(),
@@ -128,7 +126,7 @@ export const transferSchema = z.object({
       points: points,
       priceCents: cents,
       applyAll: z.boolean().default(false),
-      payment: z.object({ installments: z.number().int().min(2).max(12), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents }).strict().optional().nullable(),
+      payment: paymentSchema.optional().nullable(),
     })
     .optional()
     .nullable(),

@@ -290,12 +290,12 @@ export async function createTransfer(userId: string, input: TransferInput) {
 export async function updateEntry(
   userId: string,
   entryId: string,
-  patch: { points?: number; costCents?: number; costs?: CostItemInput[]; occurredAt?: Date; description?: string; status?: EntryStatus },
+  patch: { points?: number; costCents?: number; costs?: CostItemInput[]; payment?: Prisma.InputJsonValue | null; occurredAt?: Date; description?: string; status?: EntryStatus },
 ) {
   return withLedger(userId, async (tx) => {
     const e = await tx.entry.findFirst({ where: { id: entryId, userId } });
     if (!e) throw new DomainError(404, "Lançamento não encontrado");
-    const onlyStatus = patch.points === undefined && patch.costCents === undefined && patch.costs === undefined && patch.occurredAt === undefined && patch.description === undefined;
+    const onlyStatus = patch.points === undefined && patch.costCents === undefined && patch.costs === undefined && patch.payment === undefined && patch.occurredAt === undefined && patch.description === undefined;
     if (e.groupId && onlyStatus && patch.status === "CONFIRMED") {
       // Transferência com entrega futura: confirma todas as pernas pendentes do grupo
       await tx.entry.updateMany({ where: { userId, groupId: e.groupId, status: "PENDING" }, data: { status: "CONFIRMED" } });
@@ -317,11 +317,19 @@ export async function updateEntry(
       if (patch.costs.length) await tx.entryCost.createMany({ data: patch.costs.map((c) => ({ entryId: e.id, type: c.type, amountCents: c.amountCents, cardId: c.cardId ?? null })) });
       if (credit) costSum = patch.costs.reduce((t, c) => t + c.amountCents, 0);
     }
+    // Detalhe do parcelamento: substitui o anterior (null remove) sem mexer nos outros detalhes
+    let details: Prisma.InputJsonValue | undefined;
+    if (patch.payment !== undefined) {
+      const rest = { ...((e.details as Record<string, unknown> | null) ?? {}) };
+      delete rest.payment;
+      details = (patch.payment ? { ...rest, payment: patch.payment } : rest) as Prisma.InputJsonValue;
+    }
     return tx.entry.update({
       where: { id: e.id },
       data: {
         points: patch.points !== undefined ? (credit ? patch.points : -patch.points) : undefined,
         inputCostCents: costSum,
+        details,
         occurredAt: patch.occurredAt,
         description: patch.description?.trim() || undefined,
         status: patch.status,
