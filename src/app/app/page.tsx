@@ -65,7 +65,20 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
     }).filter((g) => g.rows.length > 0);
 
   const balance: Breakdown = { title: "Saldo por programa", groups: byHolder((a) => pts(a.balance), (h) => pts(h.balance), true), footer: { label: "Total", value: pts(s.totals.balance) }, empty: "Nenhuma conta ainda." };
-  const cost: Breakdown = { title: "Custo por programa", groups: byHolder((a) => (a.cpmCents == null || a.costCents === 0 ? null : money(a.cpmCents))), footer: { label: "Média ponderada", value: money(s.totals.cpmCents) }, empty: "Nenhuma conta com custo." };
+  // Custo do milheiro separado por programa (LATAM, Livelo, Smiles…): misturar programas distorce a média
+  const programs = [...new Map(s.accounts.filter((a) => a.balance > 0).map((a) => [a.programId, a])).values()]
+    .map((p) => {
+      const accs = s.accounts.filter((a) => a.programId === p.programId && a.balance > 0);
+      const balance = accs.reduce((t, a) => t + a.balance, 0);
+      const costCents = accs.reduce((t, a) => t + a.costCents, 0);
+      const cost: Breakdown = {
+        title: `Custo do milheiro · ${p.programName}`,
+        groups: [{ name: "Contas", rows: accs.map((a) => ({ label: a.holderName, note: pts(a.balance), value: a.costCents > 0 && a.cpmCents != null ? money(a.cpmCents) : "-", color: a.programColor })) }],
+        footer: { label: "Média do programa", value: costCents > 0 ? money(Math.round((costCents * 1000) / balance)) : "-" },
+      };
+      return { id: p.programId, name: p.programName, balance, cpm: costCents > 0 ? Math.round((costCents * 1000) / balance) : null, cost };
+    })
+    .sort((a, b) => b.balance - a.balance);
   const value: Breakdown = { title: "Valor por programa", groups: byHolder((a) => money(a.marketValueCents), (h) => money(h.marketValueCents)), footer: { label: "Total", value: money(s.totals.marketValueCents) } };
   // CPFs usados / limite nas contas com limite de beneficiários (o titular ocupa 1 vaga)
   const limited = s.accounts.filter((a) => usage[a.id]?.limit != null);
@@ -87,13 +100,22 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
     footer: { label: "Total", value: pts(pending.total) },
   };
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-5">
+    <>
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       <StatBreakdown label="Saldo total" value={fmtPts(s.totals.balance)} breakdown={balance} />
-      <StatBreakdown label="Custo do milheiro" value={money(s.totals.cpmCents)} breakdown={cost} />
       <StatBreakdown label="Pontos a receber" value={fmtPts(pending.total)} breakdown={toReceive} />
       <StatBreakdown label="Valor em reais" value={money(s.totals.marketValueCents)} breakdown={value} />
       <StatBreakdown label="CPFs usados" value={limited.length ? `${cpfUsed}/${cpfLimit}` : "-"} hint={limited.length ? `${cpfLimit - cpfUsed} livres · titular conta 1` : undefined} breakdown={cpfs} />
     </div>
+    {programs.length > 0 && (
+      <section className="mt-3 sm:mt-4" aria-label="Custo do milheiro por programa">
+        <p className="kicker mb-2">Custo do milheiro por programa</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-6">
+          {programs.map((p) => <StatBreakdown key={p.id} label={p.name} value={p.cpm == null ? "-" : money(p.cpm)} hint={pts(p.balance)} breakdown={p.cost} />)}
+        </div>
+      </section>
+    )}
+    </>
   );
 }
 
