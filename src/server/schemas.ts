@@ -413,6 +413,7 @@ export const quoteSchema = z.object({
   cashCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
 });
+export const quoteEditSchema = quoteSchema.pick({ program: true, miles: true, taxesCents: true, cashCents: true, notes: true });
 
 // Central de Atendimento: interesse em gestão de milhas ("website" é a armadilha para robôs)
 export const publicLeadSchema = z.object({
