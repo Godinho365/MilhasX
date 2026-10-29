@@ -280,17 +280,18 @@ async function Potential({ f }: { f: ReportFilter }) {
     <Card title="Potencial de lucro" subtitle={`Quanto o saldo atual ainda pode render, pelo preço e pelos pontos por CPF das vendas do período (${p.totals.sales} ${p.totals.sales === 1 ? "venda" : "vendas"}).`}>
       {p.rows.length === 0 ? <Empty text="Nenhuma conta com saldo." /> : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
             <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Lucro potencial</p><p className={`text-xl font-semibold tabular-nums ${p.totals.profitCents >= 0 ? "text-ok" : "text-bad"}`} aria-label="Lucro potencial">{fmtBRL(p.totals.profitCents)}</p></div>
             <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Faturamento necessário</p><p className="text-xl font-semibold tabular-nums">{fmtBRL(p.totals.revenueCents)}</p></div>
             <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Emissões possíveis</p><p className="text-xl font-semibold tabular-nums">≈ {p.totals.emissions.toLocaleString("pt-BR")}</p></div>
-            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Lucro potencial por CPF</p><p className="text-xl font-semibold tabular-nums" aria-label="Lucro potencial por CPF">{p.totals.profitPerCpfCents == null ? "-" : fmtBRL(p.totals.profitPerCpfCents)}</p></div>
+            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Lucro por CPF realizado</p><p className="text-xl font-semibold tabular-nums" aria-label="Lucro por CPF realizado">{p.totals.realProfitPerCpfCents == null ? "-" : fmtBRL(p.totals.realProfitPerCpfCents)}</p><p className="text-[11px] text-muted">o que as vendas deram</p></div>
+            <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Lucro potencial por CPF</p><p className="text-xl font-semibold tabular-nums" aria-label="Lucro potencial por CPF">{p.totals.profitPerCpfCents == null ? "-" : fmtBRL(p.totals.profitPerCpfCents)}</p><p className="text-[11px] text-muted">com o custo de hoje</p></div>
             <div className="rounded-xl bg-panel2 p-3"><p className="text-xs text-muted">Média de milhas por CPF</p><p className="text-xl font-semibold tabular-nums" aria-label="Média de milhas por CPF">{p.totals.ptsPerCpf == null ? "-" : fmtPts(p.totals.ptsPerCpf)}</p></div>
           </div>
           <div className="overflow-x-auto">
             <table className="table-base">
               <thead>
-                <tr><th>Programa</th><th className="text-right">Saldo</th><th className="text-right">Custo atual</th><th className="text-right">Venda média</th><th className="text-right">Lucro/milheiro</th><th className="text-right">Milhas/CPF</th><th className="text-right">CPFs livres</th><th className="text-right">Emissões</th><th className="text-right">Lucro/CPF</th><th>Gargalo</th><th className="text-right">ROE</th><th className="text-right">Margem</th><th className="text-right">Potencial</th></tr>
+                <tr><th>Programa</th><th className="text-right">Saldo</th><th className="text-right">Custo atual</th><th className="text-right">Venda média</th><th className="text-right">Lucro/milheiro</th><th className="text-right">Milhas/CPF</th><th className="text-right">CPFs livres</th><th className="text-right">Emissões</th><th className="text-right" title="Lucro por CPF que as vendas do período deram">Lucro/CPF realizado</th><th className="text-right" title="Lucro por CPF vendendo o saldo atual pelo preço médio, com o custo de hoje">Lucro/CPF potencial</th><th>Gargalo</th><th className="text-right">ROE</th><th className="text-right">Margem</th><th className="text-right">Potencial</th></tr>
               </thead>
               <tbody>
                 {p.rows.map((r) => (
@@ -303,6 +304,7 @@ async function Potential({ f }: { f: ReportFilter }) {
                     <td className="text-right tabular-nums" title="Média de milhas por CPF nas vendas do período">{r.ptsPerCpf == null ? "-" : fmtPts(r.ptsPerCpf)}</td>
                     <td className="text-right tabular-nums">{r.cpfFree ?? "sem limite"}</td>
                     <td className="text-right tabular-nums">{r.emissions == null ? "-" : `≈ ${r.emissions.toLocaleString("pt-BR")}`}</td>
+                    <td className="text-right tabular-nums">{r.realProfitPerCpfCents == null ? "-" : fmtBRL(r.realProfitPerCpfCents)}</td>
                     <td className={`text-right tabular-nums ${(r.profitPerCpfCents ?? 0) >= 0 ? "" : "text-bad"}`}>{r.profitPerCpfCents == null ? "-" : fmtBRL(r.profitPerCpfCents)}</td>
                     <td className="text-xs">{r.bottleneck === "CPFS" ? "CPFs" : r.bottleneck === "PONTOS" ? "Pontos" : <span className="text-muted">{r.bank ? "Sem vendas: transfira para uma aérea" : "Sem vendas no período"}</span>}</td>
                     <td className="text-right tabular-nums">{pctTxt(r.roePct)}</td>
@@ -313,7 +315,7 @@ async function Potential({ f }: { f: ReportFilter }) {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-muted">Custo atual = preço mínimo do milheiro para não ter prejuízo. Com poucas vendas no período a estimativa é menos confiável; escolha um período maior para usar mais histórico.</p>
+          <p className="text-xs text-muted">Custo atual = preço mínimo do milheiro para não ter prejuízo. O lucro realizado usa o custo da época de cada venda; o potencial usa o custo de hoje (se o custo subiu, o potencial por CPF fica menor). Com poucas vendas no período a estimativa é menos confiável; escolha um período maior para usar mais histórico.</p>
         </div>
       )}
     </Card>
