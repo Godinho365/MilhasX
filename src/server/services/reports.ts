@@ -367,6 +367,7 @@ export async function profitPotential(f: ReportFilter) {
   }).sort((a, b) => (b.profitCents ?? -Infinity) - (a.profitCents ?? -Infinity) || b.stockPoints - a.stockPoints);
   const priced = rows.filter((r) => r.profitCents != null);
   // emissões sem arredondar, para o lucro por CPF do total bater com o das linhas
+  const histCpfs = sales.reduce((t, s) => t + s.cpfs, 0);
   const exact = priced.reduce((t, r) => t + (r.ptsPerCpf ? r.usedPoints / r.ptsPerCpf : 0), 0);
   const withCpf = priced.filter((r) => r.ptsPerCpf).reduce((t, r) => t + (r.profitCents ?? 0), 0);
   return {
@@ -377,6 +378,7 @@ export async function profitPotential(f: ReportFilter) {
       emissions: Math.round(priced.reduce((t, r) => t + (r.emissions ?? 0), 0) * 10) / 10,
       sales: sales.length,
       profitPerCpfCents: exact > 0 ? Math.round(withCpf / exact) : null,
+      ptsPerCpf: histCpfs > 0 ? Math.round(sales.reduce((t, s) => t + (s.cpfs ? s.points : 0), 0) / histCpfs) : null, // média de milhas por CPF emitido
     },
   };
 }
