@@ -337,13 +337,6 @@ export async function evolutionReport(f: ReportFilter) {
 
 /* ---------------- Vendas ---------------- */
 
-/** CPFs emitidos numa venda: os passageiros das passagens emitidas com pontos (sem o número, os clientes do item, ou 1). */
-function saleCpfs(s: Awaited<ReturnType<typeof listSalesView>>[number]) {
-  return s.items
-    .filter((i) => i.kind === "FLIGHT" && i.issuedWith === "POINTS")
-    .reduce((t, i) => t + (i.passengers ?? Math.max(1, i.customers.length)), 0);
-}
-
 /** CPFs que ainda dá para emitir nas contas do filtro (só as que têm limite de beneficiários). */
 async function freeCpfs(f: ReportFilter) {
   const [usage, accounts] = await Promise.all([
@@ -369,9 +362,10 @@ export async function salesReport(f: ReportFilter) {
   const revenueBy = new Map<string, { name: string; value: number; color?: string }>();
   const profitBy = new Map<string, { name: string; value: number; color?: string }>();
   const beneficiaries = new Map<string, { name: string; value: number; count: number }>();
-  let revenue = 0, profit = 0, points = 0, priced = 0, cpfs = 0;
+  let revenue = 0, profit = 0, points = 0, priced = 0, cpfs = 0, invested = 0;
   for (const s of sales) {
-    cpfs += saleCpfs(s);
+    cpfs += s.cpfs;
+    invested += s.investedCents;
     revenue += s.totalCents;
     profit += s.resultCents;
     points += s.points;
@@ -394,7 +388,7 @@ export async function salesReport(f: ReportFilter) {
     }
   }
   return {
-    totals: { count: sales.length, revenueCents: revenue, profitCents: profit, points, marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : 0, cpfs, profitPerCpfCents: cpfs > 0 ? Math.round(profit / cpfs) : null, ...(await freeCpfs(f)) },
+    totals: { count: sales.length, revenueCents: revenue, profitCents: profit, points, marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : 0, cpfs, profitPerCpfCents: cpfs > 0 ? Math.round(profit / cpfs) : null, roePct: invested > 0 ? Math.round((profit / invested) * 1000) / 10 : null, ...(await freeCpfs(f)) },
     monthly: [...monthly.values()],
     count: desc(count),
     revenue: desc(revenueBy),

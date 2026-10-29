@@ -26,6 +26,9 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const total = sales.reduce((s, x) => s + x.totalCents, 0);
   const result = sales.reduce((s, x) => s + x.resultCents, 0);
   const pts = sales.reduce((s, x) => s + x.points, 0);
+  const invested = sales.reduce((s, x) => s + x.investedCents, 0);
+  const cpfs = sales.reduce((s, x) => s + x.cpfs, 0);
+  const pctFmt = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
   return (
     <>
       <PageHeader title="Vendas" subtitle="Vendas de emissão: valor cobrado, custo dos pontos e resultado" />
@@ -33,11 +36,13 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
       {tab === "vendas" ? (
         <>
           {sales.length > 0 && (
-            <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
               <Stat label="Vendas" value={String(sales.length)} />
               <Stat label="Total vendido" value={fmtBRL(total)} />
               <Stat label="Resultado" value={fmtBRL(result)} accent />
               <Stat label="Pontos vendidos" value={fmtPts(pts)} />
+              <Stat label="ROE" value={invested > 0 ? pctFmt((result / invested) * 100) : "-"} hint="resultado ÷ custo investido" />
+              <Stat label="Lucro por CPF" value={cpfs > 0 ? fmtBRL(Math.round(result / cpfs)) : "-"} hint={`${cpfs} ${cpfs === 1 ? "CPF emitido" : "CPFs emitidos"}`} />
             </div>
           )}
           <SalesClient

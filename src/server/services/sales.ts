@@ -92,7 +92,16 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
   const priced = s.items.reduce((t, i) => t + i.salePriceCents, 0);
   // Valor cobrado só pelos pontos (sem taxa de embarque e outros custos repassados): base do preço por milheiro
   const pointsValueCents = s.items.filter((i) => i.issuedWith === "POINTS").reduce((t, i) => t + i.salePriceCents, 0);
-  return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null };
+  // ROE: resultado sobre o que foi investido na emissão (custo dos pontos ou valor pago); custos repassados ficam de fora
+  const investedCents = parts.reduce((t, p, k) => t + p.pointsCostCents + s.items[k].cashCostCents, 0);
+  return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, investedCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null, roePct: pct(resultCents, investedCents) };
+}
+
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
+
+/** CPFs emitidos: passageiros das passagens emitidas com pontos (sem o número, os clientes do item, ou 1). */
+export function saleCpfs(items: { kind: string; issuedWith: string; passengers: number | null; customers: unknown[] }[]) {
+  return items.filter((i) => i.kind === "FLIGHT" && i.issuedWith === "POINTS").reduce((t, i) => t + (i.passengers ?? Math.max(1, i.customers.length)), 0);
 }
 
 function validate(input: SaleInput) {
@@ -229,6 +238,7 @@ function present(s: SaleRow) {
     description: s.items.map(itemSummary).join(" + "),
     customers: [...new Map(s.items.flatMap((i) => i.customers).map((c) => [c.id, c.name])).values()],
     points: s.points,
+    cpfs: saleCpfs(s.items),
     ...f,
     attachments: s._count.attachments,
     items: s.items.map((i) => ({

@@ -248,6 +248,7 @@ async function Sales({ f }: { f: ReportFilter }) {
         <Stat label="Lucro" value={fmtBRL(r.totals.profitCents)} hint="no período" accent />
         <Stat label="Margem" value={`${r.totals.marginPct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`} hint="média no período" />
         <Stat label="Pontos vendidos" value={fmtPts(r.totals.points)} hint={`${r.totals.count} ${r.totals.count === 1 ? "venda" : "vendas"}`} />
+        <Stat label="ROE" value={r.totals.roePct == null ? "-" : `${r.totals.roePct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} hint="resultado ÷ custo investido" />
         <Stat label="Lucro por CPF" value={r.totals.profitPerCpfCents == null ? "-" : fmtBRL(r.totals.profitPerCpfCents)} hint="média por CPF emitido" accent />
         <Stat label="CPFs emitidos" value={fmtPts(r.totals.cpfs)} hint="passageiros emitidos com pontos" />
         <Stat label="CPFs livres" value={r.totals.cpfsFree == null ? "-" : fmtPts(r.totals.cpfsFree)} hint={r.totals.cpfsFree == null ? "nenhuma conta com limite de CPFs" : `hoje, em ${r.totals.cpfAccounts} ${r.totals.cpfAccounts === 1 ? "conta" : "contas"}`} />

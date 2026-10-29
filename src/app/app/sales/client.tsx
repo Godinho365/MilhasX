@@ -84,7 +84,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }
           <div className="overflow-x-auto">
             <table className="table-base">
               <thead>
-                <tr><th>{sortHeader("occurredAt", "Data")}</th><th>Programa</th><th>Descrição</th><th className="text-right">{sortHeader("points", "Pontos")}</th><th className="text-right">{sortHeader("totalCents", "Valor")}</th><th className="text-right">Resultado</th><th className="w-16 text-right">Ações</th></tr>
+                <tr><th>{sortHeader("occurredAt", "Data")}</th><th>Programa</th><th>Descrição</th><th className="text-right">{sortHeader("points", "Pontos")}</th><th className="text-right">{sortHeader("totalCents", "Valor")}</th><th className="text-right">Resultado</th><th className="text-right">ROE</th><th className="text-right">Lucro/CPF</th><th className="w-16 text-right">Ações</th></tr>
               </thead>
               <tbody>
                 {sales.map((s) => (
@@ -98,6 +98,8 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }
                     <td className="text-right tabular-nums">{s.points ? fmtPts(s.points) : "-"}</td>
                     <td className="text-right tabular-nums">{fmtBRL(s.totalCents)}</td>
                     <td className={`text-right font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}</td>
+                    <td className="text-right tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</td>
+                    <td className="text-right tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}</td>
                     <td className="text-right">
                       <button className="btn-subtle h-8 w-8 px-0" aria-label={`Ações da venda ${s.description}`} aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu(menu?.s.id === s.id ? null : { s, top: r.bottom + 4, right: window.innerWidth - r.right }); }}><MoreHorizontal className="h-4 w-4" /></button>
                     </td>
@@ -129,10 +131,12 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
   return (
     <Modal open onClose={onClose} title="Detalhes da venda" footer={<button className="btn-primary" onClick={onClose}>Fechar</button>}>
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3 rounded-xl bg-panel2 p-3 text-center text-sm">
+        <div className="grid grid-cols-3 gap-3 rounded-xl bg-panel2 p-3 text-center text-sm sm:grid-cols-5">
           <div><p className="text-xs text-muted">Total</p><p className="font-semibold tabular-nums">{fmtBRL(s.totalCents)}</p></div>
           <div><p className="text-xs text-muted">Custo</p><p className="font-semibold tabular-nums">{fmtBRL(s.costCents)}</p></div>
           <div><p className="text-xs text-muted">Resultado</p><p className={`font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}{s.marginPct != null && <span className="block text-xs font-normal text-muted">{s.marginPct.toLocaleString("pt-BR")}%</span>}</p></div>
+          <div><p className="text-xs text-muted">ROE</p><p className="font-semibold tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</p></div>
+          <div><p className="text-xs text-muted">Lucro por CPF</p><p className="font-semibold tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}<span className="block text-xs font-normal text-muted">{s.cpfs} {s.cpfs === 1 ? "CPF" : "CPFs"}</span></p></div>
         </div>
         <div className="divide-y divide-line">
           {line("Data", fmtDate(s.date))}
