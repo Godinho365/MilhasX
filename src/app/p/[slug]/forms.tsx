@@ -49,11 +49,16 @@ function Stepper({ name, hint, value, min, max, onChange }: { name: string; hint
 function AirportInput({ value, onChange, aria, listId }: { value: string; onChange: (v: string) => void; aria: string; listId: string }) {
   return <input className={box} list={listId} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Cidade ou GRU" aria-label={aria} autoComplete="off" />;
 }
+const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+// Código, nome da cidade ou do aeroporto, sem ligar para acento e maiúsculas. Cidade com mais de um
+// aeroporto (Rio, São Paulo, BH) fica com o principal, o primeiro da lista; a agência ajusta na cotação.
+// Nome antes do código: "Rio de Janeiro" começa com três letras e virava "RIO".
 const codeOf = (v: string) => {
   const t = v.trim();
-  if (/^[A-Za-z]{3}(\s|$|—)/.test(t)) return t.slice(0, 3).toUpperCase();
-  const byCity = AIRPORTS.filter((a) => a.city.toLowerCase() === t.toLowerCase());
-  return byCity.length === 1 ? byCity[0]!.code : "";
+  const f = fold(t);
+  const byName = f && AIRPORTS.find((a) => fold(a.city) === f || fold(a.name) === f);
+  if (byName) return byName.code;
+  return /^[A-Za-z]{3}(\s|$|—)/.test(t) ? t.slice(0, 3).toUpperCase() : "";
 };
 
 type Seg = { from: string; to: string; date: string };
