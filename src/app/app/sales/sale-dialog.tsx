@@ -129,7 +129,13 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
   const acc = accounts.find((a) => a.id === accountId);
   const sup = suppliers.find((s) => s.id === supplierId);
   const costCpm = origin === "OWN" ? (acc && acc.balance > 0 ? acc.costCents / acc.balance * 1000 : 0) : (sup?.priceCpmCents ?? 0);
-  const estimate = items.reduce((t, it) => t + itemPrice(it) - (it.issuedWith === "POINTS" ? Math.round((parsePts(it.points) * costCpm) / 1000) : (money(it.cashCost) ?? 0)), 0);
+  // Prévia do lucro: o que entra pelos pontos/serviço menos o custo deles (custos repassados não entram: o cliente paga)
+  const revenue = items.reduce((t, it) => t + itemPrice(it), 0);
+  const cost = items.reduce((t, it) => t + (it.issuedWith === "POINTS" ? Math.round((parsePts(it.points) * costCpm) / 1000) : (money(it.cashCost) ?? 0)), 0);
+  const estimate = revenue - cost;
+  const margin = revenue > 0 ? (estimate / revenue) * 100 : null;
+  const saleCpm = points > 0 ? (items.reduce((t, it) => t + (it.issuedWith === "POINTS" ? itemPrice(it) : 0), 0) / points) * 1000 : null;
+  const showProfit = (acc || sup) && revenue > 0;
   const available = origin === "OWN" ? acc?.balance : sup?.balance;
   const filesSize = files.reduce((t, f) => t + f.size, 0);
 
@@ -210,9 +216,17 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
       title="Nova venda"
       footer={
         <>
-          <div className="mr-auto text-sm">
-            <p className="text-xs text-muted">Total da venda</p>
-            <p className="text-lg font-semibold tabular-nums" aria-label="Total da venda">{fmtBRL(total)}</p>
+          <div className="mr-auto flex gap-6 text-sm">
+            <div>
+              <p className="text-xs text-muted">Total da venda</p>
+              <p className="text-lg font-semibold tabular-nums" aria-label="Total da venda">{fmtBRL(total)}</p>
+            </div>
+          {showProfit && (
+            <div>
+              <p className="text-xs text-muted">Lucro estimado</p>
+              <p className={`text-lg font-semibold tabular-nums ${estimate >= 0 ? "text-ok" : "text-bad"}`} aria-label="Lucro estimado no rodapé">{fmtBRL(estimate)}</p>
+            </div>
+          )}
           </div>
           <button type="button" className="btn-ghost" onClick={requestClose}>Cancelar</button>
           <button form="sale-form" className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Criar venda"}</button>
@@ -365,11 +379,22 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
           </div>
         </Collapsible>
 
-        {(acc || sup) && points + total > 0 && (
-          <p className="rounded-xl bg-panel2 px-4 py-3 text-sm text-muted">
-            Resultado estimado: <b className={estimate >= 0 ? "text-ok" : "text-bad"}>{fmtBRL(estimate)}</b>
-            {points > 0 && available != null && points > available && <span className="text-red-300"> · Saldo insuficiente ({fmtPts(available)} pontos)</span>}
-          </p>
+        {showProfit && (
+          <section className="rounded-xl border border-line bg-panel2 px-4 py-3 text-sm" aria-label="Prévia do lucro">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Prévia do lucro</p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-4">
+              <div><dt className="text-xs text-muted">Recebe pelos pontos</dt><dd className="tabular-nums">{fmtBRL(revenue)}</dd></div>
+              <div><dt className="text-xs text-muted">{origin === "OWN" ? "Custo dos pontos" : "Pago ao fornecedor"}</dt><dd className="tabular-nums">{fmtBRL(cost)}</dd></div>
+              <div><dt className="text-xs text-muted">Lucro</dt><dd className={`font-semibold tabular-nums ${estimate >= 0 ? "text-ok" : "text-bad"}`} aria-label="Lucro estimado">{fmtBRL(estimate)}</dd></div>
+              <div><dt className="text-xs text-muted">Margem</dt><dd className="tabular-nums">{margin == null ? "-" : `${margin.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}</dd></div>
+            </dl>
+            {saleCpm != null && (
+              <p className="mt-2 text-xs text-muted">
+                Milheiro: vende a <b className="text-zinc-200">{fmtBRL(Math.round(saleCpm))}</b> · custo médio <b className="text-zinc-200">{fmtBRL(Math.round(costCpm))}</b> · lucro de <b className={saleCpm - costCpm >= 0 ? "text-ok" : "text-bad"}>{fmtBRL(Math.round(saleCpm - costCpm))}</b> por milheiro
+              </p>
+            )}
+            {points > 0 && available != null && points > available && <p className="mt-1 text-xs text-red-300">Saldo insuficiente ({fmtPts(available)} pontos)</p>}
+          </section>
         )}
       </form>
       <datalist id="sale-airports">{AIRPORTS.map((a) => <option key={a.code} value={`${a.code} — ${a.city} (${a.name})`} />)}</datalist>
