@@ -363,10 +363,7 @@ export async function profitPotential(f: ReportFilter) {
       cpfs: mine.reduce((t, s) => t + s.cpfs, 0),
       sales: mine.length,
     };
-    // Lucro por CPF realizado: o que as vendas do período de fato deram (com o custo da época de cada venda)
-    const realCpfs = mine.reduce((t, s) => t + s.cpfs, 0);
-    const realProfitPerCpfCents = realCpfs > 0 ? Math.round(mine.reduce((t, s) => t + (s.cpfs ? s.resultCents : 0), 0) / realCpfs) : null;
-    return { id: p.id, name: p.name, color: p.color, bank: p.kind === "POINTS", stockPoints: p.points, cpfFree: p.cpfFree, sales: hist.sales, realProfitPerCpfCents, ...programPotential({ stockPoints: p.points, stockCostCents: p.costCents, cpfFree: p.cpfFree, hist }) };
+    return { id: p.id, name: p.name, color: p.color, bank: p.kind === "POINTS", stockPoints: p.points, cpfFree: p.cpfFree, sales: hist.sales, ...programPotential({ stockPoints: p.points, stockCostCents: p.costCents, cpfFree: p.cpfFree, hist }) };
   }).sort((a, b) => (b.profitCents ?? -Infinity) - (a.profitCents ?? -Infinity) || b.stockPoints - a.stockPoints);
   const priced = rows.filter((r) => r.profitCents != null);
   // emissões sem arredondar, para o lucro por CPF do total bater com o das linhas
@@ -381,7 +378,6 @@ export async function profitPotential(f: ReportFilter) {
       emissions: Math.round(priced.reduce((t, r) => t + (r.emissions ?? 0), 0) * 10) / 10,
       sales: sales.length,
       profitPerCpfCents: exact > 0 ? Math.round(withCpf / exact) : null,
-      realProfitPerCpfCents: histCpfs > 0 ? Math.round(sales.reduce((t, s) => t + (s.cpfs ? s.resultCents : 0), 0) / histCpfs) : null,
       ptsPerCpf: histCpfs > 0 ? Math.round(sales.reduce((t, s) => t + (s.cpfs ? s.points : 0), 0) / histCpfs) : null, // média de milhas por CPF emitido
     },
   };
