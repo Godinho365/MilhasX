@@ -411,9 +411,12 @@ export const quoteSchema = z.object({
   miles: z.number().int().min(1).max(10_000_000).nullable().optional(),
   taxesCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
   cashCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  costCpmCents: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  issueFeeCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  issueFeeBps: z.number().int().min(0).max(10_000).nullable().optional(),
   notes: z.string().max(500).nullable().optional(),
 });
-export const quoteEditSchema = quoteSchema.pick({ program: true, miles: true, taxesCents: true, cashCents: true, notes: true });
+export const quoteEditSchema = quoteSchema.pick({ program: true, miles: true, taxesCents: true, cashCents: true, costCpmCents: true, issueFeeCents: true, issueFeeBps: true, notes: true });
 
 // Central de Atendimento: interesse em gestão de milhas ("website" é a armadilha para robôs)
 export const publicLeadSchema = z.object({

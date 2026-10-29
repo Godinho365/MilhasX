@@ -926,23 +926,26 @@ model OrderEvent {
 
 // Cotação anotada pelo usuário (comparador do buscador). Base do futuro tradutor de milhas.
 model FlightQuote {
-  id          String       @id @default(cuid())
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orderId     String?
-  order       TravelOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  program     String // chave do programa do buscador (smiles, latam, azul, ...)
-  origin      String
-  destination String
-  departDate  DateTime     @db.Date
-  returnDate  DateTime?    @db.Date
-  cabin       String       @default("ECONOMY")
-  adults      Int          @default(1)
-  miles       Int?
-  taxesCents  Int?
-  cashCents   Int?
-  notes       String?
-  createdAt   DateTime     @default(now())
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId       String?
+  order         TravelOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  program       String // chave do programa do buscador (smiles, latam, azul, ...)
+  origin        String
+  destination   String
+  departDate    DateTime     @db.Date
+  returnDate    DateTime?    @db.Date
+  cabin         String       @default("ECONOMY")
+  adults        Int          @default(1)
+  miles         Int?
+  taxesCents    Int?
+  cashCents     Int?
+  costCpmCents  Int? // custo do milheiro (ex.: preço do balcão); vazio = CPM médio do estoque
+  issueFeeCents Int? // taxa de emissão cobrada do cliente (entra no valor em dinheiro e é lucro)
+  issueFeeBps   Int? // taxa de emissão em % do total da passagem (1% = 100); vazio = valor fixo
+  notes         String?
+  createdAt     DateTime     @default(now())
 
   @@index([userId, origin, destination])
 }
