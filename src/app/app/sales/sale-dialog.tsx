@@ -248,7 +248,7 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
             <Field label="Programa" required>
               <select className="input" value={accountId} onChange={(e) => { setAccountId(e.target.value); setDirty(true); }} aria-label="Programa">
                 <option value="" disabled>Selecione o programa</option>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} ({fmtPts(a.balance)})</option>)}
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} ({fmtPts(a.balance)}){a.balance > 0 && a.costCents > 0 ? ` · milheiro ${fmtBRL(Math.round((a.costCents / a.balance) * 1000))}` : ""}</option>)}
               </select>
             </Field>
           ) : (

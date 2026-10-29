@@ -301,7 +301,9 @@ test("vendas e clientes", async () => {
   await page.goto("/app/sales");
   await page.getByRole("button", { name: "Registrar venda" }).first().click();
   const d = page.getByRole("dialog");
-  await d.getByLabel("Programa").selectOption({ label: "LATAM Pass Ana E2E (25.000)" });
+  // a opção também traz o custo do milheiro da conta ("· milheiro R$ …"), então casa pelo começo
+  const saleAcc = d.getByLabel("Programa").locator("option", { hasText: "LATAM Pass Ana E2E (25.000)" });
+  await d.getByLabel("Programa").selectOption((await saleAcc.getAttribute("value"))!);
   await d.getByLabel("Pontos da emissão do item 1").fill("10000");
   await d.getByLabel("Valor do milheiro do item 1").fill("28,00"); // 10.000 pts × R$ 28 = R$ 280
   await d.getByRole("button", { name: /Taxas e custos repassados/ }).click();
