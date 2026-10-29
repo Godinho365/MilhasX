@@ -366,13 +366,17 @@ export async function profitPotential(f: ReportFilter) {
     return { id: p.id, name: p.name, color: p.color, bank: p.kind === "POINTS", stockPoints: p.points, cpfFree: p.cpfFree, sales: hist.sales, ...programPotential({ stockPoints: p.points, stockCostCents: p.costCents, cpfFree: p.cpfFree, hist }) };
   }).sort((a, b) => (b.profitCents ?? -Infinity) - (a.profitCents ?? -Infinity) || b.stockPoints - a.stockPoints);
   const priced = rows.filter((r) => r.profitCents != null);
+  // emissões sem arredondar, para o lucro por CPF do total bater com o das linhas
+  const exact = priced.reduce((t, r) => t + (r.ptsPerCpf ? r.usedPoints / r.ptsPerCpf : 0), 0);
+  const withCpf = priced.filter((r) => r.ptsPerCpf).reduce((t, r) => t + (r.profitCents ?? 0), 0);
   return {
     rows,
     totals: {
       profitCents: priced.reduce((t, r) => t + (r.profitCents ?? 0), 0),
       revenueCents: priced.reduce((t, r) => t + (r.revenueCents ?? 0), 0),
-      emissions: priced.reduce((t, r) => t + (r.emissions ?? 0), 0),
+      emissions: Math.round(priced.reduce((t, r) => t + (r.emissions ?? 0), 0) * 10) / 10,
       sales: sales.length,
+      profitPerCpfCents: exact > 0 ? Math.round(withCpf / exact) : null,
     },
   };
 }

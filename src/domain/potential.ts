@@ -12,6 +12,7 @@ export type Potential = {
   saleCpmCents: number | null; // preço médio de venda do milheiro no histórico
   costCpmCents: number; // custo médio atual do estoque = preço mínimo sem prejuízo
   profitPerMilCents: number | null;
+  profitPerCpfCents: number | null; // lucro por emissão: lucro/milheiro × pontos por CPF do histórico
   ptsPerCpf: number | null;
   emissions: number | null; // emissões que o estoque (ou os CPFs) ainda permitem
   usedPoints: number;
@@ -35,7 +36,7 @@ export function programPotential(i: PotentialInput): Potential {
     bottleneck = "CPFS";
   }
   if (saleCpm == null) {
-    return { saleCpmCents: null, costCpmCents, profitPerMilCents: null, ptsPerCpf: ptsPerCpf && Math.round(ptsPerCpf), emissions: null, usedPoints, bottleneck, profitCents: null, revenueCents: null, roePct: null, marginPct: null };
+    return { saleCpmCents: null, costCpmCents, profitPerMilCents: null, profitPerCpfCents: null, ptsPerCpf: ptsPerCpf && Math.round(ptsPerCpf), emissions: null, usedPoints, bottleneck, profitCents: null, revenueCents: null, roePct: null, marginPct: null };
   }
   const revenueCents = Math.round((usedPoints * saleCpm) / 1000);
   const investedCents = Math.round((usedPoints * costCpmCents) / 1000);
@@ -44,8 +45,9 @@ export function programPotential(i: PotentialInput): Potential {
     saleCpmCents: Math.round(saleCpm),
     costCpmCents,
     profitPerMilCents: Math.round(saleCpm - costCpmCents),
+    profitPerCpfCents: ptsPerCpf ? Math.round(((saleCpm - costCpmCents) * ptsPerCpf) / 1000) : null,
     ptsPerCpf: ptsPerCpf && Math.round(ptsPerCpf),
-    emissions: ptsPerCpf ? Math.round(usedPoints / ptsPerCpf) : null,
+    emissions: ptsPerCpf ? Math.round((usedPoints / ptsPerCpf) * 10) / 10 : null, // 1 casa: 2,5 emissões não vira 3
     usedPoints,
     bottleneck,
     profitCents,

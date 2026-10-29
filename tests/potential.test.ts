@@ -12,6 +12,7 @@ describe("potencial de lucro", () => {
     expect(p.profitCents).toBe(160_000);
     expect(p.roePct).toBe(25);
     expect(p.marginPct).toBe(20);
+    expect(p.profitPerCpfCents).toBe(16_000); // R$ 5/milheiro × 32.000 pts
   });
 
   it("CPFs acabam antes dos pontos", () => {
