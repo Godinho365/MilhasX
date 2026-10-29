@@ -34,6 +34,9 @@ export type QuoteInput = {
   miles?: number | null;
   taxesCents?: number | null;
   cashCents?: number | null;
+  costCpmCents?: number | null;
+  issueFeeCents?: number | null; // taxa de emissão cobrada do cliente (já somada ao valor em dinheiro)
+  issueFeeBps?: number | null; // a taxa em % do total da passagem (1% = 100); vazio = valor fixo
   notes?: string | null;
 };
 
@@ -45,7 +48,8 @@ export async function addQuote(userId: string, input: QuoteInput) {
     data: {
       userId, orderId: input.orderId || null, program: input.program, origin: input.origin, destination: input.destination,
       departDate: new Date(`${input.departDate}T00:00:00Z`), returnDate: input.returnDate ? new Date(`${input.returnDate}T00:00:00Z`) : null,
-      cabin: input.cabin, adults: input.adults, miles: input.miles ?? null, taxesCents: input.taxesCents ?? null, cashCents: input.cashCents ?? null, notes: input.notes?.trim() || null,
+      cabin: input.cabin, adults: input.adults, miles: input.miles ?? null, taxesCents: input.taxesCents ?? null, cashCents: input.cashCents ?? null,
+      costCpmCents: input.costCpmCents ?? null, issueFeeCents: input.issueFeeCents ?? null, issueFeeBps: input.issueFeeBps ?? null, notes: input.notes?.trim() || null,
     },
   });
   if (q.orderId) await prisma.orderEvent.create({ data: { orderId: q.orderId, type: "quote", note: `${PROGRAM_BY_KEY[q.program]!.label}: ${q.miles ? `${q.miles.toLocaleString("pt-BR")} milhas` : ""}${q.cashCents ? ` R$ ${(q.cashCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : ""}` } });
@@ -55,7 +59,7 @@ export async function addQuote(userId: string, input: QuoteInput) {
 const quoteView = (q: Awaited<ReturnType<typeof prisma.flightQuote.create>>) => ({
   id: q.id, orderId: q.orderId, program: q.program, label: PROGRAM_BY_KEY[q.program]?.label ?? q.program,
   origin: q.origin, destination: q.destination, departDate: q.departDate.toISOString().slice(0, 10), returnDate: q.returnDate?.toISOString().slice(0, 10) ?? null,
-  cabin: q.cabin, adults: q.adults, miles: q.miles, taxesCents: q.taxesCents, cashCents: q.cashCents, notes: q.notes, createdAt: q.createdAt.toISOString(),
+  cabin: q.cabin, adults: q.adults, miles: q.miles, taxesCents: q.taxesCents, cashCents: q.cashCents, costCpmCents: q.costCpmCents, issueFeeCents: q.issueFeeCents, issueFeeBps: q.issueFeeBps, notes: q.notes, createdAt: q.createdAt.toISOString(),
 });
 export type QuoteView = ReturnType<typeof quoteView>;
 
@@ -72,21 +76,54 @@ export async function listQuotes(userId: string, f: { orderId?: string; origin?:
   });
   const codes = [...new Set(rows.map((r) => PROGRAM_CODE[r.program]).filter((c): c is string => !!c))];
   const market = new Map((await prisma.program.findMany({ where: { code: { in: codes } }, select: { code: true, marketValueCpmCents: true } })).map((p) => [p.code, p.marketValueCpmCents]));
+  const mine = await avgCpmByProgram(userId);
   return rows
     .map((r) => {
       const cpm = market.get(PROGRAM_CODE[r.program] ?? "");
       const costCents = r.cashCents ?? (r.miles && cpm ? Math.round((r.miles * cpm) / 1000) + (r.taxesCents ?? 0) : null);
-      return { ...quoteView(r), costCents, costEstimated: r.cashCents == null && costCents != null };
+      const myCpm = mine[r.program];
+      return { ...quoteView(r), costCents, costEstimated: r.cashCents == null && costCents != null, profitCents: quoteProfitCents(r, myCpm) };
     })
     .sort((a, b) => (a.costCents ?? Infinity) - (b.costCents ?? Infinity) || (a.miles ?? Infinity) - (b.miles ?? Infinity));
 }
 
-export async function updateQuote(userId: string, id: string, input: Pick<QuoteInput, "program" | "miles" | "taxesCents" | "cashCents" | "notes">) {
+/**
+ * CPM médio do seu estoque em cada programa do buscador (custo ÷ saldo das contas ativas com saldo),
+ * a mesma conta do potencial de lucro dos relatórios.
+ */
+export async function avgCpmByProgram(userId: string): Promise<Record<string, number>> {
+  const accounts = await prisma.account.findMany({ where: { userId, archived: false, balance: { gt: 0 }, program: { code: { in: Object.values(PROGRAM_CODE) } } }, select: { balance: true, costCents: true, program: { select: { code: true } } } });
+  const by = new Map<string, { points: number; cost: number }>();
+  for (const a of accounts) {
+    const cur = by.get(a.program.code) ?? { points: 0, cost: 0 };
+    cur.points += a.balance;
+    cur.cost += a.costCents;
+    by.set(a.program.code, cur);
+  }
+  const out: Record<string, number> = {};
+  for (const [key, code] of Object.entries(PROGRAM_CODE)) {
+    const v = by.get(code);
+    if (v && v.points > 0 && v.cost > 0) out[key] = Math.round((v.cost * 1000) / v.points);
+  }
+  return out;
+}
+
+/**
+ * Lucro de vender a cotação pelo valor em dinheiro: menos as taxas e as milhas pelo custo do milheiro da
+ * cotação (ex.: balcão) ou, sem ele, pelo CPM médio do estoque. A taxa de emissão cobrada do cliente
+ * já está no valor em dinheiro, então é lucro.
+ */
+export const quoteProfitCents = (q: { miles: number | null; taxesCents: number | null; cashCents: number | null; costCpmCents?: number | null }, stockCpmCents: number | undefined) => {
+  const cpm = q.costCpmCents ?? stockCpmCents;
+  return q.miles && q.cashCents != null && cpm ? q.cashCents - (q.taxesCents ?? 0) - Math.round((q.miles * cpm) / 1000) : null;
+};
+
+export async function updateQuote(userId: string, id: string, input: Pick<QuoteInput, "program" | "miles" | "taxesCents" | "cashCents" | "costCpmCents" | "issueFeeCents" | "issueFeeBps" | "notes">) {
   if (!PROGRAM_BY_KEY[input.program]) throw new DomainError(400, "Programa inválido");
   if (!input.miles && !input.cashCents) throw new DomainError(400, "Informe as milhas ou o valor em reais");
   const { count } = await prisma.flightQuote.updateMany({
     where: { id, userId },
-    data: { program: input.program, miles: input.miles ?? null, taxesCents: input.taxesCents ?? null, cashCents: input.cashCents ?? null, notes: input.notes?.trim() || null },
+    data: { program: input.program, miles: input.miles ?? null, taxesCents: input.taxesCents ?? null, cashCents: input.cashCents ?? null, costCpmCents: input.costCpmCents ?? null, issueFeeCents: input.issueFeeCents ?? null, issueFeeBps: input.issueFeeBps ?? null, notes: input.notes?.trim() || null },
   });
   if (!count) throw new DomainError(404, "Cotação não encontrada");
   return quoteView(await prisma.flightQuote.findUniqueOrThrow({ where: { id } }));

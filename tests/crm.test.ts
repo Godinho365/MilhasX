@@ -13,6 +13,7 @@ import * as publicOrder from "@/app/api/public/orders/[slug]/route";
 import * as salesProfile from "@/app/api/sales-profile/route";
 import { ordersDashboard } from "@/server/services/orders";
 import { PROGRAM_BY_KEY, SEARCH_PROGRAMS, validateSearch } from "@/domain/flight-search";
+import { parseSearchLink, parseOffers, preferredOffer } from "@/domain/quote-paste";
 import { whatsappLink, whatsappText, routeLabel, orderSummary, WHATSAPP_TEMPLATES } from "@/domain/orders";
 import { prisma } from "@/server/db";
 
@@ -131,6 +132,65 @@ describe("buscador", () => {
     expect((await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data.items[0].id).toBe(smiles.id);
     expect((await c.call(quote.PATCH, "PATCH", "/x", { program: "smiles", miles: null, cashCents: null }, { id: smiles.id })).status).toBe(400);
     expect((await c.call(quote.PATCH, "PATCH", "/x", { program: "smiles", miles: 1 }, { id: "nao-existe" })).status).toBe(404);
+  });
+
+  it("potencial de lucro da cotação pelo CPM médio do estoque no programa", async () => {
+    const latam = await prisma.program.create({ data: { name: "LATAM Pass", code: "LATAM", kind: "MILES", marketValueCpmCents: 2450 } });
+    const [h1, h2, h3] = await Promise.all(["Ana", "Bia", "Caio"].map((name) => prisma.holder.create({ data: { userId, name } })));
+    // CPM médio = (300 + 186) ÷ (20.000 + 10.000) × 1000 = R$ 16,20; a arquivada fica fora
+    await prisma.account.createMany({ data: [
+      { userId, holderId: h1!.id, programId: latam.id, balance: 20000, costCents: 30000 },
+      { userId, holderId: h2!.id, programId: latam.id, balance: 10000, costCents: 18600 },
+      { userId, holderId: h3!.id, programId: latam.id, balance: 50000, costCents: 10000, archived: true },
+    ] });
+    const base = { origin: "BSB", destination: "SDU", departDate: "2027-05-29", cabin: "ECONOMY", adults: 1 };
+    // 37.746 × R$ 22 + R$ 97,17 = R$ 927,58 em dinheiro
+    await c.call(quotes.POST, "POST", "/x", { ...base, program: "latam", miles: 37746, taxesCents: 9717, cashCents: 92758 });
+    await c.call(quotes.POST, "POST", "/x", { ...base, program: "smiles", miles: 41000, taxesCents: 9717, cashCents: 79417 });
+    const r = (await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data;
+    expect(r.cpm).toEqual({ latam: 1620 });
+    const byProg = Object.fromEntries(r.items.map((q: { program: string; profitCents: number | null }) => [q.program, q.profitCents]));
+    expect(byProg).toEqual({ latam: 92758 - 9717 - Math.round((37746 * 1620) / 1000), smiles: null }); // sem estoque Smiles: sem lucro
+
+    // Comprando no balcão: o custo do milheiro da cotação vale no lugar do estoque. A taxa de emissão (5% de
+    // R$ 650 = R$ 32,50) é cobrada do cliente: já está no valor em dinheiro e é lucro
+    const balcao = (await c.call(quotes.POST, "POST", "/x", { ...base, program: "smiles", miles: 30000, taxesCents: 5000, cashCents: 68250, costCpmCents: 1500, issueFeeCents: 3250, issueFeeBps: 500 })).data.item;
+    expect(balcao).toMatchObject({ costCpmCents: 1500, issueFeeCents: 3250, issueFeeBps: 500 });
+    const profitOf = async (id: string) => (await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data.items.find((q: { id: string }) => q.id === id).profitCents;
+    expect(await profitOf(balcao.id)).toBe(68250 - 5000 - 45000);
+    await c.call(quote.PATCH, "PATCH", "/x", { program: "latam", miles: 30000, taxesCents: 5000, cashCents: 70000, costCpmCents: null, issueFeeCents: 2000, issueFeeBps: null }, { id: balcao.id });
+    expect(await profitOf(balcao.id)).not.toBeNull();
+    expect((await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data.items.find((q: { id: string }) => q.id === balcao.id)).toMatchObject({ issueFeeCents: 2000, issueFeeBps: null });
+    expect(await profitOf(balcao.id)).toBe(70000 - 5000 - Math.round((30000 * 1620) / 1000)); // sem custo informado: volta ao CPM médio do estoque
+  });
+
+  it("colar: lê o link da busca de volta e as opções de preço do texto da página", () => {
+    const rt = { origin: "BSB", destination: "SDU", departDate: "2027-05-29", returnDate: "2027-05-30", adults: 2, children: 1, infants: 0, cabin: "ECONOMY" as const };
+    for (const key of ["latam", "smiles", "azul-mundo"]) expect(parseSearchLink(`olha: ${PROGRAM_BY_KEY[key]!.build(rt)} `), key).toEqual({ program: key, params: rt });
+    expect(parseSearchLink(PROGRAM_BY_KEY.latam!.build({ ...rt, returnDate: null, cabin: "BUSINESS" }))!.params).toMatchObject({ returnDate: null, cabin: "BUSINESS" });
+    expect(parseSearchLink(PROGRAM_BY_KEY["latam-cash"]!.build(rt))!.program).toBe("latam-cash");
+    expect(parseSearchLink(PROGRAM_BY_KEY.azul!.build(rt))).toEqual({ program: "azul", params: { origin: "BSB", destination: "SDU", departDate: "2027-05-29", returnDate: "2027-05-30" } });
+    expect(parseSearchLink("https://www.united.com/pt/br/fsr/choose-flights?f=BSB")).toEqual({ program: "mileageplus", params: {} });
+    expect(parseSearchLink("sem link aqui")).toBeNull();
+
+    const latam = "Voo direto 06:10 BSB 08:00 SDU Duração 1 h 50 min A partir de 37.746 pontos + R$ 97,17\n06:55 BSB 10:30 SDU 1 escala A partir de 52.110 pontos + R$ 97,17";
+    expect(parseOffers(latam)).toEqual([{ miles: 37746, taxesCents: 9717, cashCents: null }, { miles: 52110, taxesCents: 9717, cashCents: null }]);
+    expect(parseOffers("59.700 milhas\nTaxas R$ 97,17 ... 41.000 milhas Taxas R$ 1.097,17 ... 41.000 milhas Taxas R$ 1.097,17")).toEqual([{ miles: 41000, taxesCents: 109717, cashCents: null }, { miles: 59700, taxesCents: 9717, cashCents: null }]);
+    expect(parseOffers("Tarifa Light R$ 1.014,90 Tarifa Standard R$ 794,17 Bagagem R$ 30,00", true)).toEqual([{ miles: null, taxesCents: null, cashCents: 79417 }, { miles: null, taxesCents: null, cashCents: 101490 }]);
+    // Texto real da LATAM (ida e volta): trechos separados e as combinações milhas + dinheiro do total
+    const latamReal = ["Brasília a Rio de Janeiro sáb., 29 de mai.", "13:30 BSB Direto 1 h 45 min. 15:15 SDU", "Light Preço por passageiro 10.180 milhas + BRL 34,55", "Rio de Janeiro a Brasília dom., 30 de mai.", "Light Preço por passageiro 27.566 milhas + BRL 62,62", "Selecione a opção que preferir para pagar sua passagem:", "37.746 milhas + BRL 97,17", "33.972 milhas + BRL 293,42", "26.423 milhas + BRL 584,06", "18.873 milhas + BRL 833,22"].join("\n");
+    // Só as opções de pagamento do total (os valores de cada trecho ficam de fora); a primeira é a usada
+    expect(parseOffers(latamReal).map((o) => [o.miles, o.taxesCents])).toEqual([[18873, 83322], [26423, 58406], [33972, 29342], [37746, 9717]]);
+    expect(preferredOffer(latamReal)).toEqual({ miles: 37746, taxesCents: 9717, cashCents: null });
+    expect(preferredOffer(latam)).toBeNull(); // lista de voos, sem opções de pagamento: o usuário escolhe
+
+    // Smiles: o link do usuário (com parâmetro extra) e o total da seleção antes de "1 pessoa adulta"
+    expect(parseSearchLink("https://www.smiles.com.br/mfe/emissao-passagem?tripType=1&originAirport=BSB&destinationAirport=SDU&departureDate=1811592000000&returnDate=1811678400000&adults=1&children=0&infants=0&searchType=g3&segments=1&isFlexibleDateChecked=false&cabin=ECONOMIC&novo-resultado-voos=true"))
+      .toEqual({ program: "smiles", params: { origin: "BSB", destination: "SDU", departDate: "2027-05-29", returnDate: "2027-05-30", adults: 1, children: 0, infants: 0, cabin: "ECONOMY" } });
+    const smiles = "Ida 06:00 BSB 07:50 SDU 41.000 milhas R$ 97,17 Volta 18:00 SDU 19:45 BSB 18.700 milhas Total 59.700 milhas + R$ 97,17\n1 pessoa adulta Continuar";
+    expect(preferredOffer(smiles)).toEqual({ miles: 59700, taxesCents: 9717, cashCents: null });
+    expect(preferredOffer("120.400 milhas + R$ 194,34 2 pessoas adultas")).toEqual({ miles: 120400, taxesCents: 19434, cashCents: null });
+    expect(parseOffers("nada de preço")).toEqual([]);
   });
 
   it("WhatsApp e rótulos", () => {
