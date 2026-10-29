@@ -12,3 +12,6 @@ e2e/screenshots/
 playwright-report/
 .next-e2e/
 e2e/.results-run*.txt
+
+# a raiz do repositório ignora "lib" (Python); o código do app fica em src/lib
+!src/lib/

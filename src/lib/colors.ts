@@ -1,15 +1,10 @@
-/** Paleta das séries dos gráficos e dos avatares (cores estáveis por nome). */
+const PALETTE = ["#f87171", "#a78bfa", "#2dd4bf", "#fb923c", "#60a5fa", "#f472b6", "#facc15", "#4ade80", "#38bdf8", "#c084fc"];
 
-export const PALETTE = ["#a3e635", "#38bdf8", "#f472b6", "#fbbf24", "#a78bfa", "#34d399", "#fb923c", "#60a5fa", "#f87171", "#2dd4bf"] as const;
-
-/** Cor da i-ésima série de um gráfico. */
-export function seriesColor(i: number): string {
-  return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]!;
-}
-
-/** Cor determinística para um nome (titular, loja, programa). */
-export function colorFor(name: string): string {
+/** Cor estável derivada do texto (avatares e séries de gráfico). */
+export function colorFor(text: string) {
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return PALETTE[h % PALETTE.length]!;
 }
+
+export const seriesColor = (i: number) => PALETTE[(i + 4) % PALETTE.length]!;

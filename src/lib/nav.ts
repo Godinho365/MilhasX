@@ -1,90 +1,73 @@
 "use client";
-/**
- * Vigia de navegação. O App Router às vezes descarta um `router.push` (ou um `refresh`) quando
- * ele coincide com outra atualização; aqui a navegação é verificada e repetida quando se perde.
- */
-import { useCallback } from "react";
+// Vigia de navegação. No Next 15 a requisição de uma navegação do cliente às vezes é abortada
+// (ERR_ABORTED) e a tela fica parada, sem erro (medido: ~1 em 6 buscas no extrato). Se a URL não
+// mudar a tempo, repete a navegação; se ainda assim não mudar, navega por completo.
 import { useRouter } from "next/navigation";
+import { useCallback } from "react";
 
-type Router = { push: (href: string) => void; refresh: () => void };
+// Espera generosa: repetir uma navegação que só estava lenta recria a página (o loading.tsx
+// suspende de novo) e apaga o que o usuário já digitou.
+const RETRY_MS = 5000;
+const HARD_MS = 3000;
+const here = () => window.location.pathname + window.location.search;
 
-const current = () => window.location.pathname + window.location.search;
-
-function sameUrl(href: string) {
-  const u = new URL(href, window.location.href);
-  return u.pathname + u.search === current();
+export function watchNavigation(href: string, retry: () => void) {
+  const target = new URL(href, window.location.href);
+  if (target.origin !== window.location.origin) return;
+  const start = here();
+  // Link para a própria página: nada a vigiar
+  if (target.pathname + target.search === start) return;
+  const arrived = () => here() !== start;
+  window.setTimeout(() => {
+    if (arrived()) return;
+    retry();
+    window.setTimeout(() => {
+      if (!arrived()) window.location.assign(target.pathname + target.search);
+    }, HARD_MS);
+  }, RETRY_MS);
 }
 
-/** Empurra a rota e, se o endereço não mudar, tenta de novo; por fim, carrega a página inteira. */
-export function navigateSafe(router: Router, href: string) {
-  if (sameUrl(href)) {
-    router.refresh();
-    return;
-  }
-  router.push(href);
-  let tries = 0;
-  const check = () => {
-    if (sameUrl(href)) return;
-    tries += 1;
-    if (tries === 1) {
-      router.push(href);
-      setTimeout(check, 900);
-    } else {
-      window.location.assign(href);
-    }
-  };
-  setTimeout(check, 700);
-}
-
-/** `const nav = useNav(); nav("/app/entries?x=1")` */
+/** router.push / router.replace com o vigia. */
 export function useNav() {
   const router = useRouter();
-  return useCallback((href: string) => navigateSafe(router, href), [router]);
+  return useCallback(
+    (href: string, opts: { replace?: boolean; scroll?: boolean } = {}) => {
+      const go = () => (opts.replace ? router.replace(href, { scroll: opts.scroll }) : router.push(href, { scroll: opts.scroll }));
+      watchNavigation(href, go);
+      go();
+    },
+    [router],
+  );
 }
 
-/**
- * Recarrega os dados do servidor e confere, pelo carimbo `data-rendered` no <html>
- * (ver RenderStamp), que uma nova renderização chegou; senão repete e, por fim, recarrega a página.
- */
-export function refreshSafe(router: Router) {
-  const before = document.documentElement.dataset.rendered;
-  router.refresh();
-  let tries = 0;
-  const check = () => {
-    if (document.documentElement.dataset.rendered !== before) return;
-    tries += 1;
-    if (tries === 1) {
-      router.refresh();
-      setTimeout(check, 1200);
-    } else {
-      window.location.reload();
-    }
-  };
-  setTimeout(check, 1000);
-}
-
-/**
- * Observa cliques em links internos e, se a navegação não acontecer em pouco tempo, repete com `go`.
- * Devolve a função de limpeza (para usar direto em useEffect).
- */
-export function watchLinkClicks(go: (href: string) => void) {
+/** Para cliques em links internos (<Link> e <a>): instalado uma vez no layout do app. */
+export function watchLinkClicks(push: (href: string) => void) {
   const onClick = (e: MouseEvent) => {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-    if (!a || a.target === "_blank" || a.hasAttribute("download") || a.dataset.noWatch !== undefined) return;
-    const u = new URL(a.href, window.location.href);
-    if (u.origin !== window.location.origin || u.pathname.startsWith("/api/")) return;
-    const href = u.pathname + u.search;
-    if (href === current() && u.hash) return;
-    setTimeout(() => {
-      if (current() === href) return;
-      // ainda não navegou: repete uma vez
-      go(href);
-      setTimeout(() => {
-        if (current() !== href) window.location.assign(href);
-      }, 1500);
-    }, 800);
+    if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
+    const href = a.getAttribute("href")!;
+    if (!href.startsWith("/") || href.startsWith("/api/")) return;
+    watchNavigation(href, () => push(href));
   };
-  document.addEventListener("click", onClick);
-  return () => document.removeEventListener("click", onClick);
+  // Fase de captura: o <Link> do Next cancela o clique para navegar por conta própria
+  document.addEventListener("click", onClick, true);
+  return () => document.removeEventListener("click", onClick, true);
+}
+
+/**
+ * router.refresh com o mesmo vigia: o refresh também pode ser abortado em silêncio. Confere se o
+ * servidor renderizou de novo (carimbo do RenderStamp); se não, repete e, em último caso, recarrega.
+ */
+export function refreshSafe(router: { refresh: () => void }) {
+  const stamp = () => document.documentElement.dataset.rendered;
+  const before = stamp();
+  router.refresh();
+  window.setTimeout(() => {
+    if (stamp() !== before) return;
+    router.refresh();
+    window.setTimeout(() => {
+      if (stamp() === before) window.location.reload();
+    }, 4000);
+  }, 4000);
 }
