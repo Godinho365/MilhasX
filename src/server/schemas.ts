@@ -76,7 +76,7 @@ export const detailsSchema = z
     endDate: optDate,
     // compra parcelada: valor cheio, quanto de fato foi pago (com antecipação) e o desconto
     payment: z
-      .object({ installments: z.number().int().min(2).max(24), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents })
+      .object({ installments: z.number().int().min(2).max(12), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents })
       .strict()
       .optional()
       .nullable(),
@@ -128,7 +128,7 @@ export const transferSchema = z.object({
       points: points,
       priceCents: cents,
       applyAll: z.boolean().default(false),
-      payment: z.object({ installments: z.number().int().min(2).max(24), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents }).strict().optional().nullable(),
+      payment: z.object({ installments: z.number().int().min(2).max(12), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents }).strict().optional().nullable(),
     })
     .optional()
     .nullable(),

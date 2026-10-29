@@ -156,7 +156,7 @@ export function PaymentFields({ totalCents, value, onChange, label = "Pagamento"
         </div>
         {n > 1 && (
           <select className="input h-9 w-auto py-1" value={n} onChange={(e) => onChange({ ...value, installments: Number(e.target.value) })} aria-label="Número de parcelas">
-            {Array.from({ length: 23 }, (_, i) => i + 2).map((k) => <option key={k} value={k}>{k}x</option>)}
+            {Array.from({ length: 11 }, (_, i) => i + 2).map((k) => <option key={k} value={k}>{k}x</option>)}
           </select>
         )}
       </div>
