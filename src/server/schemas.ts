@@ -74,6 +74,12 @@ export const detailsSchema = z
     destination: z.string().trim().regex(/^[A-Z]{3}$/, "Aeroporto inválido").optional().nullable().or(z.literal("")),
     startDate: optDate,
     endDate: optDate,
+    // compra parcelada: valor cheio, quanto de fato foi pago (com antecipação) e o desconto
+    payment: z
+      .object({ installments: z.number().int().min(2).max(24), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents })
+      .strict()
+      .optional()
+      .nullable(),
   })
   .strict();
 export const recurrenceOptionsSchema = z.object({
@@ -117,7 +123,15 @@ export const transferSchema = z.object({
   parityFrom: z.number().int().min(1).max(1000).default(1),
   parityTo: z.number().int().min(1).max(1000).default(1),
   feeCents: cents.default(0),
-  purchase: z.object({ points: points, priceCents: cents, applyAll: z.boolean().default(false) }).optional().nullable(),
+  purchase: z
+    .object({
+      points: points,
+      priceCents: cents,
+      applyAll: z.boolean().default(false),
+      payment: z.object({ installments: z.number().int().min(2).max(24), anticipated: z.boolean(), nominalCents: cents, paidCents: cents, discountCents: cents }).strict().optional().nullable(),
+    })
+    .optional()
+    .nullable(),
   deliveryDate: dateStr.optional().nullable(),
   idempotencyKey: key,
 });

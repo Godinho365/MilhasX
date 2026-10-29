@@ -181,7 +181,7 @@ export interface TransferInput {
   parityFrom?: number; // paridade origem:destino (ex.: 3:2)
   parityTo?: number;
   feeCents?: number; // taxas adicionais, somadas ao custo levado
-  purchase?: { points: number; priceCents: number; applyAll: boolean } | null; // compra de pontos no carrinho
+  purchase?: { points: number; priceCents: number; applyAll: boolean; payment?: Prisma.InputJsonValue | null } | null; // compra de pontos no carrinho
   deliveryDate?: Date | null; // previsão de entrega diferente
   idempotencyKey?: string | null;
 }
@@ -233,6 +233,7 @@ export async function createTransfer(userId: string, input: TransferInput) {
             createdAt: new Date(createdAt.getTime() - 1),
             description: `Compra de pontos para transferência (${input.purchase.points.toLocaleString("pt-BR")} pontos)`,
             costs: { create: [{ type: "PONTOS", amountCents: input.purchase.priceCents }] },
+            details: input.purchase.payment ? { payment: input.purchase.payment } : undefined,
           },
         });
       }

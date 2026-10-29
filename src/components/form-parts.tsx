@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, Plus, Eraser } from "lucide-react";
 import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
 import { COST_LABELS, type CostType } from "@/domain/costs";
+import { planCost, type PaymentPlan } from "@/domain/installments";
 
 export type AccountOpt = { id: string; holder: string; program: string; color: string; balance: number; costCents: number; programId?: string; holderId?: string; logo?: string | null; pinned?: boolean };
 export type CardOpt = { id: string; name: string };
@@ -125,4 +126,60 @@ export function useDirty<T>(initial: T) {
   const [value, setValue] = useState(initial);
   const [dirty, setDirty] = useState(false);
   return { value, set: (v: T) => { setValue(v); setDirty(true); }, dirty, reset: () => { setValue(initial); setDirty(false); } };
+}
+
+/* ---------- Pagamento: à vista ou parcelado, com antecipação das parcelas restantes ---------- */
+
+export type PayState = { installments: number; anticipate: boolean; payoff: string };
+export const emptyPay = (): PayState => ({ installments: 1, anticipate: false, payoff: "" });
+export const toPlan = (p: PayState): PaymentPlan => ({ installments: p.installments, anticipate: p.anticipate, payoffCents: p.payoff.trim() ? parseBRLToCents(p.payoff) : null });
+/** Detalhe gravado no lançamento (só quando parcelado). */
+export const paymentDetail = (p: PayState, totalCents: number) => {
+  if (p.installments <= 1) return null;
+  const r = planCost(totalCents, toPlan(p));
+  return { installments: p.installments, anticipated: r.discountCents > 0, nominalCents: totalCents, paidCents: r.effectiveCents, discountCents: r.discountCents };
+};
+const pctBR = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;
+
+export function PaymentFields({ totalCents, value, onChange, label = "Pagamento" }: { totalCents: number; value: PayState; onChange: (p: PayState) => void; label?: string }) {
+  const r = planCost(totalCents, toPlan(value));
+  const n = value.installments;
+  const payoffInvalid = value.anticipate && value.payoff.trim() !== "" && (toPlan(value).payoffCents == null || (toPlan(value).payoffCents ?? 0) > r.restCents);
+  return (
+    <div className="space-y-3 rounded-xl border border-line p-3" aria-label={label}>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium">{label}</span>
+        <div className="inline-flex gap-1 rounded-xl border border-line bg-panel p-1" role="tablist" aria-label="Forma de pagamento">
+          {([[false, "À vista"], [true, "Parcelado"]] as const).map(([parc, l]) => (
+            <button key={l} type="button" role="tab" aria-selected={(n > 1) === parc} onClick={() => onChange(parc ? { ...value, installments: n > 1 ? n : 12 } : emptyPay())} className={`rounded-lg px-3 py-1 text-sm font-medium ${(n > 1) === parc ? "bg-panel2 text-white" : "text-muted hover:text-zinc-100"}`}>{l}</button>
+          ))}
+        </div>
+        {n > 1 && (
+          <select className="input h-9 w-auto py-1" value={n} onChange={(e) => onChange({ ...value, installments: Number(e.target.value) })} aria-label="Número de parcelas">
+            {Array.from({ length: 23 }, (_, i) => i + 2).map((k) => <option key={k} value={k}>{k}x</option>)}
+          </select>
+        )}
+      </div>
+      {n > 1 && (
+        <>
+          <p className="text-xs text-muted">{totalCents > 0 ? <>1ª parcela {fmtBRL(r.firstCents)} + {n - 1}× {fmtBRL(r.installmentCents)}. Parcelado sem antecipar, o custo continua {fmtBRL(totalCents)}.</> : "Informe o valor para ver as parcelas."}</p>
+          <Switch checked={value.anticipate} onChange={(v) => onChange({ ...value, anticipate: v })} label={`Antecipar as ${n - 1} parcelas restantes`} hint="A 1ª parcela é paga normal; as outras são quitadas com desconto" />
+          {value.anticipate && (
+            <div className="space-y-2">
+              <label className="block text-sm">
+                <span className="label">Valor para quitar as {n - 1} parcelas (R$)</span>
+                <input className="input tabular-nums" inputMode="decimal" placeholder={totalCents > 0 ? `até ${fmtBRL(r.restCents)}` : "R$ 0,00"} value={value.payoff} onChange={(e) => onChange({ ...value, payoff: e.target.value })} aria-label="Valor para quitar as parcelas" />
+              </label>
+              {payoffInvalid && <p className="text-xs text-red-300">O valor para quitar não pode passar de {fmtBRL(r.restCents)} (as {n - 1} parcelas).</p>}
+              {r.discountCents > 0 && (
+                <p className="rounded-lg bg-panel2 px-3 py-2 text-xs text-muted" aria-label="Resumo da antecipação">
+                  Desconto de <b className="text-ok">{fmtBRL(r.discountCents)}</b>: {pctBR(r.discountPct ?? 0)} nas parcelas antecipadas · {pctBR(r.discountTotalPct ?? 0)} na compra · ≈ {pctBR(r.monthlyRatePct ?? 0)} ao mês. Custo real: <b className="text-white">{fmtBRL(r.effectiveCents)}</b>.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }

@@ -10,6 +10,7 @@ import {
 import { api, newKey, today } from "@/lib/api";
 import { parseBRLToCents, fmtBRL, fmtPts } from "@/lib/format";
 import { MANUAL_CREDIT_TYPES, MANUAL_DEBIT_TYPES, ENTRY_LABELS, type EntryType } from "@/domain/ledger";
+import { planCost, scaleCosts } from "@/domain/installments";
 import { costTypesFor, DETAILS_BY_TYPE, redemptionValueCpm, type CostType } from "@/domain/costs";
 import { AIRPORTS } from "@/domain/airports";
 import { Modal, Field, Alert } from "./ui";
@@ -17,6 +18,7 @@ import { ProgramLogo } from "./program-logo";
 import { toast, confirmDialog } from "./feedback";
 import {
   Collapsible, Switch, PointsInput, AccountSelect, CostRows, costsPayload, emptyCost, parsePts, accountLabel,
+  PaymentFields, emptyPay, toPlan, paymentDetail, type PayState,
   type AccountOpt, type CardOpt, type CostRow,
 } from "./form-parts";
 
@@ -144,6 +146,7 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
   const [costs, setCosts] = useState<CostRow[]>(() => toCostRows(prefill));
   const [repeat, setRepeat] = useState(false);
   const [rec, setRec] = useState({ frequency: "MONTHLY" as (typeof FREQS)[number][0], advanced: false, dayOfMonth: "", interval: "1", endDate: "", skipWeekends: false });
+  const [pay, setPay] = useState<PayState>(emptyPay);
 
   useEffect(() => {
     api<{ items: Recent[] }>("/api/entries/recent?direction=credit").then((r) => r.ok && setRecent(r.data.items));
@@ -160,7 +163,9 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
   }
   const points = parsePts(f.points);
   const { items: costItems } = costsPayload(costs);
-  const totalCost = costItems.reduce((t, c) => t + c.amountCents, 0);
+  const nominalCost = costItems.reduce((t, c) => t + c.amountCents, 0);
+  // parcelado com antecipação: o custo que entra no CPM é o que de fato foi pago
+  const totalCost = planCost(nominalCost, toPlan(pay)).effectiveCents;
   const acc = accounts.find((a) => a.id === f.accountId);
   const dayOfDate = Number(f.date.slice(8, 10));
 
@@ -174,11 +179,15 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
     if (points <= 0) return setErro("Informe os pontos");
     const c = costsPayload(costs);
     if (c.erro) return setErro(c.erro);
+    const plan = toPlan(pay);
+    if (pay.installments > 1 && pay.anticipate && (plan.payoffCents == null || plan.payoffCents > planCost(nominalCost, plan).restCents)) return setErro("Valor para quitar as parcelas inválido");
+    const payment = paymentDetail(pay, nominalCost);
     setBusy(true);
     setErro("");
     const r = await api("/api/entries", "POST", {
       accountId: f.accountId, type: f.type, points, occurredAt: f.date, description: f.description || undefined,
-      storeId: f.storeId || null, costs: c.items, idempotencyKey: key,
+      storeId: f.storeId || null, costs: scaleCosts(c.items, totalCost), idempotencyKey: key,
+      details: payment ? { payment } : undefined,
       recurrence: repeat
         ? { frequency: rec.frequency, interval: Number(rec.interval) || 1, dayOfMonth: rec.dayOfMonth ? Number(rec.dayOfMonth) : null, endDate: rec.endDate || null, skipWeekends: rec.skipWeekends }
         : null,
@@ -254,6 +263,7 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
             right={!costsOpen && totalCost > 0 ? <span className="text-sm font-semibold tabular-nums">{fmtBRL(totalCost)}</span> : undefined}
           >
             <CostRows rows={costs} setRows={(r) => { setCosts(r); setDirty(true); }} types={types} cards={cards} />
+            {nominalCost > 0 && <div className="mt-3"><PaymentFields totalCents={nominalCost} value={pay} onChange={(p) => { setPay(p); setDirty(true); }} /></div>}
           </Collapsible>
         )}
 
@@ -466,6 +476,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
   const [adv, setAdv] = useState({ open: false, parityFrom: "1", parityTo: "1", fee: "", cart: false, cartPoints: "", cartPrice: "", applyAll: false, delivery: false, deliveryDate: "" });
   const update = (patch: Partial<typeof f>) => { setF({ ...f, ...patch }); setDirty(true); };
   const ua = (patch: Partial<typeof adv>) => { setAdv({ ...adv, ...patch }); setDirty(true); };
+  const [cartPay, setCartPay] = useState<PayState>(emptyPay);
 
   const src = accounts.find((a) => a.id === f.from);
   const points = parsePts(f.points);
@@ -475,7 +486,9 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
   const bonus = Math.floor((base * (Number(f.bonus) || 0)) / 100);
   const fee = parseBRLToCents(adv.fee) ?? 0;
   const cartPts = adv.cart ? parsePts(adv.cartPoints) : 0;
-  const cartCost = adv.cart ? (parseBRLToCents(adv.cartPrice) ?? 0) : 0;
+  const cartNominal = adv.cart ? (parseBRLToCents(adv.cartPrice) ?? 0) : 0;
+  // compra do carrinho parcelada com antecipação: entra no custo o que de fato foi pago
+  const cartCost = planCost(cartNominal, toPlan(cartPay)).effectiveCents;
   // Prévia do custo levado (mesma regra do servidor)
   const srcBalance = (src?.balance ?? 0) + cartPts;
   const srcCost = (src?.costCents ?? 0) + cartCost;
@@ -498,6 +511,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     if (points <= 0) return setErro("Informe os pontos");
     if (adv.fee && parseBRLToCents(adv.fee) === null) return setErro("Taxa inválida");
     if (adv.cart && (cartPts <= 0 || parseBRLToCents(adv.cartPrice) === null)) return setErro("Informe a quantidade e o preço da compra de pontos");
+    if (adv.cart && cartPay.installments > 1 && cartPay.anticipate && (toPlan(cartPay).payoffCents == null || (toPlan(cartPay).payoffCents ?? 0) > planCost(cartNominal, toPlan(cartPay)).restCents)) return setErro("Valor para quitar as parcelas inválido");
     if (adv.delivery && !adv.deliveryDate) return setErro("Informe a data de entrega no destino");
     if (adv.delivery && adv.deliveryDate < f.date) return setErro("A data de entrega no destino não pode ser anterior à data da transferência");
     setBusy(true);
@@ -505,7 +519,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     const r = await api("/api/transfers", "POST", {
       fromAccountId: f.from, toAccountId: f.to, points, bonusPercent: Number(f.bonus) || 0, occurredAt: f.date, description: f.description || null,
       parityFrom: pf, parityTo: pt, feeCents: fee,
-      purchase: adv.cart ? { points: cartPts, priceCents: cartCost, applyAll: adv.applyAll } : null,
+      purchase: adv.cart ? { points: cartPts, priceCents: cartCost, applyAll: adv.applyAll, payment: paymentDetail(cartPay, cartNominal) } : null,
       deliveryDate: adv.delivery ? adv.deliveryDate : null,
       idempotencyKey: key,
     });
@@ -561,6 +575,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
                     <Field label="Quantidade" required><input className="input tabular-nums" inputMode="numeric" placeholder="Ex: 8000" value={adv.cartPoints} onChange={(e) => ua({ cartPoints: e.target.value ? fmtPts(parsePts(e.target.value)) : "" })} /></Field>
                     <Field label="Preço da compra (R$)" required><input className="input" inputMode="decimal" placeholder="R$ 0,00" value={adv.cartPrice} onChange={(e) => ua({ cartPrice: e.target.value })} /></Field>
                   </div>
+                  {cartNominal > 0 && <PaymentFields label="Pagamento da compra" totalCents={cartNominal} value={cartPay} onChange={(p) => { setCartPay(p); setDirty(true); }} />}
                   <Switch checked={adv.applyAll} onChange={(v) => ua({ applyAll: v })} label="Aplicar todos os pontos comprados na transferência" hint="Prioriza os pontos comprados, em vez de usar o custo médio da conta" />
                 </>
               )}

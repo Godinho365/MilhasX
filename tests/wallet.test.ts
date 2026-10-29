@@ -280,3 +280,20 @@ describe("titular: e-mail autorizado, endereço e anexos", () => {
     expect((await send(c, h, "11.pdf", PDF)).status).toBe(409);
   });
 });
+
+describe("compra parcelada com antecipação", () => {
+  it("crédito e carrinho gravam o custo pago e o detalhe do parcelamento", async () => {
+    const payment = { installments: 12, anticipated: true, nominalCents: 308000, paidCents: 294249, discountCents: 13751 };
+    const r = await add({ accountId: liv, type: "PURCHASE", points: 100000, costs: [{ type: "PONTOS", amountCents: 294249 }], details: { payment }, idempotencyKey: randomUUID() });
+    expect(r.status).toBe(201);
+    const e = await prisma.entry.findFirstOrThrow({ where: { accountId: liv, type: "PURCHASE" } });
+    expect(e.costCents).toBe(294249);
+    expect((e.details as { payment: unknown }).payment).toEqual(payment);
+    const t = await c.call(transfers.POST, "POST", "/api/transfers", { fromAccountId: liv, toAccountId: lat, points: 10000, bonusPercent: 0, occurredAt: "2026-10-22", idempotencyKey: randomUUID(), purchase: { points: 5000, priceCents: 14000, payment: { ...payment, nominalCents: 15000, paidCents: 14000, discountCents: 1000 } } });
+    expect(t.status).toBe(201);
+    const cart = await prisma.entry.findFirstOrThrow({ where: { accountId: liv, description: { startsWith: "Compra de pontos para transferência" } } });
+    expect(cart.costCents).toBe(14000);
+    expect((cart.details as { payment: { paidCents: number } }).payment.paidCents).toBe(14000);
+    await assertConsistent();
+  });
+});
