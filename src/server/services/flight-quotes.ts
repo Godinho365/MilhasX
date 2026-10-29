@@ -59,14 +59,37 @@ const quoteView = (q: Awaited<ReturnType<typeof prisma.flightQuote.create>>) => 
 });
 export type QuoteView = ReturnType<typeof quoteView>;
 
-/** Cotações de um pedido, ou de um trecho (para comparar), da mais barata em milhas para a mais cara. */
+/**
+ * Cotações de um pedido, ou de um trecho (para comparar), da mais barata para a mais cara em reais:
+ * milhas de programas diferentes não se comparam entre si. Custo = valor em dinheiro anotado ou,
+ * sem ele, milhas pelo valor de mercado do milheiro do programa + taxas (estimado).
+ */
 export async function listQuotes(userId: string, f: { orderId?: string; origin?: string; destination?: string }) {
   const rows = await prisma.flightQuote.findMany({
     where: { userId, orderId: f.orderId, origin: f.origin, destination: f.destination },
     orderBy: [{ createdAt: "desc" }],
     take: 100,
   });
-  return rows.map(quoteView).sort((a, b) => (a.miles ?? Infinity) - (b.miles ?? Infinity));
+  const codes = [...new Set(rows.map((r) => PROGRAM_CODE[r.program]).filter((c): c is string => !!c))];
+  const market = new Map((await prisma.program.findMany({ where: { code: { in: codes } }, select: { code: true, marketValueCpmCents: true } })).map((p) => [p.code, p.marketValueCpmCents]));
+  return rows
+    .map((r) => {
+      const cpm = market.get(PROGRAM_CODE[r.program] ?? "");
+      const costCents = r.cashCents ?? (r.miles && cpm ? Math.round((r.miles * cpm) / 1000) + (r.taxesCents ?? 0) : null);
+      return { ...quoteView(r), costCents, costEstimated: r.cashCents == null && costCents != null };
+    })
+    .sort((a, b) => (a.costCents ?? Infinity) - (b.costCents ?? Infinity) || (a.miles ?? Infinity) - (b.miles ?? Infinity));
+}
+
+export async function updateQuote(userId: string, id: string, input: Pick<QuoteInput, "program" | "miles" | "taxesCents" | "cashCents" | "notes">) {
+  if (!PROGRAM_BY_KEY[input.program]) throw new DomainError(400, "Programa inválido");
+  if (!input.miles && !input.cashCents) throw new DomainError(400, "Informe as milhas ou o valor em reais");
+  const { count } = await prisma.flightQuote.updateMany({
+    where: { id, userId },
+    data: { program: input.program, miles: input.miles ?? null, taxesCents: input.taxesCents ?? null, cashCents: input.cashCents ?? null, notes: input.notes?.trim() || null },
+  });
+  if (!count) throw new DomainError(404, "Cotação não encontrada");
+  return quoteView(await prisma.flightQuote.findUniqueOrThrow({ where: { id } }));
 }
 
 export async function deleteQuote(userId: string, id: string) {

@@ -7,6 +7,7 @@ import * as order from "@/app/api/orders/[id]/route";
 import * as move from "@/app/api/orders/[id]/move/route";
 import * as archive from "@/app/api/orders/[id]/archive/route";
 import * as quotes from "@/app/api/quotes/route";
+import * as quote from "@/app/api/quotes/[id]/route";
 import * as searches from "@/app/api/flight-searches/route";
 import * as publicOrder from "@/app/api/public/orders/[slug]/route";
 import * as salesProfile from "@/app/api/sales-profile/route";
@@ -115,6 +116,21 @@ describe("buscador", () => {
     expect(list.map((q: { program: string }) => q.program)).toEqual(["latam", "smiles"]); // menor primeiro
     expect((await c.call(quotes.GET, "GET", `/api/quotes?orderId=${o.id}`)).data.items).toHaveLength(1);
     expect((await c.call(order.GET, "GET", "/x", undefined, { id: o.id })).data.item.events[0]).toMatchObject({ type: "quote" });
+  });
+
+  it("compara cotações pelo custo em reais e permite editar", async () => {
+    await prisma.program.create({ data: { name: "Smiles", code: "SMILES", kind: "MILES", marketValueCpmCents: 1700 } });
+    const base = { origin: "BSB", destination: "SDU", departDate: "2027-05-29", cabin: "ECONOMY", adults: 1 };
+    await c.call(quotes.POST, "POST", "/x", { ...base, program: "latam", miles: 37746, taxesCents: 9717, cashCents: 107856 });
+    const smiles = (await c.call(quotes.POST, "POST", "/x", { ...base, program: "smiles", miles: 41000, taxesCents: 9717, cashCents: 79417 })).data.item;
+    await c.call(quotes.POST, "POST", "/x", { ...base, program: "smiles", miles: 30000, taxesCents: 9717 }); // sem dinheiro: 30 × R$ 17 + taxas
+    const list = (await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data.items;
+    expect(list.map((q: { miles: number; costCents: number; costEstimated: boolean }) => [q.miles, q.costCents, q.costEstimated])).toEqual([[30000, 60717, true], [41000, 79417, false], [37746, 107856, false]]);
+
+    expect((await c.call(quote.PATCH, "PATCH", "/x", { program: "smiles", miles: 41000, taxesCents: 9717, cashCents: 50000, notes: " direto " }, { id: smiles.id })).data.item).toMatchObject({ cashCents: 50000, notes: "direto" });
+    expect((await c.call(quotes.GET, "GET", "/api/quotes?origin=BSB&destination=SDU")).data.items[0].id).toBe(smiles.id);
+    expect((await c.call(quote.PATCH, "PATCH", "/x", { program: "smiles", miles: null, cashCents: null }, { id: smiles.id })).status).toBe(400);
+    expect((await c.call(quote.PATCH, "PATCH", "/x", { program: "smiles", miles: 1 }, { id: "nao-existe" })).status).toBe(404);
   });
 
   it("WhatsApp e rótulos", () => {

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, History, Scale, Search, ExternalLink, Trash2, Plus, Minus } from "lucide-react";
+import { ArrowLeftRight, History, Scale, Search, ExternalLink, Trash2, Plus, Minus, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDate, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
@@ -10,7 +10,7 @@ import { SEARCH_PROGRAMS, GROUP_LABELS, CABIN_LABELS, DEFAULT_PROGRAMS, PROGRAM_
 import type { Segment, TripType } from "@/domain/orders";
 
 type OrderOpt = { id: string; number: number; customerName: string; route: string; tripType: TripType; cabin: string; segments: Segment[]; adults: number; children: number; infants: number };
-type Quote = { id: string; program: string; label: string; miles: number | null; taxesCents: number | null; cashCents: number | null; departDate: string; returnDate: string | null; notes: string | null; orderId: string | null; createdAt: string };
+type Quote = { id: string; program: string; label: string; miles: number | null; taxesCents: number | null; cashCents: number | null; departDate: string; returnDate: string | null; notes: string | null; orderId: string | null; createdAt: string; costCents: number | null; costEstimated: boolean };
 type Hist = { id: string; params: SearchParams; programs: string[]; createdAt: string };
 const STORE_KEY = "mm:buscador:programas";
 
@@ -185,6 +185,7 @@ function ComparePanel({ params, orderId, programs, onClose }: { params: SearchPa
   const [cash, setCash] = useState("");
   const [notes, setNotes] = useState("");
   const [erro, setErro] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
   const routeOk = !validateSearch(params);
   const load = () => {
     if (!routeOk) return;
@@ -192,37 +193,58 @@ function ComparePanel({ params, orderId, programs, onClose }: { params: SearchPa
   };
   useEffect(load, [params.origin, params.destination]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    const taxesCents = taxes.trim() ? parseBRLToCents(taxes) : null;
-    const cashCents = cash.trim() ? parseBRLToCents(cash) : null;
-    if ((taxes.trim() && taxesCents === null) || (cash.trim() && cashCents === null)) return setErro("Valor em reais inválido");
-    const r = await api("/api/quotes", "POST", { orderId: orderId || null, program, origin: params.origin, destination: params.destination, departDate: params.departDate, returnDate: params.returnDate, cabin: params.cabin, adults: params.adults, miles: Number(miles.replace(/\D/g, "")) || null, taxesCents, cashCents, notes: notes || null });
-    if (!r.ok) return setErro(r.erro);
+  function resetForm() {
+    setEditing(null);
     setErro("");
     setMiles("");
     setTaxes("");
     setCash("");
     setNotes("");
-    toast("Cotação anotada");
+  }
+  function edit(q: Quote) {
+    setEditing(q.id);
+    setErro("");
+    setProgram(q.program);
+    setMiles(q.miles ? q.miles.toLocaleString("pt-BR") : "");
+    setTaxes(q.taxesCents != null ? fmtBRL(q.taxesCents) : "");
+    setCash(q.cashCents != null ? fmtBRL(q.cashCents) : "");
+    setNotes(q.notes ?? "");
+  }
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    const taxesCents = taxes.trim() ? parseBRLToCents(taxes) : null;
+    const cashCents = cash.trim() ? parseBRLToCents(cash) : null;
+    if ((taxes.trim() && taxesCents === null) || (cash.trim() && cashCents === null)) return setErro("Valor em reais inválido");
+    const values = { program, miles: Number(miles.replace(/\D/g, "")) || null, taxesCents, cashCents, notes: notes || null };
+    const r = editing
+      ? await api(`/api/quotes/${editing}`, "PATCH", values)
+      : await api("/api/quotes", "POST", { ...values, orderId: orderId || null, origin: params.origin, destination: params.destination, departDate: params.departDate, returnDate: params.returnDate, cabin: params.cabin, adults: params.adults });
+    if (!r.ok) return setErro(r.erro);
+    toast(editing ? "Cotação atualizada" : "Cotação anotada");
+    resetForm();
     load();
   }
   async function remove(id: string) {
     const r = await api(`/api/quotes/${id}`, "DELETE");
-    if (r.ok) load();
+    if (!r.ok) return;
+    if (editing === id) resetForm();
+    load();
   }
   return (
     <Modal open onClose={onClose} size="lg" title="Comparar cotações">
       {!routeOk ? <Alert kind="info">Preencha origem, destino e ida no buscador para anotar e comparar cotações deste trecho.</Alert> : (
         <div className="space-y-4">
           <p className="text-sm text-muted">{params.origin} → {params.destination} · {fmtDate(params.departDate)}{params.returnDate ? ` a ${fmtDate(params.returnDate)}` : ""} · {CABIN_LABELS[params.cabin]}{orderId ? " · ligada ao pedido escolhido" : ""}</p>
-          <form onSubmit={add} className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-5" aria-label="Anotar cotação">
+          <form onSubmit={add} className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-5" aria-label={editing ? "Editar cotação" : "Anotar cotação"}>
             {erro && <div className="sm:col-span-5"><Alert>{erro}</Alert></div>}
             <Field label="Programa"><select className="input" value={program} onChange={(e) => setProgram(e.target.value)}>{SEARCH_PROGRAMS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></Field>
             <Field label="Milhas"><input className="input" inputMode="numeric" value={miles} onChange={(e) => setMiles(e.target.value)} placeholder="0" /></Field>
             <Field label="Taxas (R$)"><input className="input" inputMode="decimal" value={taxes} onChange={(e) => setTaxes(e.target.value)} placeholder="R$ 0,00" /></Field>
             <Field label="Em dinheiro (R$)"><input className="input" inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="R$ 0,00" /></Field>
-            <div className="flex items-end"><button className="btn-primary w-full">Anotar</button></div>
+            <div className="flex items-end gap-2">
+              <button className="btn-primary w-full">{editing ? "Salvar" : "Anotar"}</button>
+              {editing && <button type="button" className="btn-ghost" onClick={resetForm}>Cancelar</button>}
+            </div>
             <Field label="Observação" className="sm:col-span-5"><input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} placeholder="Voo, horário, escalas…" /></Field>
           </form>
           {items.length === 0 ? <p className="text-center text-sm text-muted">Nenhuma cotação anotada para este trecho.</p> : (
@@ -230,17 +252,23 @@ function ComparePanel({ params, orderId, programs, onClose }: { params: SearchPa
               <table className="table-base" aria-label="Cotações do trecho">
                 <thead><tr><th>Programa</th><th>Data</th><th className="text-right">Milhas</th><th className="text-right">Taxas</th><th className="text-right">Em dinheiro</th><th className="hidden md:table-cell">Observação</th><th /></tr></thead>
                 <tbody>
-                  {items.map((q, i) => (
-                    <tr key={q.id} className={i === 0 && q.miles ? "bg-green-500/5" : ""}>
-                      <td className="font-semibold">{q.label}{i === 0 && q.miles ? <span className="ml-1.5 rounded bg-green-500/15 px-1.5 text-[11px] text-green-300">menor</span> : null}</td>
+                  {items.map((q) => {
+                    const cheapest = q.costCents != null && q.costCents === items[0]!.costCents && items.length > 1;
+                    return (
+                    <tr key={q.id} className={editing === q.id ? "bg-accent-soft" : cheapest ? "bg-green-500/5" : ""}>
+                      <td className="font-semibold">{q.label}{cheapest ? <span className="ml-1.5 rounded bg-green-500/15 px-1.5 text-[11px] text-green-300" title={q.costEstimated ? "Menor custo estimado: milhas pelo valor de mercado do milheiro + taxas" : "Menor valor em reais"}>menor</span> : null}</td>
                       <td className="tabular-nums">{fmtDate(q.departDate)}</td>
                       <td className="text-right tabular-nums">{q.miles ? q.miles.toLocaleString("pt-BR") : "-"}</td>
                       <td className="text-right tabular-nums">{q.taxesCents ? fmtBRL(q.taxesCents) : "-"}</td>
-                      <td className="text-right tabular-nums">{q.cashCents ? fmtBRL(q.cashCents) : "-"}</td>
+                      <td className="text-right tabular-nums">{q.cashCents ? fmtBRL(q.cashCents) : q.costEstimated ? <span className="text-muted" title="Estimado: milhas pelo valor de mercado do milheiro + taxas">≈ {fmtBRL(q.costCents!)}</span> : "-"}</td>
                       <td className="hidden max-w-[220px] truncate text-muted md:table-cell">{q.notes}</td>
-                      <td className="text-right"><button className="btn-subtle h-7 w-7 px-0" onClick={() => remove(q.id)} aria-label={`Excluir cotação ${q.label}`}><Trash2 className="h-3.5 w-3.5" /></button></td>
+                      <td className="whitespace-nowrap text-right">
+                        <button className="btn-subtle h-7 w-7 px-0" onClick={() => edit(q)} aria-label={`Editar cotação ${q.label}`}><Pencil className="h-3.5 w-3.5" /></button>
+                        <button className="btn-subtle h-7 w-7 px-0" onClick={() => remove(q.id)} aria-label={`Excluir cotação ${q.label}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
