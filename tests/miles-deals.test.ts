@@ -12,6 +12,7 @@ import * as move from "@/app/api/miles-deals/[id]/move/route";
 import * as share from "@/app/api/miles-deals/[id]/share/route";
 import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
 import * as ticket from "@/app/api/miles-deals/[id]/ticket/route";
+import * as receipt from "@/app/api/miles-deals/[id]/receipt/route";
 import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
@@ -35,6 +36,10 @@ beforeEach(async () => {
 const acc = (id: string) => prisma.account.findUniqueOrThrow({ where: { id } });
 const newDeal = (body: Record<string, unknown> = {}) => c.call(deals.POST, "POST", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", ...body });
 
+type Upload = (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
+const sendFile = (post: Upload, id: string, body: Buffer, name: string) =>
+  post(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, "x-file-name": name }, body: new Uint8Array(body) }), { params: Promise.resolve({ id }) });
+
 describe("CRM Milhas", () => {
   it("cria com número sequencial, total e lucro estimado pelo CPM da conta", async () => {
     const a = (await newDeal({ accountId: lat, points: 10000, saleCpmCents: 3000 })).data.item;
@@ -53,6 +58,13 @@ describe("CRM Milhas", () => {
 
   it("ao mover para Pago lança a venda uma vez, baixa os pontos e trava a negociação", async () => {
     const d = (await newDeal({ customerName: "Agência Voa" })).data.item;
+    // Sem comprovante de pagamento não vai para Pago
+    expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).status).toBe(409);
+    const rec = await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.4\n"), "comprovante.pdf");
+    expect(rec.status).toBe(201);
+    const recBody = await rec.json();
+    expect(recBody.aviso).toMatch(/venda não foi lançada.*conta/);
+    expect(recBody.item).toMatchObject({ stage: "NEW", receipt: { name: "comprovante.pdf" }, saleId: null });
     // Sem conta, pontos e milheiro não fecha
     expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).status).toBe(400);
     await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 30000, saleCpmCents: 3000 }, { id: d.id });
@@ -66,6 +78,10 @@ describe("CRM Milhas", () => {
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
     expect(s).toMatchObject({ points: 10000, totalCents: 30000 });
     expect(s.items[0]).toMatchObject({ kind: "OTHER", clientType: "AGENCY", points: 10000, salePriceCents: 30000 });
+    expect(await prisma.saleAttachment.findMany({ where: { saleId: paid.saleId }, select: { name: true } })).toEqual([{ name: "comprovante.pdf" }]);
+    // venda lançada: o comprovante não sai mais da negociação (está nos anexos da venda)
+    const delRec = await receipt.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
+    expect(delRec.status).toBe(409);
 
     // De novo em Pago não duplica; voltar de etapa, mudar a venda ou excluir é bloqueado
     await c.call(move.POST, "POST", "/x", { stage: "PAID", position: 0 }, { id: d.id });
@@ -143,8 +159,12 @@ describe("CRM Milhas", () => {
     expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(201);
 
     // Em Pago, a venda cobra milhas + taxas e as taxas são custo repassado (não mudam o lucro)
-    const paid = (await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
-    const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
+    const paidRes = await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.5\n"), "pix.pdf");
+    const { item: paid, aviso } = await paidRes.json();
+    expect(aviso).toBeNull();
+    expect(paid.stage).toBe("PAID");
+    const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true, attachments: { select: { name: true } } } });
+    expect(s.attachments.map((a) => a.name).sort()).toEqual(["bilhete.pdf", "pix.pdf"]);
     expect(s.totalCents).toBe(26125);
     expect(s.items[0]).toMatchObject({ salePriceCents: 22550, reservation: "ABC123", costs: [{ type: "TAXA_EMBARQUE", amountCents: 3575 }] });
   });

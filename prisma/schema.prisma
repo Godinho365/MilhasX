@@ -1149,12 +1149,25 @@ model MilesDeal {
   saleId         String?        @unique // venda criada ao chegar em "Pago"
   sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
   ticket         MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
+  receipt        MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
   archivedAt     DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@unique([userId, number])
   @@index([userId, stage])
+}
+
+/// Comprovante de pagamento da negociação do CRM Milhas (vai junto para os anexos da venda)
+model MilesDealReceipt {
+  dealId    String    @id
+  deal      MilesDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime  @default(now())
 }
 
 /// Bilhete (passagem) da negociação do CRM Milhas; os bytes ficam fora da tabela principal

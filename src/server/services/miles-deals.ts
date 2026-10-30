@@ -28,6 +28,7 @@ export type DealInput = {
 const include = {
   account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
+  receipt: { select: { name: true, size: true, createdAt: true } },
 } as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
 
@@ -53,6 +54,8 @@ const view = (d: Row) => {
     locator: d.locator,
     // só com o bilhete anexado a negociação está emitida
     ticket: d.ticket ? { name: d.ticket.name, size: d.ticket.size, at: d.ticket.createdAt.toISOString() } : null,
+    // só com o comprovante de pagamento a negociação vai para "Pago" (e vira venda)
+    receipt: d.receipt ? { name: d.receipt.name, size: d.receipt.size, at: d.receipt.createdAt.toISOString() } : null,
     shareToken: d.shareToken,
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
@@ -153,7 +156,8 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       salePriceCents: dealTotalCents(d.points, d.saleCpmCents)!,
       clientType: d.buyerType === "FINAL" ? "FINAL" : "AGENCY",
       customerIds: d.customerId ? [d.customerId] : [],
-      passengers: d.passengers ?? undefined,
+      // CPFs da emissão: o combinado ou, sem ele, os passageiros informados (contam no lucro por CPF)
+      passengers: d.passengers ?? ((Array.isArray(d.passengersData) && d.passengersData.length) || undefined),
       // Taxas pagas na emissão e cobradas do comprador: entram no total como custo repassado
       costs: d.taxesCents ? [{ type: "TAXA_EMBARQUE", amountCents: d.taxesCents }] : [],
       reservation: d.locator ?? undefined,
@@ -161,7 +165,21 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       observation: d.notes ?? undefined,
     }],
   });
+  await copyFilesToSale(userId, d.id, sale.id);
   return sale.id;
+}
+
+/** Bilhete e comprovante da negociação vão para os anexos da venda (sem repetir o que já está lá). */
+async function copyFilesToSale(userId: string, dealId: string, saleId: string) {
+  const [ticket, receipt, have] = await Promise.all([
+    prisma.milesDealTicket.findUnique({ where: { dealId } }),
+    prisma.milesDealReceipt.findUnique({ where: { dealId } }),
+    prisma.saleAttachment.findMany({ where: { saleId }, select: { name: true, size: true } }),
+  ]);
+  for (const f of [ticket, receipt]) {
+    if (!f || have.some((h) => h.name === f.name && h.size === f.size)) continue;
+    await prisma.saleAttachment.create({ data: { saleId, userId, name: f.name, mime: f.mime, size: f.size, data: f.data } });
+  }
 }
 
 /** Move a negociação para a etapa (e posição) indicada; chegar em "Pago" lança a venda. */
@@ -169,6 +187,7 @@ export async function moveDeal(userId: string, id: string, stage: MilesDealStage
   const d = await own(userId, id);
   if (d.saleId && stage !== "PAID") throw new DomainError(409, "Esta negociação já virou venda: para reabrir, exclua a venda em Vendas");
   if (stage === "ISSUED" && !(await prisma.milesDealTicket.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o bilhete para marcar como emitida");
+  if (stage === "PAID" && !d.saleId && !(await prisma.milesDealReceipt.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o comprovante de pagamento para lançar a venda");
   const saleId = stage === "PAID" && !d.saleId ? await closeAsSale(userId, d) : d.saleId;
   await prisma.$transaction(async (tx) => {
     const column = await tx.milesDeal.findMany({ where: { userId, stage, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
@@ -262,6 +281,45 @@ export async function deleteDealTicket(userId: string, id: string) {
   const { count } = await prisma.milesDealTicket.deleteMany({ where: { dealId: d.id, userId } });
   if (!count) throw new DomainError(404, "Bilhete não encontrado");
   if (d.stage === "ISSUED") return moveDeal(userId, d.id, "AWAITING");
+  return getDeal(userId, id);
+}
+
+/* ---------------- Comprovante de pagamento ---------------- */
+
+/** Anexa (ou troca) o comprovante. Com ele a negociação vai para "Pago" e a venda é lançada; se faltar algo
+ *  para lançar (conta, pontos, saldo), o comprovante fica salvo e o aviso diz o que falta. */
+export async function addDealReceipt(userId: string, id: string, name: string, buf: Buffer) {
+  const d = await own(userId, id);
+  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
+  if (buf.length > TICKET_MAX) throw new DomainError(413, "Arquivo maior que 10 MB");
+  const mime = detectAttachment(buf);
+  if (!mime) throw new DomainError(415, "Envie o comprovante em PDF, PNG, JPEG, WEBP ou HEIC");
+  const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "comprovante";
+  const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
+  await prisma.milesDealReceipt.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
+  if (d.saleId) {
+    await copyFilesToSale(userId, d.id, d.saleId);
+    return { item: await getDeal(userId, id), aviso: null };
+  }
+  try {
+    return { item: await moveDeal(userId, d.id, "PAID"), aviso: null };
+  } catch (e) {
+    if (!(e instanceof DomainError)) throw e;
+    return { item: await getDeal(userId, id), aviso: `Comprovante salvo, mas a venda não foi lançada: ${e.message}` };
+  }
+}
+
+export async function getDealReceipt(userId: string, id: string) {
+  const r = await prisma.milesDealReceipt.findFirst({ where: { dealId: id, userId } });
+  if (!r) throw new DomainError(404, "Comprovante não encontrado");
+  return { name: r.name, mime: r.mime, data: Buffer.from(r.data) };
+}
+
+export async function deleteDealReceipt(userId: string, id: string) {
+  const d = await own(userId, id);
+  if (d.saleId) throw new DomainError(409, "A venda já foi lançada: o comprovante está nos anexos dela em Vendas");
+  const { count } = await prisma.milesDealReceipt.deleteMany({ where: { dealId: d.id, userId } });
+  if (!count) throw new DomainError(404, "Comprovante não encontrado");
   return getDeal(userId, id);
 }
 

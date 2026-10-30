@@ -188,59 +188,86 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   );
 }
 
-/* ---------------- Bilhete (emissão) ---------------- */
+/* ---------------- Bilhete e comprovante ---------------- */
 
 const fmtSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+type DealFile = { name: string; size: number; at: string };
 
-/** A negociação só fica "Emitida" com o bilhete anexado; com ele aparece a mensagem para o comprador. */
+/** Anexo da negociação (bilhete ou comprovante): anexar, baixar, trocar e remover. */
+function FileBox({ title, what, url, file, hint, doneHint, removable = true, onChanged }: {
+  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean;
+  onChanged: (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  async function upload(f: File) {
+    if (f.size > 10 * 1024 * 1024) return toast(`O ${what} passa de 10 MB`, "error");
+    setBusy(true);
+    const res = await fetch(url, { method: "POST", body: f, headers: { "content-type": f.type || "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return toast(j.erro ?? `Não foi possível anexar o ${what}`, "error");
+    onChanged(j, "upload");
+  }
+  async function remove() {
+    if (!(await confirmDialog({ title: `Remover o ${what}?`, body: "O arquivo será apagado.", confirmLabel: "Remover", danger: true }))) return;
+    const r = await api<{ item: DealView }>(url, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    onChanged(r.data, "remove");
+  }
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label={title}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">{title}</h3>
+        <input ref={input} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} aria-label={`Arquivo do ${what}`} />
+        {file ? (
+          <>
+            <a className="btn-ghost h-8 text-xs" href={url}><Receipt className="h-3.5 w-3.5" />Baixar</a>
+            <button type="button" className="btn-ghost h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}>Trocar</button>
+            {removable && <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label={`Remover o ${what}`}><Trash2 className="h-3.5 w-3.5" /></button>}
+          </>
+        ) : (
+          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
+        )}
+      </div>
+      {file ? (
+        <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {new Date(file.at).toLocaleString("pt-BR")}. {doneHint}</p>
+      ) : (
+        <p className="text-xs text-amber-300">{hint}</p>
+      )}
+    </section>
+  );
+}
+
+/** Emitida só com o bilhete (aí aparece a mensagem para o comprador); paga só com o comprovante (aí vira venda). */
 function Emission({ deal: initial }: { deal: DealView }) {
   const router = useRouter();
   const [deal, setDeal] = useState(initial);
-  const [busy, setBusy] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   useEffect(() => setDeal(initial), [initial]);
-  async function upload(f: File) {
-    if (f.size > 10 * 1024 * 1024) return toast("O bilhete passa de 10 MB", "error");
-    setBusy(true);
-    const res = await fetch(`/api/miles-deals/${deal.id}/ticket`, { method: "POST", body: f, headers: { "content-type": f.type || "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
-    const j = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) return toast(j.erro ?? "Não foi possível anexar o bilhete", "error");
-    setDeal(j.item);
-    toast(initial.stage !== j.item.stage ? "Bilhete anexado: negociação emitida" : "Bilhete anexado");
+  const changed = (msgs: { up: string; moved: string; removed: string }) => (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => {
+    const moved = r.item.stage !== deal.stage;
+    setDeal(r.item);
+    if (r.aviso) toast(r.aviso, "error");
+    else toast(action === "remove" ? msgs.removed : moved ? msgs.moved : msgs.up);
     refreshSafe(router);
-  }
-  async function remove() {
-    if (!(await confirmDialog({ title: "Remover o bilhete?", body: deal.stage === "ISSUED" ? "A negociação volta para Aguardando emissão." : "O arquivo será apagado.", confirmLabel: "Remover", danger: true }))) return;
-    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/ticket`, "DELETE");
-    if (!r.ok) return toast(r.erro, "error");
-    setDeal(r.data.item);
-    toast("Bilhete removido");
-    refreshSafe(router);
-  }
+  };
   return (
     <>
-      <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Bilhete">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-sm font-semibold">Bilhete</h3>
-          <input ref={input} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} aria-label="Arquivo do bilhete" />
-          {deal.ticket ? (
-            <>
-              <a className="btn-ghost h-8 text-xs" href={`/api/miles-deals/${deal.id}/ticket`}><Receipt className="h-3.5 w-3.5" />Baixar</a>
-              <button type="button" className="btn-ghost h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}>Trocar</button>
-              <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label="Remover o bilhete"><Trash2 className="h-3.5 w-3.5" /></button>
-            </>
-          ) : (
-            <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : "Anexar bilhete"}</button>
-          )}
-        </div>
-        {deal.ticket ? (
-          <p className="text-xs text-muted">{deal.ticket.name} · {fmtSize(deal.ticket.size)} · anexado em {new Date(deal.ticket.at).toLocaleString("pt-BR")}. O comprador pode baixar pela página dele.</p>
-        ) : (
-          <p className="text-xs text-amber-300">Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece.</p>
-        )}
-      </section>
+      <FileBox
+        title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket}
+        hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece."
+        doneHint="O comprador pode baixar pela página dele."
+        onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: negociação emitida", removed: "Bilhete removido" })}
+      />
       {deal.ticket && <IssuedMessage deal={deal} />}
+      {(deal.ticket || deal.receipt) && (
+        <FileBox
+          title="Comprovante de pagamento" what="comprovante" url={`/api/miles-deals/${deal.id}/receipt`} file={deal.receipt} removable={!deal.saleId}
+          hint="Quando o comprador pagar, anexe o comprovante: a negociação vai para Pago e a venda é lançada em Vendas (com o bilhete e o comprovante anexados)."
+          doneHint={deal.saleId ? "Venda lançada em Vendas, com o bilhete e o comprovante anexados." : "A venda ainda não foi lançada."}
+          onChanged={changed({ up: "Comprovante anexado", moved: "Comprovante anexado: venda lançada em Vendas", removed: "Comprovante removido" })}
+        />
+      )}
     </>
   );
 }
