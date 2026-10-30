@@ -44,11 +44,16 @@ type Pending = Awaited<ReturnType<typeof pendingBreakdown>>;
 const pts = (n: number) => `${fmtPts(n)} pts`;
 
 /** CPFs que ainda dá para emitir na conta: limite do programa menos os usados na janela, ou o número informado à mão. */
-function cpfFree(a: Summary["accounts"][number], usage: Awaited<ReturnType<typeof beneficiaryUsage>>) {
+function freeOf(a: Summary["accounts"][number], usage: Awaited<ReturnType<typeof beneficiaryUsage>>) {
   const u = usage[a.id];
-  const free = u?.limit != null ? Math.max(0, u.limit - u.used) : a.cpfAvailable;
+  return u?.limit != null ? Math.max(0, u.limit - u.used) : a.cpfAvailable;
+}
+function cpfFree(a: Summary["accounts"][number], usage: Awaited<ReturnType<typeof beneficiaryUsage>>) {
+  const free = freeOf(a, usage);
   return free == null ? undefined : `${free} ${free === 1 ? "CPF livre" : "CPFs livres"}`;
 }
+/** "4.811 pts (22 livres)": os CPFs livres entre parênteses, ao lado dos pontos. */
+const withFree = (text: string, free: number | null | undefined) => (free == null ? text : `${text} (${free} ${free === 1 ? "livre" : "livres"})`);
 
 /** Os 4 indicadores; o ⇕ de cada um abre o detalhamento por titular e programa (como na referência). */
 async function WalletStats({ userId, s, pending, money }: { userId: string; s: Summary; pending: Pending; money: Money }) {
@@ -73,10 +78,13 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
       const costCents = accs.reduce((t, a) => t + a.costCents, 0);
       const cost: Breakdown = {
         title: `Custo do milheiro · ${p.programName}`,
-        groups: [{ name: "Contas", rows: accs.map((a) => ({ label: a.holderName, note: pts(a.balance), value: a.costCents > 0 && a.cpmCents != null ? money(a.cpmCents) : "-", color: a.programColor })) }],
+        groups: [{ name: "Contas", rows: accs.map((a) => ({ label: a.holderName, note: withFree(pts(a.balance), freeOf(a, usage)), value: a.costCents > 0 && a.cpmCents != null ? money(a.cpmCents) : "-", color: a.programColor })) }],
         footer: { label: "Média do programa", value: costCents > 0 ? money(Math.round((costCents * 1000) / balance)) : "-" },
       };
-      return { id: p.programId, name: p.programName, balance, cpm: costCents > 0 ? Math.round((costCents * 1000) / balance) : null, cost };
+      // CPFs que ainda dá para emitir somando as contas do programa (só as que têm limite)
+      const limitedAccs = accs.filter((a) => usage[a.id]?.limit != null);
+      const cpfsFree = limitedAccs.length ? limitedAccs.reduce((t, a) => t + Math.max(0, (usage[a.id].limit ?? 0) - usage[a.id].used), 0) : null;
+      return { id: p.programId, name: p.programName, balance, cpfsFree, cpm: costCents > 0 ? Math.round((costCents * 1000) / balance) : null, cost };
     })
     .sort((a, b) => b.balance - a.balance);
   const value: Breakdown = { title: "Valor por programa", groups: byHolder((a) => money(a.marketValueCents), (h) => money(h.marketValueCents)), footer: { label: "Total", value: money(s.totals.marketValueCents) } };
@@ -111,7 +119,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
       <section className="mt-3 sm:mt-4" aria-label="Custo do milheiro por programa">
         <p className="kicker mb-2">Custo do milheiro por programa</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-6">
-          {programs.map((p) => <StatBreakdown key={p.id} label={p.name} value={p.cpm == null ? "-" : money(p.cpm)} hint={pts(p.balance)} breakdown={p.cost} />)}
+          {programs.map((p) => <StatBreakdown key={p.id} label={p.name} value={p.cpm == null ? "-" : money(p.cpm)} hint={withFree(pts(p.balance), p.cpfsFree)} breakdown={p.cost} />)}
         </div>
       </section>
     )}
