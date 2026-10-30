@@ -8,6 +8,7 @@ import * as accounts from "@/app/api/accounts/route";
 import * as entries from "@/app/api/entries/route";
 import * as entry from "@/app/api/entries/[id]/route";
 import * as transfers from "@/app/api/transfers/route";
+import * as transferRoute from "@/app/api/transfers/[groupId]/route";
 import * as sales from "@/app/api/sales/route";
 import * as summary from "@/app/api/summary/route";
 import * as alerts from "@/app/api/alerts/route";
@@ -311,5 +312,34 @@ describe("compra parcelada com antecipação", () => {
     expect(e.costCents).toBe(261800);
     expect((e.details as { payment?: unknown } | null)?.payment).toBeUndefined();
     await assertConsistent();
+  });
+});
+
+describe("editar transferência", () => {
+  it("carrega no formato do formulário e regrava no mesmo grupo e horário", async () => {
+    await add({ accountId: liv, type: "PURCHASE", points: 30000, costs: [{ type: "PONTOS", amountCents: 90000 }], idempotencyKey: randomUUID() });
+    const t = await c.call(transfers.POST, "POST", "/api/transfers", { fromAccountId: liv, toAccountId: lat, points: 10000, bonusPercent: 30, occurredAt: "2026-10-22", idempotencyKey: randomUUID(), purchase: { points: 5000, priceCents: 14000 } });
+    const groupId = t.data.groupId as string;
+    const outBefore = await prisma.entry.findFirstOrThrow({ where: { groupId, type: "TRANSFER_OUT" } });
+    const g = await c.call(transferRoute.GET, "GET", "/x", undefined, { groupId });
+    expect(g.data.item).toMatchObject({ fromAccountId: liv, toAccountId: lat, points: 10000, bonusPercent: 30, occurredAt: "2026-10-22", description: "", parityFrom: 1, parityTo: 1, feeCents: 0, deliveryDate: null, purchase: { points: 5000, priceCents: 14000, applyAll: false } });
+    const p = await c.call(transferRoute.PATCH, "PATCH", "/x", { fromAccountId: liv, toAccountId: lat, points: 20000, bonusPercent: 80, occurredAt: "2026-10-22", parityFrom: 1, parityTo: 1 }, { groupId });
+    expect(p.status).toBe(200);
+    const legs = await prisma.entry.findMany({ where: { groupId } });
+    expect(legs.map((e) => [e.type, e.points]).sort()).toEqual([["TRANSFER_BONUS", 16000], ["TRANSFER_IN", 20000], ["TRANSFER_OUT", -20000]]);
+    const out = legs.find((e) => e.type === "TRANSFER_OUT")!;
+    expect(out.createdAt.getTime()).toBe(outBefore.createdAt.getTime());
+    expect(out.idempotencyKey).toBe(outBefore.idempotencyKey);
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: lat } })).balance).toBe(36000);
+    await assertConsistent();
+  });
+
+  it("edição inválida não muda nada", async () => {
+    await add({ accountId: liv, type: "PURCHASE", points: 30000, costs: [{ type: "PONTOS", amountCents: 90000 }], idempotencyKey: randomUUID() });
+    const t = await c.call(transfers.POST, "POST", "/api/transfers", { fromAccountId: liv, toAccountId: lat, points: 10000, bonusPercent: 0, occurredAt: "2026-10-22", idempotencyKey: randomUUID() });
+    const groupId = t.data.groupId as string;
+    const bad = await c.call(transferRoute.PATCH, "PATCH", "/x", { fromAccountId: liv, toAccountId: liv, points: 10000, bonusPercent: 0, occurredAt: "2026-10-22" }, { groupId });
+    expect(bad.status).toBe(400);
+    expect(await prisma.entry.count({ where: { groupId } })).toBe(2);
   });
 });

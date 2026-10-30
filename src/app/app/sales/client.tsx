@@ -16,13 +16,13 @@ import type { SaleView } from "@/server/services/sales";
 
 const COST_LABELS: Record<string, string> = { TAXA_EMBARQUE: "Taxa de embarque", IOF: "IOF", BAGAGEM: "Bagagem", ASSENTO: "Assento", COMPLETAR_PONTOS: "Completar pontos", OUTROS: "Outros" };
 
-export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }: { sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string> }) {
+export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, editSale }: { sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; editSale?: SaleView | null }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<SaleView | null>(null);
-  const [editingSale, setEditingSale] = useState<SaleView | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleView | null>(editSale ?? null);
   const [menu, setMenu] = useState<{ s: SaleView; top: number; right: number } | null>(null);
 
   useEffect(() => {
@@ -119,7 +119,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }
         </div>
       )}
       {creating && <SaleDialog accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => setCreating(false)} />}
-      {editingSale && <SaleDialog key={editingSale.id} editing={editingSale} accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => setEditingSale(null)} />}
+      {editingSale && <SaleDialog key={editingSale.id} editing={editingSale} accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => { setEditingSale(null); if (sp.edit) nav("/app/sales", { replace: true }); }} />}
       {viewing && <SaleDetails sale={viewing} onClose={() => setViewing(null)} />}
     </>
   );

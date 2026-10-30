@@ -30,7 +30,7 @@ export type FormKind = "credit" | "debit" | "transfer" | "batch";
 export type Prefill = { accountId: string; type: EntryType; points: number; description: string; costs: { type: string; amountCents: number; cardId: string | null }[] };
 
 /** Abre um formulário de lançamento de qualquer lugar da interface (opcionalmente preenchido). */
-export const openEntryForm = (kind: FormKind, prefill?: Prefill) => window.dispatchEvent(new CustomEvent("mm:new-entry", { detail: { kind, prefill } }));
+export const openEntryForm = (kind: FormKind, prefill?: Prefill, editGroupId?: string) => window.dispatchEvent(new CustomEvent("mm:new-entry", { detail: { kind, prefill, editGroupId } }));
 
 const toCostRows = (p?: Prefill): CostRow[] =>
   p?.costs.length ? p.costs.map((c) => ({ type: c.type as CostType, amount: (c.amountCents / 100).toFixed(2).replace(".", ","), cardId: c.cardId ?? "" })) : [emptyCost()];
@@ -52,12 +52,14 @@ export function EntryForms({ accounts, defaultAccountId, cards = [], stores = []
   const [menu, setMenu] = useState(false);
   const [form, setForm] = useState<FormKind | null>(null);
   const [prefill, setPrefill] = useState<Prefill | undefined>();
+  const [editGroupId, setEditGroupId] = useState<string | undefined>();
 
   useEffect(() => {
     const onOpen = (e: Event) => {
-      const d = (e as CustomEvent<{ kind: FormKind; prefill?: Prefill }>).detail;
+      const d = (e as CustomEvent<{ kind: FormKind; prefill?: Prefill; editGroupId?: string }>).detail;
       setMenu(false);
       setPrefill(d.prefill);
+      setEditGroupId(d.editGroupId);
       setForm(d.kind);
     };
     window.addEventListener("mm:new-entry", onOpen);
@@ -77,7 +79,7 @@ export function EntryForms({ accounts, defaultAccountId, cards = [], stores = []
     { kind: "batch", label: "Lote", sub: "Adicionar vários", icon: <Upload className="h-5 w-5" />, tone: "bg-violet-500/15 text-violet-400" },
   ];
   const disabled = accounts.length === 0;
-  const close = () => setForm(null);
+  const close = () => { setForm(null); setEditGroupId(undefined); };
 
   return (
     <>
@@ -123,7 +125,7 @@ export function EntryForms({ accounts, defaultAccountId, cards = [], stores = []
       </div>
       {form === "credit" && <CreditForm accounts={accounts} cards={cards} stores={stores} onClose={close} prefill={prefill} preset={preset} />}
       {form === "debit" && <DebitForm accounts={accounts} cards={cards} onClose={close} prefill={prefill} preset={preset} />}
-      {form === "transfer" && <TransferForm accounts={accounts} onClose={close} preset={preset} />}
+      {form === "transfer" && <TransferForm key={editGroupId ?? "nova"} accounts={accounts} onClose={close} preset={preset} editGroupId={editGroupId} />}
       {form === "batch" && <BatchForm accounts={accounts} onClose={close} />}
     </>
   );
@@ -466,7 +468,10 @@ function DebitForm({ accounts, cards, onClose, prefill, preset }: { accounts: Ac
 
 /* ============================== Transferência ============================== */
 
-function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; onClose: () => void; preset?: string }) {
+type SavedTransfer = { giveBack: { points: number; costCents: number }; fromAccountId: string; toAccountId: string; points: number; bonusPercent: number; occurredAt: string; description: string; parityFrom: number; parityTo: number; feeCents: number; deliveryDate: string | null; purchase: { points: number; priceCents: number; applyAll: boolean; payment: { installments: number; anticipated: boolean; nominalCents: number; paidCents: number } | null } | null };
+const brl = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+
+function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: AccountOpt[]; onClose: () => void; preset?: string; editGroupId?: string }) {
   const router = useRouter();
   const [key] = useState(newKey);
   const [busy, setBusy] = useState(false);
@@ -477,6 +482,30 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
   const update = (patch: Partial<typeof f>) => { setF({ ...f, ...patch }); setDirty(true); };
   const ua = (patch: Partial<typeof adv>) => { setAdv({ ...adv, ...patch }); setDirty(true); };
   const [cartPay, setCartPay] = useState<PayState>(emptyPay);
+  const [loading, setLoading] = useState(!!editGroupId);
+  const [saved, setSaved] = useState<SavedTransfer | null>(null);
+  // Editar: carrega a transferência salva no formulário
+  useEffect(() => {
+    if (!editGroupId) return;
+    api<{ item: SavedTransfer }>(`/api/transfers/${encodeURIComponent(editGroupId)}`).then((r) => {
+      setLoading(false);
+      if (!r.ok) return setErro(r.erro);
+      const t = r.data.item;
+      setSaved(t);
+      const pay = t.purchase?.payment;
+      setF({ from: t.fromAccountId, to: t.toAccountId, points: fmtPts(t.points), bonus: t.bonusPercent ? String(t.bonusPercent) : "", date: t.occurredAt, description: t.description });
+      setAdv({
+        open: t.parityFrom !== 1 || t.parityTo !== 1 || t.feeCents > 0 || !!t.purchase || !!t.deliveryDate,
+        parityFrom: String(t.parityFrom), parityTo: String(t.parityTo), fee: t.feeCents ? brl(t.feeCents) : "",
+        cart: !!t.purchase, cartPoints: t.purchase ? fmtPts(t.purchase.points) : "", cartPrice: t.purchase ? brl(pay ? pay.nominalCents : t.purchase.priceCents) : "",
+        applyAll: !!t.purchase?.applyAll, delivery: !!t.deliveryDate, deliveryDate: t.deliveryDate ?? "",
+      });
+      if (pay) {
+        const first = planCost(pay.nominalCents, { installments: pay.installments, anticipate: false, payoffCents: null }).firstCents;
+        setCartPay({ installments: pay.installments, anticipate: pay.anticipated, payoff: pay.anticipated ? brl(pay.paidCents - first) : "" });
+      }
+    });
+  }, [editGroupId]);
 
   const src = accounts.find((a) => a.id === f.from);
   const points = parsePts(f.points);
@@ -490,8 +519,10 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
   // compra do carrinho parcelada com antecipação: entra no custo o que de fato foi pago
   const cartCost = planCost(cartNominal, toPlan(cartPay)).effectiveCents;
   // Prévia do custo levado (mesma regra do servidor)
-  const srcBalance = (src?.balance ?? 0) + cartPts;
-  const srcCost = (src?.costCents ?? 0) + cartCost;
+  // editando: o que esta transferência tirou da origem volta a contar
+  const back = saved && f.from === saved.fromAccountId ? saved.giveBack : { points: 0, costCents: 0 };
+  const srcBalance = (src?.balance ?? 0) + back.points + cartPts;
+  const srcCost = (src?.costCents ?? 0) + back.costCents + cartCost;
   let carried = 0;
   if (src && points > 0 && points <= srcBalance) {
     if (adv.cart && adv.applyAll && cartPts > 0) {
@@ -516,7 +547,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     if (adv.delivery && adv.deliveryDate < f.date) return setErro("A data de entrega no destino não pode ser anterior à data da transferência");
     setBusy(true);
     setErro("");
-    const r = await api("/api/transfers", "POST", {
+    const r = await api(editGroupId ? `/api/transfers/${encodeURIComponent(editGroupId)}` : "/api/transfers", editGroupId ? "PATCH" : "POST", {
       fromAccountId: f.from, toAccountId: f.to, points, bonusPercent: Number(f.bonus) || 0, occurredAt: f.date, description: f.description || null,
       parityFrom: pf, parityTo: pt, feeCents: fee,
       purchase: adv.cart ? { points: cartPts, priceCents: cartCost, applyAll: adv.applyAll, payment: paymentDetail(cartPay, cartNominal) } : null,
@@ -525,7 +556,7 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     });
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
-    toast("Transferência registrada");
+    toast(editGroupId ? "Transferência atualizada" : "Transferência registrada");
     onClose();
     refreshSafe(router);
   }
@@ -534,8 +565,8 @@ function TransferForm({ accounts, onClose, preset }: { accounts: AccountOpt[]; o
     <Modal
       open
       onClose={requestClose}
-      title="Nova transferência"
-      footer={<><button type="button" className="btn-ghost" onClick={requestClose}>Cancelar</button><button form="transfer-form" className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Criar transferência"}</button></>}
+      title={editGroupId ? "Editar transferência" : "Nova transferência"}
+      footer={<><button type="button" className="btn-ghost" onClick={requestClose}>Cancelar</button><button form="transfer-form" className="btn-primary" disabled={busy || loading}>{busy ? "Salvando…" : editGroupId ? "Salvar alterações" : "Criar transferência"}</button></>}
     >
       <form id="transfer-form" onSubmit={submit} className="space-y-5">
         {erro && <Alert>{erro}</Alert>}

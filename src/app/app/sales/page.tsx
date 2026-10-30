@@ -1,6 +1,6 @@
 import { requirePageUser, selectedHolderId } from "@/server/session";
 import { listCustomers } from "@/server/services/market";
-import { listSales } from "@/server/services/sales";
+import { listSales, getSale } from "@/server/services/sales";
 import { listAccounts } from "@/server/services/wallet";
 import { listSupplierAccounts } from "@/server/services/extras";
 import { saleQuerySchema } from "@/server/schemas";
@@ -23,6 +23,8 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
     listSupplierAccounts(user.id),
     prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
+  const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, groupId: sp.edit }, select: { id: true } }) : null;
+  const editSale = toEdit ? await getSale(user.id, toEdit.id) : null;
   const total = sales.reduce((s, x) => s + x.totalCents, 0);
   const result = sales.reduce((s, x) => s + x.resultCents, 0);
   const pts = sales.reduce((s, x) => s + x.points, 0);
@@ -50,6 +52,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
           <SalesClient
             sp={sp}
             sales={sales}
+            editSale={editSale}
             accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} ${a.holder.name}`, balance: a.balance, costCents: a.costCents }))}
             suppliers={suppliers.map((s) => ({ id: s.id, label: `${s.program.name} · ${s.supplier.name}${s.identifier ? ` (${s.identifier})` : ""}`, balance: s.balance, priceCpmCents: s.priceCpmCents }))}
             customers={customers.map((c) => ({ id: c.id, name: c.name, kind: c.kind === "AGENCY" ? "AGENCY" : "FINAL" }))}

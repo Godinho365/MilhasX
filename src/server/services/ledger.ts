@@ -193,7 +193,7 @@ export function transferAmounts(points: number, bonusPercent: number, parityFrom
   return { base, bonus, total: base + bonus };
 }
 
-export async function createTransfer(userId: string, input: TransferInput) {
+function checkTransfer(input: TransferInput) {
   if (input.fromAccountId === input.toAccountId) throw new DomainError(400, "Origem e destino precisam ser diferentes");
   if (!Number.isInteger(input.points) || input.points <= 0) throw new DomainError(400, "Quantidade de pontos inválida");
   if (input.bonusPercent < 0 || input.bonusPercent > 300) throw new DomainError(400, "Bônus inválido");
@@ -208,75 +208,83 @@ export async function createTransfer(userId: string, input: TransferInput) {
   const amounts = transferAmounts(input.points, input.bonusPercent, pf, pt);
   if (amounts.base <= 0) throw new DomainError(400, "Com essa paridade nenhum ponto chega ao destino");
   if (input.deliveryDate && input.deliveryDate < input.occurredAt) throw new DomainError(400, "A data de entrega no destino não pode ser anterior à data da transferência");
+  return { pf, pt, amounts };
+}
+
+/** Grava as pernas da transferência (compra no carrinho, saída, entrada e bônus) num grupo. */
+async function writeTransfer(tx: Tx, userId: string, input: TransferInput, groupId: string, createdAt: Date) {
+  const { pf, pt, amounts } = checkTransfer(input);
   const pendingDelivery = !!input.deliveryDate && input.deliveryDate > new Date();
+  const from = await ownAccount(tx, userId, input.fromAccountId);
+  const to = await ownAccount(tx, userId, input.toAccountId);
+  const base = { userId, occurredAt: input.occurredAt, createdAt, groupId };
+  // Compra de pontos no carrinho: entra na origem um instante antes da transferência, no mesmo grupo
+  // (excluir a transferência leva a compra junto)
+  if (input.purchase) {
+    await tx.entry.create({
+      data: {
+        userId,
+        groupId,
+        accountId: from.id,
+        type: "PURCHASE",
+        points: input.purchase.points,
+        inputCostCents: input.purchase.priceCents,
+        occurredAt: input.occurredAt,
+        createdAt: new Date(createdAt.getTime() - 1),
+        description: `Compra de pontos para transferência (${input.purchase.points.toLocaleString("pt-BR")} pontos)`,
+        costs: { create: [{ type: "PONTOS", amountCents: input.purchase.priceCents }] },
+        details: input.purchase.payment ? { payment: input.purchase.payment } : undefined,
+      },
+    });
+  }
+  await tx.entry.create({
+    data: {
+      ...base,
+      accountId: from.id,
+      type: "TRANSFER_OUT",
+      points: -input.points,
+      description: input.description?.trim() || `Transferência para ${to.program.name} ${to.holder.name}`,
+      idempotencyKey: input.idempotencyKey ?? null,
+      priorityPoints: input.purchase?.applyAll ? input.purchase.points : null,
+      priorityCostCents: input.purchase?.applyAll ? input.purchase.priceCents : null,
+      details: pf !== 1 || pt !== 1 ? { parityFrom: pf, parityTo: pt } : undefined,
+    },
+  });
+  const destination = {
+    ...base,
+    accountId: to.id,
+    occurredAt: input.deliveryDate ?? input.occurredAt,
+    status: (pendingDelivery ? "PENDING" : "CONFIRMED") as EntryStatus,
+  };
+  await tx.entry.create({
+    data: {
+      ...destination,
+      type: "TRANSFER_IN",
+      points: amounts.base,
+      inputCostCents: input.feeCents ?? 0,
+      description: `Transferência de ${from.program.name} ${from.holder.name}`,
+      costs: input.feeCents ? { create: [{ type: "OUTROS", amountCents: input.feeCents }] } : undefined,
+    },
+  });
+  if (amounts.bonus > 0) {
+    await tx.entry.create({
+      data: {
+        ...destination,
+        type: "TRANSFER_BONUS",
+        points: amounts.bonus,
+        description: `Bônus de transferência (${input.bonusPercent}%)`,
+      },
+    });
+  }
+}
+
+export async function createTransfer(userId: string, input: TransferInput) {
+  checkTransfer(input);
   const existing = await findByKey(userId, input.idempotencyKey);
   if (existing) return { groupId: existing.groupId!, duplicated: true };
   const groupId = randomUUID();
-  const createdAt = new Date();
   try {
-    await withLedger(userId, async (tx) => {
-      const from = await ownAccount(tx, userId, input.fromAccountId);
-      const to = await ownAccount(tx, userId, input.toAccountId);
-      const base = { userId, occurredAt: input.occurredAt, createdAt, groupId };
-      // Compra de pontos no carrinho: entra na origem um instante antes da transferência, no mesmo grupo
-      // (excluir a transferência leva a compra junto)
-      if (input.purchase) {
-        await tx.entry.create({
-          data: {
-            userId,
-            groupId,
-            accountId: from.id,
-            type: "PURCHASE",
-            points: input.purchase.points,
-            inputCostCents: input.purchase.priceCents,
-            occurredAt: input.occurredAt,
-            createdAt: new Date(createdAt.getTime() - 1),
-            description: `Compra de pontos para transferência (${input.purchase.points.toLocaleString("pt-BR")} pontos)`,
-            costs: { create: [{ type: "PONTOS", amountCents: input.purchase.priceCents }] },
-            details: input.purchase.payment ? { payment: input.purchase.payment } : undefined,
-          },
-        });
-      }
-      await tx.entry.create({
-        data: {
-          ...base,
-          accountId: from.id,
-          type: "TRANSFER_OUT",
-          points: -input.points,
-          description: input.description?.trim() || `Transferência para ${to.program.name} ${to.holder.name}`,
-          idempotencyKey: input.idempotencyKey ?? null,
-          priorityPoints: input.purchase?.applyAll ? input.purchase.points : null,
-          priorityCostCents: input.purchase?.applyAll ? input.purchase.priceCents : null,
-          details: pf !== 1 || pt !== 1 ? { parityFrom: pf, parityTo: pt } : undefined,
-        },
-      });
-      const destination = {
-        ...base,
-        accountId: to.id,
-        occurredAt: input.deliveryDate ?? input.occurredAt,
-        status: (pendingDelivery ? "PENDING" : "CONFIRMED") as EntryStatus,
-      };
-      await tx.entry.create({
-        data: {
-          ...destination,
-          type: "TRANSFER_IN",
-          points: amounts.base,
-          inputCostCents: input.feeCents ?? 0,
-          description: `Transferência de ${from.program.name} ${from.holder.name}`,
-          costs: input.feeCents ? { create: [{ type: "OUTROS", amountCents: input.feeCents }] } : undefined,
-        },
-      });
-      if (amounts.bonus > 0) {
-        await tx.entry.create({
-          data: {
-            ...destination,
-            type: "TRANSFER_BONUS",
-            points: amounts.bonus,
-            description: `Bônus de transferência (${input.bonusPercent}%)`,
-          },
-        });
-      }
-    });
+    await withLedger(userId, (tx) => writeTransfer(tx, userId, input, groupId, new Date()));
     return { groupId, duplicated: false };
   } catch (e) {
     if (isUniqueViolation(e)) {
@@ -285,6 +293,51 @@ export async function createTransfer(userId: string, input: TransferInput) {
     }
     throw e;
   }
+}
+
+/** Transferência salva, no formato do formulário (para editar). */
+export async function getTransfer(userId: string, groupId: string) {
+  const legs = await prisma.entry.findMany({ where: { userId, groupId }, include: { costs: true } });
+  const out = legs.find((e) => e.type === "TRANSFER_OUT");
+  const inn = legs.find((e) => e.type === "TRANSFER_IN");
+  if (!out || !inn) throw new DomainError(404, "Transferência não encontrada");
+  const bonus = legs.find((e) => e.type === "TRANSFER_BONUS");
+  const cart = legs.find((e) => e.type === "PURCHASE");
+  const parity = (out.details as { parityFrom?: number; parityTo?: number } | null) ?? {};
+  const pct = bonus ? Number(/\((\d+)%\)/.exec(bonus.description)?.[1] ?? Math.round((bonus.points * 100) / inn.points)) : 0;
+  const to = await prisma.account.findFirst({ where: { id: inn.accountId }, include: { program: true, holder: true } });
+  const defaultDesc = to ? `Transferência para ${to.program.name} ${to.holder.name}` : "";
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  return {
+    groupId,
+    fromAccountId: out.accountId,
+    toAccountId: inn.accountId,
+    points: -out.points,
+    bonusPercent: pct,
+    occurredAt: day(out.occurredAt),
+    description: out.description === defaultDesc ? "" : out.description,
+    parityFrom: parity.parityFrom ?? 1,
+    parityTo: parity.parityTo ?? 1,
+    feeCents: inn.inputCostCents,
+    deliveryDate: day(inn.occurredAt) !== day(out.occurredAt) ? day(inn.occurredAt) : null,
+    purchase: cart
+      ? { points: cart.points, priceCents: cart.inputCostCents, applyAll: out.priorityPoints != null, payment: (cart.details as { payment?: unknown } | null)?.payment ?? null }
+      : null,
+    // o que volta para a origem quando a transferência é refeita (para a prévia do formulário)
+    giveBack: { points: -out.points - (cart?.points ?? 0), costCents: -out.costCents - (cart?.costCents ?? 0) },
+  };
+}
+
+/** Edita a transferência inteira: apaga as pernas do grupo e grava de novo no mesmo grupo e horário. */
+export async function updateTransfer(userId: string, groupId: string, input: TransferInput) {
+  checkTransfer(input);
+  return withLedger(userId, async (tx) => {
+    const out = await tx.entry.findFirst({ where: { userId, groupId, type: "TRANSFER_OUT" } });
+    if (!out) throw new DomainError(404, "Transferência não encontrada");
+    await tx.entry.deleteMany({ where: { userId, groupId } });
+    await writeTransfer(tx, userId, { ...input, idempotencyKey: out.idempotencyKey }, groupId, out.createdAt);
+    return { groupId };
+  });
 }
 
 export async function updateEntry(

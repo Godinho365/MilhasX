@@ -16,7 +16,7 @@ import { planCost, scaleCosts } from "@/domain/installments";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 
-type Row = { id: string; date: string; program: string; holder: string; color: string; type: EntryType; description: string; points: number; costCents: number; inputCostCents: number; status: string; grouped: boolean; ignored: boolean };
+type Row = { id: string; date: string; program: string; holder: string; color: string; type: EntryType; description: string; points: number; costCents: number; inputCostCents: number; status: string; grouped: boolean; groupId: string | null; ignored: boolean };
 type Opt = { id: string; name: string };
 
 const OPS: [string, string][] = [
@@ -35,6 +35,12 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
   const [filters, setFilters] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [details, setDetails] = useState<Row | null>(null);
+  // Venda e transferência são editadas inteiras, no formulário delas; o resto, aqui mesmo
+  const editRow = (row: Row) => {
+    if (row.groupId && row.type === "SALE") nav(`/app/sales?edit=${encodeURIComponent(row.groupId)}`);
+    else if (row.groupId) openEntryForm("transfer", undefined, row.groupId);
+    else setEditing(row);
+  };
   const [menu, setMenu] = useState<{ row: Row; top: number; right: number } | null>(null);
   const opened = useRef(false);
 
@@ -297,7 +303,7 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-48 animate-pop-in rounded-xl border border-line bg-panel2 p-1 text-left shadow-xl shadow-black/40" onClick={(e) => e.stopPropagation()}>
           {menuItem(<Eye className="h-4 w-4" />, "Ver detalhes", () => setDetails(menu.row))}
           {menu.row.status === "PENDING" && menuItem(<CheckCheck className="h-4 w-4 text-ok" />, "Marcar recebido", () => confirmPending([menu.row.id]))}
-          {!menu.row.grouped && menuItem(<Pencil className="h-4 w-4" />, "Editar", () => setEditing(menu.row))}
+          {menuItem(<Pencil className="h-4 w-4" />, "Editar", () => editRow(menu.row))}
           {!menu.row.grouped && MANUAL.has(menu.row.type) && menuItem(<Copy className="h-4 w-4" />, "Duplicar", () => duplicate(menu.row))}
           {menuItem(<EyeOff className="h-4 w-4" />, menu.row.ignored ? "Voltar aos relatórios" : "Ignorar nos relatórios", () => toggleIgnored(menu.row))}
           <div className="my-1 border-t border-line" />
@@ -305,7 +311,7 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
         </div>
       )}
       {filters && <FiltersDialog accounts={accounts} cards={cards} onClose={() => setFilters(false)} />}
-      {details && <DetailsDialog row={details} onClose={() => setDetails(null)} onEdit={() => { setEditing(details); setDetails(null); }} />}
+      {details && <DetailsDialog row={details} onClose={() => setDetails(null)} onEdit={() => { editRow(details); setDetails(null); }} />}
       {editing && <EditDialog row={editing} cards={cards} onClose={() => setEditing(null)} />}
     </>
   );
@@ -435,7 +441,7 @@ function DetailsDialog({ row, onClose, onEdit }: { row: Row; onClose: () => void
       onClose={onClose}
       size="sm"
       title="Detalhes do lançamento"
-      footer={<>{!row.grouped && <button className="btn-ghost mr-auto" onClick={onEdit}><Pencil className="h-4 w-4" />Editar</button>}<button className="btn-primary" onClick={onClose}>Fechar</button></>}
+      footer={<><button className="btn-ghost mr-auto" onClick={onEdit}><Pencil className="h-4 w-4" />Editar</button><button className="btn-primary" onClick={onClose}>Fechar</button></>}
     >
       {erro && <Alert>{erro}</Alert>}
       <div className="space-y-4">
