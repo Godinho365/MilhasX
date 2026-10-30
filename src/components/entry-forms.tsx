@@ -508,6 +508,17 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
   }, [editGroupId]);
 
   const src = accounts.find((a) => a.id === f.from);
+  const dst = accounts.find((a) => a.id === f.to);
+  // Destino com bônus cadastrado (ex.: 30% na LATAM): preenche quando o clube está ativo, se o campo
+  // estiver vazio ou com o bônus sugerido antes (uma promoção digitada à mão não é trocada)
+  const [autoBonus, setAutoBonus] = useState<string | null>(null);
+  function pickTo(v: string) {
+    const a = accounts.find((x) => x.id === v);
+    const suggested = a?.bonusPct != null && a.clubActive ? String(a.bonusPct) : null;
+    const keep = f.bonus !== "" && f.bonus !== autoBonus;
+    update({ to: v, bonus: keep ? f.bonus : suggested ?? "" });
+    setAutoBonus(suggested);
+  }
   const points = parsePts(f.points);
   const pf = Math.max(1, Number(adv.parityFrom) || 1);
   const pt = Math.max(1, Number(adv.parityTo) || 1);
@@ -572,9 +583,9 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
         {erro && <Alert>{erro}</Alert>}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="De" required><AccountSelect accounts={accounts} value={f.from} onChange={(v) => update({ from: v })} placeholder="Origem" label="De" /></Field>
-          <Field label="Para" required><AccountSelect accounts={accounts.filter((a) => a.id !== f.from)} value={f.to} onChange={(v) => update({ to: v })} placeholder="Destino" label="Para" /></Field>
+          <Field label="Para" required><AccountSelect accounts={accounts.filter((a) => a.id !== f.from)} value={f.to} onChange={pickTo} placeholder="Destino" label="Para" /></Field>
           <Field label="Pontos" required><PointsInput label="Pontos transferidos" value={f.points} onChange={(v) => update({ points: v })} /></Field>
-          <Field label="Bônus (%)">
+          <Field label="Bônus (%)" hint={dst?.bonusPct != null ? (dst.clubActive ? `Clube ativo: ${dst.bonusPct}% de bônus nesta conta` : `Clube inativo nesta conta: sem o bônus de ${dst.bonusPct}%`) : undefined}>
             <div className="relative">
               <input className="input pr-24" inputMode="numeric" placeholder="Ex: 10" value={f.bonus} onChange={(e) => update({ bonus: e.target.value.replace(/\D/g, "").slice(0, 3) })} aria-label="Bônus (%)" />
               <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5">

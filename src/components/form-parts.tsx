@@ -6,7 +6,7 @@ import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
 import { COST_LABELS, type CostType } from "@/domain/costs";
 import { planCost, type PaymentPlan } from "@/domain/installments";
 
-export type AccountOpt = { id: string; holder: string; program: string; color: string; balance: number; costCents: number; programId?: string; holderId?: string; logo?: string | null; pinned?: boolean };
+export type AccountOpt = { id: string; holder: string; program: string; color: string; balance: number; costCents: number; programId?: string; holderId?: string; logo?: string | null; pinned?: boolean; bonusPct?: number | null; clubActive?: boolean };
 export type CardOpt = { id: string; name: string };
 
 export const parsePts = (v: string) => Number(v.replace(/\D/g, "")) || 0;

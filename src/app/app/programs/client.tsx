@@ -15,7 +15,7 @@ import { Modal, Field, Alert, Empty, SegmentedButtons } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { HoldersTab, HolderDialog, type HolderFull } from "./holders";
 
-type Acc = { cards?: string[]; cpf?: { used: number; limit: number | null } | null; id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; updatedAt: string };
+type Acc = { cards?: string[]; cpf?: { used: number; limit: number | null } | null; id: string; holderId: string; holderName: string; programId: string; programName: string; programColor: string; programLogo?: string | null; balance: number; cpmCents: number | null; costCents: number; pendingPoints: number; nickname: string | null; label: string; pinned: boolean; archived: boolean; tags: string[]; cpfAvailable: number | null; transferBonusPct?: number | null; updatedAt: string };
 type P = { id: string; name: string; balance: number; costCents: number; cpmCents: number | null; color: string; logo?: string | null; holders: number };
 
 export function ProgramsClient(props: { view: "programas" | "titulares"; holders: HolderFull[]; programs: { id: string; name: string; color: string }[]; accounts: Acc[]; byProgram: P[] }) {
@@ -212,12 +212,12 @@ export function ProgramsClient(props: { view: "programas" | "titulares"; holders
 /** Editar conta: nome, CPFs disponíveis e tags. */
 function AccountDialog({ account, tagSuggestions, onClose }: { account: Acc; tagSuggestions: string[]; onClose: () => void }) {
   const router = useRouter();
-  const [f, setF] = useState({ nickname: account.nickname ?? "", cpf: account.cpfAvailable != null ? String(account.cpfAvailable) : "" });
+  const [f, setF] = useState({ nickname: account.nickname ?? "", cpf: account.cpfAvailable != null ? String(account.cpfAvailable) : "", bonus: account.transferBonusPct != null ? String(account.transferBonusPct) : "" });
   const [tags, setTags] = useState(account.tags);
   const [erro, setErro] = useState("");
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const r = await api(`/api/accounts/${account.id}`, "PATCH", { nickname: f.nickname || null, cpfAvailable: f.cpf.trim() ? Number(f.cpf) : null, tags });
+    const r = await api(`/api/accounts/${account.id}`, "PATCH", { nickname: f.nickname || null, cpfAvailable: f.cpf.trim() ? Number(f.cpf) : null, transferBonusPct: f.bonus.trim() ? Number(f.bonus) : null, tags });
     if (!r.ok) return setErro(r.erro);
     toast("Conta atualizada");
     onClose();
@@ -230,6 +230,7 @@ function AccountDialog({ account, tagSuggestions, onClose }: { account: Acc; tag
         <p className="text-sm text-muted">{account.programName} · {account.holderName}</p>
         <Field label="Nome da conta" hint={`Em branco: ${account.programName} ${account.holderName}`}><input className="input" maxLength={60} value={f.nickname} onChange={(e) => setF({ ...f, nickname: e.target.value })} placeholder={`${account.programName} ${account.holderName}`} /></Field>
         <Field label="CPFs disponíveis" hint="Quantos passageiros ainda podem ser emitidos nessa conta"><input className="input" type="number" min={0} max={1000} value={f.cpf} onChange={(e) => setF({ ...f, cpf: e.target.value })} placeholder="Ex: 25" /></Field>
+        <Field label="Bônus em transferências (%)" hint="Bônus que esta conta recebe enquanto o clube está ativo (ex.: 30). Preenche sozinho na transferência."><input className="input" type="number" min={0} max={300} value={f.bonus} onChange={(e) => setF({ ...f, bonus: e.target.value })} placeholder="Ex: 30" /></Field>
         <Field label="Tags"><TagsInput value={tags} onChange={setTags} suggestions={tagSuggestions} /></Field>
       </form>
     </Modal>

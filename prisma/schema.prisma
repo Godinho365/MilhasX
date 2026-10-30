@@ -264,6 +264,7 @@ model Account {
   cpfAvailable      Int? // CPFs (passageiros) que ainda podem ser emitidos
   beneficiaryLimit  Int? // limite de beneficiários (CPFs distintos) do programa; vazio = sugestão do programa
   beneficiaryWindow String   @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
+  transferBonusPct  Int? // bônus que esta conta recebe em transferências enquanto o clube está ativo (ex.: 30)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
