@@ -99,9 +99,12 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
 
-/** CPFs emitidos: passageiros das passagens emitidas com pontos (sem o número, os clientes do item, ou 1). */
+/** CPFs emitidos com pontos: os passageiros das passagens (sem o número, os clientes do item, ou 1) e de
+ *  outros itens que informam passageiros, como a venda de milhas do CRM Milhas (uma emissão para o comprador). */
 export function saleCpfs(items: { kind: string; issuedWith: string; passengers: number | null; customers: unknown[] }[]) {
-  return items.filter((i) => i.kind === "FLIGHT" && i.issuedWith === "POINTS").reduce((t, i) => t + (i.passengers ?? Math.max(1, i.customers.length)), 0);
+  return items
+    .filter((i) => i.issuedWith === "POINTS")
+    .reduce((t, i) => t + (i.kind === "FLIGHT" ? (i.passengers ?? Math.max(1, i.customers.length)) : (i.passengers ?? 0)), 0);
 }
 
 function validate(input: SaleInput) {

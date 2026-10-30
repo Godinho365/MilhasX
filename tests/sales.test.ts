@@ -171,3 +171,15 @@ describe("editar venda", () => {
     expect(await acc(lat)).toMatchObject({ balance: 10000 });
   });
 });
+
+describe("CPFs emitidos", () => {
+  it("contam passagens e também a venda de milhas do CRM (item com passageiros)", async () => {
+    const { saleCpfs } = await import("@/server/services/sales");
+    expect(saleCpfs([
+      { kind: "FLIGHT", issuedWith: "POINTS", passengers: 2, customers: [] },
+      { kind: "OTHER", issuedWith: "POINTS", passengers: 1, customers: [] }, // CRM Milhas
+      { kind: "BAGGAGE", issuedWith: "POINTS", passengers: null, customers: [] },
+      { kind: "FLIGHT", issuedWith: "CASH", passengers: 3, customers: [] },
+    ])).toBe(3);
+  });
+});
