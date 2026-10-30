@@ -98,3 +98,21 @@ describe("limite de beneficiários", () => {
     expect((await b.call(benef.POST, "POST", "/x", { name: "X Y", usedAt: "2026-01-01" }, { id: lat })).status).toBe(404);
   });
 });
+
+describe("passageiros sem nome", () => {
+  it("cada Anônimo ocupa uma vaga e o nome informado depois toma o lugar dele", async () => {
+    const { countDistinct } = await import("@/domain/beneficiaries");
+    const since = new Date("2026-01-01");
+    const at = "2026-10-30";
+    expect(countDistinct([{ id: "a", name: "Anônimo", document: null, usedAt: at }, { id: "b", name: "Anônimo", document: null, usedAt: at }, { id: "c", name: "Ana", document: null, usedAt: at }], since)).toBe(3);
+
+    // venda de 2 passageiros sem cliente: 2 Anônimos (titular + 2 = 3 usados)
+    await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: lat, occurredAt: at, items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 30000, passengers: 2 }] });
+    expect((await state()).used).toBe(3);
+    // informar um nome depois não conta em dobro: ele toma o lugar de um Anônimo da mesma data
+    expect((await c.call(benef.POST, "POST", "/x", { name: "Bia Rocha", document: "123.456.789-09", usedAt: at }, { id: lat })).status).toBe(201);
+    const s = await state();
+    expect(s.used).toBe(3);
+    expect(s.items.map((b: { name: string }) => b.name).sort()).toEqual(["Anônimo", "Bia Rocha"]);
+  });
+});

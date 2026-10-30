@@ -159,7 +159,8 @@ describe("editar venda", () => {
     expect(after).toHaveLength(1);
     expect(after[0]!.points).toBe(-8000);
     expect(after[0]!.createdAt.getTime()).toBe(before.createdAt.getTime());
-    expect(await prisma.accountBeneficiary.count({ where: { saleId: id } })).toBe(0);
+    // sem cliente nomeado, o passageiro da venda editada fica "Anônimo" (ocupa a vaga)
+    expect(await prisma.accountBeneficiary.findMany({ where: { saleId: id }, select: { name: true, document: true } })).toEqual([{ name: "Anônimo", document: null }]);
   });
 
   it("edição com conta inválida não muda nada", async () => {

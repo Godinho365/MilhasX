@@ -4,6 +4,7 @@ import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
 import { dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
+import { ANONYMOUS } from "@/domain/beneficiaries";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Pago" a negociação vira uma
 // venda em Vendas (baixa dos pontos da conta escolhida); depois disso não volta de etapa nem muda os
@@ -174,11 +175,16 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
  *  Com os passageiros informados, eles substituem os beneficiários que a venda criou pelo cliente. */
 async function passengersAsBeneficiaries(userId: string, d: Awaited<ReturnType<typeof own>>, saleId: string) {
   const pax = (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[];
-  if (!pax.length || !d.accountId) return;
+  if (!d.accountId) return;
   const sale = await prisma.sale.findUniqueOrThrow({ where: { id: saleId }, select: { occurredAt: true } });
+  // sem nomes para todos os CPFs combinados, o restante fica "Anônimo"
+  const rows = [
+    ...pax.map((p) => ({ name: p.name.trim(), document: p.cpf.replace(/\D/g, "") || null })),
+    ...Array.from({ length: Math.max(0, (d.passengers ?? 0) - pax.length) }, () => ({ name: ANONYMOUS, document: null })),
+  ];
   await prisma.$transaction([
     prisma.accountBeneficiary.deleteMany({ where: { saleId, userId } }),
-    prisma.accountBeneficiary.createMany({ data: pax.map((p) => ({ userId, accountId: d.accountId!, saleId, name: p.name.trim(), document: p.cpf.replace(/\D/g, "") || null, usedAt: sale.occurredAt })) }),
+    prisma.accountBeneficiary.createMany({ data: rows.map((r) => ({ userId, accountId: d.accountId!, saleId, ...r, usedAt: sale.occurredAt })) }),
   ]);
 }
 

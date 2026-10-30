@@ -1,5 +1,5 @@
 // Detalhe da conta: recorrências (clubes), compras bonificadas pendentes e credenciais criptografadas.
-import { beneficiaryExpiry, beneficiaryKey, countDistinct, effectiveLimit, holderCpf, windowStart, withoutHolder, type BeneficiaryWindow } from "@/domain/beneficiaries";
+import { beneficiaryExpiry, beneficiaryKey, countDistinct, effectiveLimit, holderCpf, isAnonymous, windowStart, withoutHolder, type BeneficiaryWindow } from "@/domain/beneficiaries";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { EntryType, RecurrenceFrequency } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
@@ -399,7 +399,14 @@ export async function setBeneficiaryLimit(userId: string, accountId: string, inp
 export async function addBeneficiary(userId: string, accountId: string, input: { name: string; document?: string | null; usedAt: Date }) {
   const acc = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { id: true } });
   if (!acc) throw new DomainError(404, "Conta não encontrada");
-  return prisma.accountBeneficiary.create({ data: { userId, accountId, name: input.name.trim(), document: input.document?.replace(/\D/g, "") || null, usedAt: input.usedAt } });
+  const data = { name: input.name.trim(), document: input.document?.replace(/\D/g, "") || null };
+  // Uma emissão sem nome deixou um "Anônimo" na conta: o nome informado depois toma o lugar dele
+  // (de preferência o da mesma data), em vez de contar a mesma pessoa duas vezes
+  const day = input.usedAt.toISOString().slice(0, 10);
+  const anon = (await prisma.accountBeneficiary.findMany({ where: { accountId, userId }, orderBy: { usedAt: "asc" } })).filter(isAnonymous);
+  const slot = anon.find((b) => b.usedAt.toISOString().slice(0, 10) === day) ?? anon[0];
+  if (slot) return prisma.accountBeneficiary.update({ where: { id: slot.id }, data });
+  return prisma.accountBeneficiary.create({ data: { userId, accountId, ...data, usedAt: input.usedAt } });
 }
 
 export async function removeBeneficiary(userId: string, accountId: string, id: string) {
@@ -412,7 +419,7 @@ export async function removeBeneficiary(userId: string, accountId: string, id: s
 /** CPFs usados na janela de cada conta (para a coluna "CPFs" da lista de programas). */
 export async function beneficiaryUsage(userId: string, now = new Date()) {
   const accs = await prisma.account.findMany({ where: { userId }, select: { id: true, beneficiaryLimit: true, beneficiaryWindow: true, program: { select: { code: true } }, holder: { select: { name: true, documents: true } } } });
-  const rows = await prisma.accountBeneficiary.findMany({ where: { userId, usedAt: { gte: new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)) } }, select: { accountId: true, name: true, document: true, usedAt: true } });
+  const rows = await prisma.accountBeneficiary.findMany({ where: { userId, usedAt: { gte: new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1)) } }, select: { id: true, accountId: true, name: true, document: true, usedAt: true } });
   const out: Record<string, { used: number; limit: number | null }> = {};
   for (const a of accs) {
     const eff = effectiveLimit(a, a.program.code);
