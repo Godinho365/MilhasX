@@ -13,6 +13,8 @@ import * as share from "@/app/api/miles-deals/[id]/share/route";
 import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
 import * as ticket from "@/app/api/miles-deals/[id]/ticket/route";
 import * as receipt from "@/app/api/miles-deals/[id]/receipt/route";
+import * as archiveRoute from "@/app/api/miles-deals/[id]/archive/route";
+import { listDeals, milesDealsDashboard } from "@/server/services/miles-deals";
 import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
@@ -180,6 +182,23 @@ describe("CRM Milhas", () => {
     expect((await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana", cpf: "123", birthDate: "2002-03-23" }] }, { id: d.id })).status).toBe(400);
     const cleared = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [] }, { id: d.id });
     expect(cleared.data.item).toMatchObject({ passengersData: [], passengersAt: null });
+  });
+
+  it("arquivar tira do Kanban e o dashboard soma as vendas pagas", async () => {
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    const a = (await newDeal({ customerName: "Comprador A", accountId: lat, points: 10000, saleCpmCents: 3000 })).data.item;
+    const b = (await newDeal({ customerName: "Comprador B" })).data.item;
+    expect((await sendFile(receipt.POST, a.id, Buffer.from("%PDF-1.4\n"), "pix.pdf")).status).toBe(201); // paga: vira venda
+    expect((await c.call(archiveRoute.POST, "POST", "/x", { archived: true }, { id: b.id })).data.item.archivedAt).toBeTruthy();
+    expect((await listDeals(userId)).map((d) => d.customerName)).toEqual(["Comprador A"]);
+    expect((await listDeals(userId, { archived: true })).map((d) => d.customerName)).toEqual(["Comprador B"]);
+    const dash = await milesDealsDashboard(userId, 30);
+    expect(dash.totals).toMatchObject({ created: 2, paid: 1, conversionPct: 50, points: 10000, revenueCents: 30000, archived: 1, saleCpmCents: 3000 });
+    expect(dash.topBuyers[0]).toMatchObject({ name: "Comprador A", deals: 1, revenueCents: 30000 });
+    expect(dash.pipeline.find((p) => p.stage === "PAID")).toMatchObject({ count: 1, points: 10000 });
+    // reabrir volta para o Kanban
+    await c.call(archiveRoute.POST, "POST", "/x", { archived: false }, { id: b.id });
+    expect(await listDeals(userId)).toHaveLength(2);
   });
 
   it("isola por usuário", async () => {

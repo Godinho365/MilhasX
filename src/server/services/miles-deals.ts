@@ -3,7 +3,7 @@ import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
-import { dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
+import { DEAL_STAGES, dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Pago" a negociação vira uma
@@ -30,6 +30,7 @@ const include = {
   account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
   receipt: { select: { name: true, size: true, createdAt: true } },
+  sale: { select: { occurredAt: true } }, // data da venda (dashboard)
 } as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
 
@@ -58,6 +59,8 @@ const view = (d: Row) => {
     // só com o comprovante de pagamento a negociação vai para "Pago" (e vira venda)
     receipt: d.receipt ? { name: d.receipt.name, size: d.receipt.size, at: d.receipt.createdAt.toISOString() } : null,
     shareToken: d.shareToken,
+    archivedAt: d.archivedAt?.toISOString() ?? null,
+    paidAt: d.sale?.occurredAt.toISOString() ?? null,
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
     chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
@@ -69,6 +72,7 @@ const view = (d: Row) => {
     profitManual: d.profitCents != null,
     profitCents: d.profitCents ?? estimatedProfitCents,
     createdAt: d.createdAt.toISOString(),
+    updatedAt: d.updatedAt.toISOString(),
   };
 };
 export type DealView = ReturnType<typeof view>;
@@ -107,9 +111,66 @@ export async function getDeal(userId: string, id: string) {
   return view(d);
 }
 
-export async function listDeals(userId: string) {
-  const rows = await prisma.milesDeal.findMany({ where: { userId, archivedAt: null }, include, orderBy: [{ position: "asc" }, { createdAt: "desc" }] });
+export async function listDeals(userId: string, opts: { archived?: boolean } = {}) {
+  const rows = await prisma.milesDeal.findMany({
+    where: { userId, archivedAt: opts.archived ? { not: null } : null },
+    include,
+    orderBy: opts.archived ? [{ archivedAt: "desc" }] : [{ position: "asc" }, { createdAt: "desc" }],
+  });
   return rows.map(view);
+}
+
+/** Arquiva (sai do Kanban e vai para a Lista) ou reabre a negociação. */
+export async function archiveDeal(userId: string, id: string, archived: boolean) {
+  const d = await own(userId, id);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { archivedAt: archived ? new Date() : null } });
+  return getDeal(userId, id);
+}
+
+/** Indicadores do CRM Milhas no período (pelas datas de criação e de pagamento) e o pipeline atual. */
+export async function milesDealsDashboard(userId: string, days: number | null, now = new Date()) {
+  const since = days ? new Date(now.getTime() - days * 86_400_000) : null;
+  const inPeriod = (iso: string | null) => !!iso && (!since || new Date(iso) >= since);
+  const [active, archived] = await Promise.all([listDeals(userId), listDeals(userId, { archived: true })]);
+  const all = [...active, ...archived];
+  const created = all.filter((d) => inPeriod(d.createdAt));
+  const paid = all.filter((d) => d.stage === "PAID" && inPeriod(d.paidAt));
+  const sum = (l: DealView[], f: (d: DealView) => number | null | undefined) => l.reduce((t, d) => t + (f(d) ?? 0), 0);
+  const revenue = sum(paid, (d) => d.chargeCents);
+  const points = sum(paid, (d) => d.points);
+  const pax = sum(paid, (d) => d.passengersData.length || d.passengers);
+  const profit = sum(paid, (d) => d.profitCents);
+  const byBuyer = new Map<string, { name: string; deals: number; points: number; revenueCents: number }>();
+  for (const d of paid) {
+    const k = d.customerName.trim().toLowerCase();
+    const b = byBuyer.get(k) ?? { name: d.customerName, deals: 0, points: 0, revenueCents: 0 };
+    b.deals++; b.points += d.points ?? 0; b.revenueCents += d.chargeCents ?? 0;
+    byBuyer.set(k, b);
+  }
+  const days0 = (iso: string) => Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000);
+  return {
+    totals: {
+      created: created.length,
+      paid: paid.length,
+      conversionPct: created.length ? Math.round((created.filter((d) => d.stage === "PAID").length / created.length) * 1000) / 10 : null,
+      points,
+      revenueCents: revenue,
+      profitCents: profit,
+      avgTicketCents: paid.length ? Math.round(revenue / paid.length) : null,
+      saleCpmCents: points > 0 ? Math.round((sum(paid, (d) => d.totalCents) * 1000) / points) : null,
+      profitPerCpfCents: pax > 0 ? Math.round(profit / pax) : null,
+      archived: archived.filter((d) => inPeriod(d.archivedAt)).length,
+    },
+    pipeline: DEAL_STAGES.map((stage) => {
+      const l = active.filter((d) => d.stage === stage);
+      return { stage, count: l.length, points: sum(l, (d) => d.points), chargeCents: sum(l, (d) => d.chargeCents) };
+    }),
+    byType: (["FINAL", "AGENCY", "BALCAO"] as const).map((t) => ({ type: t, deals: paid.filter((d) => d.buyerType === t).length, revenueCents: sum(paid.filter((d) => d.buyerType === t), (d) => d.chargeCents) })),
+    topBuyers: [...byBuyer.values()].sort((a, b) => b.revenueCents - a.revenueCents).slice(0, 5),
+    // paradas: sem andar há mais de 2 dias antes da emissão; emitidas esperando pagamento
+    stalled: active.filter((d) => ["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage) && days0(d.updatedAt) > 2).map((d) => ({ id: d.id, number: d.number, customerName: d.customerName, stage: d.stage, days: days0(d.updatedAt) })),
+    awaitingPayment: active.filter((d) => d.stage === "ISSUED").map((d) => ({ id: d.id, number: d.number, customerName: d.customerName, chargeCents: d.chargeCents, days: d.ticket ? days0(d.ticket.at) : 0 })),
+  };
 }
 
 export async function createDeal(userId: string, input: DealInput) {

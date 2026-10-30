@@ -93,6 +93,15 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
     onClose();
     refreshSafe(router);
   }
+  // Arquivada sai do Kanban e fica na Lista; dá para reabrir
+  async function archive(archived: boolean) {
+    if (!deal) return;
+    const r = await api(`/api/miles-deals/${deal.id}/archive`, "POST", { archived });
+    if (!r.ok) return setErro(r.erro);
+    toast(archived ? "Negociação arquivada" : "Negociação reaberta");
+    onClose();
+    refreshSafe(router);
+  }
   async function remove() {
     if (!deal || !(await confirmDialog({ title: `Excluir a negociação #${deal.number}?`, confirmLabel: "Excluir", danger: true }))) return;
     const r = await api(`/api/miles-deals/${deal.id}`, "DELETE");
@@ -104,7 +113,8 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   return (
     <Modal open onClose={onClose} title={deal ? `Negociação #${deal.number}` : "Nova negociação"} footer={
       <>
-        {deal && !locked && <button type="button" className="btn-ghost mr-auto text-red-300" onClick={remove}><Trash2 className="h-4 w-4" />Excluir</button>}
+        {deal && !locked && <button type="button" className="btn-ghost text-red-300" onClick={remove}><Trash2 className="h-4 w-4" />Excluir</button>}
+        {deal && <button type="button" className="btn-ghost mr-auto" onClick={() => archive(!deal.archivedAt)}>{deal.archivedAt ? "Reabrir" : "Arquivar"}</button>}
         <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
         <button form="deal-form" className="btn-primary" disabled={busy}>Salvar</button>
       </>
@@ -269,6 +279,47 @@ function Emission({ deal: initial }: { deal: DealView }) {
         />
       )}
     </>
+  );
+}
+
+/* ---------------- Lista ---------------- */
+
+/** Negociações ativas e arquivadas em tabela; clicar abre a negociação. */
+export function DealsList({ active, archived, customers, accounts }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const all = [...active, ...archived];
+  const deal = all.find((d) => d.id === open) ?? null;
+  const balcoes = [...new Set([...all.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName), "HotMilhas", "MaxMilhas"])];
+  const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
+  const table = (rows: DealView[], empty: string) =>
+    rows.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{empty}</p> : (
+      <div className="overflow-x-auto">
+        <table className="table-base">
+          <thead><tr><th>Nº</th><th>Comprador</th><th className="hidden md:table-cell">Conta</th><th className="text-right">Milhas</th><th className="hidden text-right sm:table-cell">Milheiro</th><th className="text-right">Total</th><th className="hidden text-right lg:table-cell">Lucro</th><th className="hidden md:table-cell">Etapa</th><th className="hidden lg:table-cell">Criada</th></tr></thead>
+          <tbody>
+            {rows.map((d) => (
+              <tr key={d.id} className="cursor-pointer hover:bg-panel2" onClick={() => setOpen(d.id)}>
+                <td className="tabular-nums">#{d.number}</td>
+                <td><span className="font-medium">{d.customerName}</span><span className="block text-xs text-muted">{BUYER_LABELS[d.buyerType]}</span></td>
+                <td className="hidden max-w-[180px] truncate md:table-cell">{d.accountLabel ?? "-"}</td>
+                <td className="text-right tabular-nums">{d.points ? d.points.toLocaleString("pt-BR") : "-"}</td>
+                <td className="hidden text-right tabular-nums sm:table-cell">{d.saleCpmCents ? fmtBRL(d.saleCpmCents) : "-"}</td>
+                <td className="text-right tabular-nums">{d.chargeCents != null ? fmtBRL(d.chargeCents) : "-"}</td>
+                <td className={`hidden text-right tabular-nums lg:table-cell ${(d.profitCents ?? 0) >= 0 ? "text-ok" : "text-bad"}`}>{d.profitCents != null ? fmtBRL(d.profitCents) : "-"}</td>
+                <td className="hidden md:table-cell">{d.archivedAt ? <span className="text-muted">Arquivada em {fmtDay(d.archivedAt)}</span> : DEAL_STAGE_LABELS[d.stage as DealStageKey]}</td>
+                <td className="hidden text-muted lg:table-cell">{fmtDay(d.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  return (
+    <div className="space-y-4">
+      <section className="card overflow-hidden" aria-label="Negociações ativas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações ativas <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhuma negociação ativa.")}</section>
+      <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
+      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} />}
+    </div>
   );
 }
 
