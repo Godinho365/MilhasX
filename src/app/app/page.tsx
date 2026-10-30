@@ -133,11 +133,12 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
           <p className="text-xs text-muted">
             Quantas milhas cada conta ainda consegue emitir com os CPFs livres (~{fmtPts(cap.avg.ptsPerCpf)} por emissão{cap.avg.fromHistory ? `, média de ${cap.avg.sample} ${cap.avg.sample === 1 ? "CPF" : "CPFs"} dos últimos 12 meses` : ", padrão até haver vendas"}).
             Compre e acumule pontos no titular com mais espaço; milhas além disso ficam sem CPF para usar.
+            {cap.avg.saleCpmCents ? ` Potencial: se usar todos os CPFs livres, vendendo a ~${money(cap.avg.saleCpmCents)} o milheiro (sua média) e com o custo atual de cada conta.` : " Potencial: aparece depois das primeiras vendas."}
           </p>
         </div>
         <div className="overflow-x-auto">
           <table className="table-base">
-            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th></tr></thead>
+            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th><th className="text-right">Potencial de faturamento</th><th className="text-right">Potencial de lucro</th></tr></thead>
             <tbody>
               {[...capRows].sort((a, b) => b.space - a.space).map((r) => (
                 <tr key={r.id}>
@@ -147,9 +148,25 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
                   <td className="text-right tabular-nums">{r.load.cpfFree}</td>
                   <td className="hidden text-right tabular-nums md:table-cell">{r.emissionsLeft.toLocaleString("pt-BR")}</td>
                   <td className={`text-right font-semibold tabular-nums ${r.space < 0 ? "text-bad" : ""}`} title={r.space < 0 ? "Milhas demais para os CPFs livres: risco de saldo encalhado" : undefined}>{r.space < 0 ? `−${fmtPts(-r.space)} ⚠️` : fmtPts(r.space)}</td>
+                  <td className="text-right tabular-nums">{r.revenueCents == null ? "-" : money(r.revenueCents)}</td>
+                  <td className={`text-right font-semibold tabular-nums ${(r.profitCents ?? 0) < 0 ? "text-bad" : "text-ok"}`}>{r.profitCents == null ? "-" : money(r.profitCents)}</td>
                 </tr>
               ))}
             </tbody>
+            {capRows.length > 1 && (
+              <tfoot>
+                <tr className="border-t border-line font-semibold">
+                  <td>Total</td>
+                  <td className="text-right tabular-nums">{fmtPts(capRows.reduce((t, r) => t + r.load.balance, 0))}</td>
+                  <td className="hidden text-right tabular-nums sm:table-cell">{capRows.some((r) => r.load.reserved) ? fmtPts(capRows.reduce((t, r) => t + r.load.reserved, 0)) : "-"}</td>
+                  <td className="text-right tabular-nums">{capRows.reduce((t, r) => t + r.load.cpfFree, 0)}</td>
+                  <td className="hidden text-right tabular-nums md:table-cell">{(Math.round(capRows.reduce((t, r) => t + r.emissionsLeft, 0) * 10) / 10).toLocaleString("pt-BR")}</td>
+                  <td className="text-right tabular-nums">{fmtPts(capRows.reduce((t, r) => t + r.space, 0))}</td>
+                  <td className="text-right tabular-nums">{money(capRows.reduce((t, r) => t + (r.revenueCents ?? 0), 0))}</td>
+                  <td className="text-right tabular-nums text-ok">{money(capRows.reduce((t, r) => t + (r.profitCents ?? 0), 0))}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </section>

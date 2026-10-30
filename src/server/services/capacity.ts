@@ -2,7 +2,7 @@
 import { prisma, DomainError } from "../db";
 import { beneficiaryUsage } from "./accounts";
 import { saleCpfs } from "./sales";
-import { DEFAULT_PTS_PER_CPF, accountSpace, emissionFit, rankForEmission } from "@/domain/capacity";
+import { DEFAULT_PTS_PER_CPF, accountSpace, capacityPotential, emissionFit, rankForEmission } from "@/domain/capacity";
 
 const OPEN_STAGES = ["NEW", "NEGOTIATION", "AWAITING", "ISSUED"] as const;
 
@@ -11,11 +11,19 @@ export async function emissionAverage(userId: string, now = new Date()) {
   const since = new Date(now.getTime() - 365 * 86_400_000);
   const items = await prisma.saleItem.findMany({
     where: { issuedWith: "POINTS", sale: { userId, occurredAt: { gte: since } } },
-    select: { kind: true, issuedWith: true, points: true, passengers: true, customers: { select: { id: true } } },
+    select: { kind: true, issuedWith: true, points: true, salePriceCents: true, passengers: true, customers: { select: { id: true } } },
   });
   const cpfs = items.reduce((t, i) => t + saleCpfs([i]), 0);
   const points = items.filter((i) => saleCpfs([i]) > 0).reduce((t, i) => t + i.points, 0);
-  return { ptsPerCpf: cpfs > 0 ? Math.round(points / cpfs) : DEFAULT_PTS_PER_CPF, sample: cpfs, fromHistory: cpfs > 0 };
+  // preço médio do milheiro vendido (valor dos pontos ÷ pontos), para o potencial de faturamento
+  const soldPts = items.reduce((t, i) => t + i.points, 0);
+  const soldCents = items.reduce((t, i) => t + i.salePriceCents, 0);
+  return {
+    ptsPerCpf: cpfs > 0 ? Math.round(points / cpfs) : DEFAULT_PTS_PER_CPF,
+    sample: cpfs,
+    fromHistory: cpfs > 0,
+    saleCpmCents: soldPts > 0 ? Math.round((soldCents * 1000) / soldPts) : null,
+  };
 }
 
 /** Contas com limite de CPFs: saldo, reservado em negociações abertas, CPFs livres, capacidade e espaço. */
@@ -23,7 +31,7 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
   const [usage, avg, accounts, deals] = await Promise.all([
     beneficiaryUsage(userId),
     emissionAverage(userId),
-    prisma.account.findMany({ where: { userId, archived: false }, select: { id: true, balance: true, nickname: true, holderId: true, program: { select: { name: true, code: true } }, holder: { select: { name: true } } } }),
+    prisma.account.findMany({ where: { userId, archived: false }, select: { id: true, balance: true, costCents: true, nickname: true, holderId: true, program: { select: { name: true, code: true } }, holder: { select: { name: true } } } }),
     prisma.milesDeal.findMany({ where: { userId, archivedAt: null, saleId: null, stage: { in: [...OPEN_STAGES] }, accountId: { not: null }, NOT: opts.exceptDealId ? { id: opts.exceptDealId } : undefined }, select: { accountId: true, points: true } }),
   ]);
   const reservedBy = new Map<string, number>();
@@ -33,7 +41,9 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
     .map((a) => {
       const u = usage[a.id]!;
       const load = { balance: a.balance, reserved: reservedBy.get(a.id) ?? 0, cpfFree: Math.max(0, (u.limit ?? 0) - u.used), ptsPerCpf: avg.ptsPerCpf };
-      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...accountSpace(load) };
+      const space = accountSpace(load);
+      const costCpmCents = a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null;
+      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents) };
     })
     .sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
   return { avg, rows };
