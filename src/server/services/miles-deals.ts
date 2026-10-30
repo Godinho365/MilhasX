@@ -166,7 +166,20 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
     }],
   });
   await copyFilesToSale(userId, d.id, sale.id);
+  await passengersAsBeneficiaries(userId, d, sale.id);
   return sale.id;
+}
+
+/** Quem ocupa vaga no limite de CPFs da conta são os passageiros emitidos, não o comprador (balcão/agência).
+ *  Com os passageiros informados, eles substituem os beneficiários que a venda criou pelo cliente. */
+async function passengersAsBeneficiaries(userId: string, d: Awaited<ReturnType<typeof own>>, saleId: string) {
+  const pax = (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[];
+  if (!pax.length || !d.accountId) return;
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { id: saleId }, select: { occurredAt: true } });
+  await prisma.$transaction([
+    prisma.accountBeneficiary.deleteMany({ where: { saleId, userId } }),
+    prisma.accountBeneficiary.createMany({ data: pax.map((p) => ({ userId, accountId: d.accountId!, saleId, name: p.name.trim(), document: p.cpf.replace(/\D/g, "") || null, usedAt: sale.occurredAt })) }),
+  ]);
 }
 
 /** Bilhete e comprovante da negociação vão para os anexos da venda (sem repetir o que já está lá). */

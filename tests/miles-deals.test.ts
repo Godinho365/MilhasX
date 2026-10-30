@@ -165,6 +165,8 @@ describe("CRM Milhas", () => {
     expect(paid.stage).toBe("PAID");
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true, attachments: { select: { name: true } } } });
     expect(s.attachments.map((a) => a.name).sort()).toEqual(["bilhete.pdf", "pix.pdf"]);
+    // quem ocupa vaga no limite de CPFs é o passageiro emitido, não o comprador (Agência Voa)
+    expect(await prisma.accountBeneficiary.findMany({ where: { saleId: s.id }, select: { name: true, document: true, accountId: true } })).toEqual([{ name: "Ana Souza Lima", document: "12345678909", accountId: lat }]);
     expect(s.totalCents).toBe(26125);
     expect(s.items[0]).toMatchObject({ salePriceCents: 22550, reservation: "ABC123", costs: [{ type: "TAXA_EMBARQUE", amountCents: 3575 }] });
   });
