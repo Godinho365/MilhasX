@@ -57,3 +57,46 @@ export const LATAM_BOOKMARKLET =
   "if(p.email)s(g('passengerInfo_email'),p.email);if(p.phone)s(g('passengerInfo_number'),p.phone);ok++}" +
   "alert(ok+' passageiro(s) preenchido(s).'+(miss?' '+miss+' sem campos na tela: abra esse passageiro na LATAM e clique no favorito de novo.':'')+' Confira os dados antes de continuar.')" +
   "})()";
+
+/** Favorito "Copiar da LATAM": o contrário do de cima. Na tela de Passageiros da LATAM, lê os passageiros
+ *  já preenchidos e copia no mesmo formato, para colar em "Informar passageiros" no MilhasX. Só lê. */
+export const LATAM_COPY_BOOKMARKLET =
+  "javascript:(async()=>{" +
+  // só o domínio da LATAM (e subdomínios) por HTTPS
+  "if(location.protocol!=='https:'||!/(^|\\.)latamairlines\\.com$/.test(location.hostname)){alert('Abra a tela de Passageiros da LATAM e clique de novo.');return}" +
+  "const list=[];" +
+  "for(let i=0;i<9;i++){const g=k=>document.getElementById('passenger-'+i+'_'+k);if(!g('firstName'))break;" +
+  "const v=k=>(g(k)&&g(k).value||'').trim();" +
+  "const gb=document.querySelector('[data-testid=\"passenger-'+i+'_gender-container\"]');const gt=gb?gb.innerText.trim():'';" +
+  "const p={firstName:v('firstName'),lastName:v('lastName'),birthDate:v('dateOfBirth'),cpf:v('taxDocument').replace(/\\D/g,'')};" +
+  "if(gt==='Masculino'||gt==='Feminino')p.gender=gt;if(v('passengerInfo_email'))p.email=v('passengerInfo_email');if(v('passengerInfo_number'))p.phone=v('passengerInfo_number').replace(/\\D/g,'');" +
+  "if(p.firstName||p.cpf)list.push(p)}" +
+  "if(!list.length){alert('Nenhum passageiro preenchido nesta tela.');return}" +
+  "const t=JSON.stringify({milhasx:'latam',passengers:list});" +
+  "try{await navigator.clipboard.writeText(t);alert(list.length+' passageiro(s) copiado(s). No MilhasX, cole em Informar passageiros.')}" +
+  "catch(e){prompt('Copie o texto abaixo (Ctrl+C) e cole em Informar passageiros no MilhasX:',t)}" +
+  "})()";
+
+/** Lê o texto copiado pelo favorito "Copiar da LATAM" (ou "Copiar para a LATAM"); null se não for desse formato. */
+export function fromLatamPayload(text: string) {
+  let d: { milhasx?: string; passengers?: LatamPassenger[] };
+  try {
+    d = JSON.parse(text.trim());
+  } catch {
+    return null;
+  }
+  if (!d || d.milhasx !== "latam" || !Array.isArray(d.passengers)) return null;
+  return d.passengers.map((p) => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(p.birthDate ?? "");
+    return {
+      name: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim(),
+      firstName: p.firstName ?? "",
+      lastName: p.lastName ?? "",
+      cpf: (p.cpf ?? "").replace(/\D/g, ""),
+      birthDate: m ? `${m[3]}-${m[2]}-${m[1]}` : "",
+      gender: (p.gender === "Feminino" ? "F" : p.gender === "Masculino" ? "M" : "") as "M" | "F" | "",
+      email: p.email ?? "",
+      phone: p.phone ?? "",
+    };
+  });
+}

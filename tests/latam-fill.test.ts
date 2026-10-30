@@ -1,6 +1,6 @@
 // Favorito "Preencher LATAM": texto copiado e código do favorito.
 import { describe, it, expect } from "vitest";
-import { LATAM_BOOKMARKLET, latamPayload, latamPhone, splitName } from "@/domain/latam-fill";
+import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload, latamPhone, splitName } from "@/domain/latam-fill";
 
 describe("preencher LATAM", () => {
   it("separa nome e sobrenome como a LATAM pede", () => {
@@ -42,5 +42,30 @@ describe("preencher LATAM", () => {
   it("o código do favorito é JavaScript válido", () => {
     expect(LATAM_BOOKMARKLET.startsWith("javascript:")).toBe(true);
     expect(() => new Function(LATAM_BOOKMARKLET.slice("javascript:".length))).not.toThrow();
+  });
+});
+
+describe("copiar da LATAM", () => {
+  it("lê o texto copiado de volta para o formato dos passageiros", () => {
+    const t = JSON.stringify({ milhasx: "latam", passengers: [{ firstName: "SUZINEI", lastName: "SCHNEIDER", birthDate: "18/04/1978", cpf: "95768599053", gender: "Feminino", email: "x@y.com", phone: "49999053238" }] });
+    expect(fromLatamPayload(t)).toEqual([{ name: "SUZINEI SCHNEIDER", firstName: "SUZINEI", lastName: "SCHNEIDER", cpf: "95768599053", birthDate: "1978-04-18", gender: "F", email: "x@y.com", phone: "49999053238" }]);
+    expect(fromLatamPayload("Nicolas\nCPF 037.355.180-01")).toBeNull();
+  });
+
+  it("o favorito lê os campos da tela da LATAM e só roda nela", async () => {
+    const body = LATAM_COPY_BOOKMARKLET.slice("javascript:".length);
+    const fields: Record<string, string> = { firstName: "Nicolas", lastName: "Eduardo Amaral", dateOfBirth: "23/03/2002", taxDocument: "037.355.180-01", passengerInfo_email: "n@x.com", passengerInfo_number: "(21) 99493-4776" };
+    const doc = {
+      getElementById: (id: string) => { const m = /^passenger-(\d+)_(.+)$/.exec(id); return m && m[1] === "0" && m[2]! in fields ? { value: fields[m[2]!] } : null; },
+      querySelector: () => ({ innerText: "Masculino" }),
+    };
+    const run = async (hostname: string) => {
+      let copied = "";
+      const nav = { clipboard: { writeText: async (t: string) => { copied = t; } } };
+      await new Function("location", "alert", "navigator", "document", "prompt", `return ${body}`)({ protocol: "https:", hostname }, () => {}, nav, doc, () => "");
+      return copied;
+    };
+    expect(await run("falso-latamairlines.com")).toBe("");
+    expect(fromLatamPayload(await run("www.latamairlines.com"))).toEqual([{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "03735518001", birthDate: "2002-03-23", gender: "M", email: "n@x.com", phone: "21994934776" }]);
   });
 });

@@ -11,7 +11,7 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
 import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
-import { LATAM_BOOKMARKLET, latamPayload } from "@/domain/latam-fill";
+import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
 
 type Customer = { id: string; name: string; phone: string | null };
@@ -317,7 +317,8 @@ function IssuedMessage({ deal }: { deal: DealView }) {
  *  não aceita links "javascript:" (é o que um favorito é). */
 function LatamBookmarklet({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLAnchorElement>(null);
-  useEffect(() => { ref.current?.setAttribute("href", LATAM_BOOKMARKLET); }, []);
+  const refCopy = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { ref.current?.setAttribute("href", LATAM_BOOKMARKLET); refCopy.current?.setAttribute("href", LATAM_COPY_BOOKMARKLET); }, []);
   return (
     <Modal open onClose={onClose} title="Favorito Preencher LATAM" footer={<button className="btn-primary" onClick={onClose}>Entendi</button>}>
       <div className="space-y-4 text-sm">
@@ -330,7 +331,17 @@ function LatamBookmarklet({ onClose }: { onClose: () => void }) {
           <li>Aqui no CRM, clique em <b>Copiar para a LATAM</b> na negociação.</li>
           <li>Na tela <b>Passageiros</b> da LATAM, clique no favorito <b>Preencher LATAM</b>. Se o navegador pedir, permita ler a área de transferência.</li>
         </ol>
-        <p className="text-xs text-muted">Ele preenche nome, sobrenome, nascimento e CPF de cada passageiro. Nada é enviado: confira o sexo e os demais campos e continue na LATAM.</p>
+        <p className="text-xs text-muted">Ele preenche nome, sobrenome, nascimento, CPF, sexo, e-mail e telefone de cada passageiro. Nada é enviado: confira e continue na LATAM.</p>
+        <div className="space-y-2 border-t border-line pt-4">
+          <p><b>O passageiro já está preenchido na LATAM?</b> Use o caminho inverso:</p>
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Arraste também este botão para a barra de favoritos:
+              <div className="mt-2"><a ref={refCopy} draggable onClick={(e) => { e.preventDefault(); toast("Arraste o botão para a barra de favoritos", "error"); }} className="inline-flex items-center gap-2 rounded-xl border border-line bg-panel2 px-4 py-2 font-semibold">⇩ Copiar da LATAM</a></div>
+            </li>
+            <li>Na tela <b>Passageiros</b> da LATAM, clique em <b>Copiar da LATAM</b>.</li>
+            <li>Aqui na negociação, em <b>Informar passageiros</b>, cole no campo de texto: os passageiros se preenchem sozinhos.</li>
+          </ol>
+        </div>
       </div>
     </Modal>
   );
@@ -351,8 +362,9 @@ function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (i: number, p: Partial<PaxRow>) => setRows((l) => l.map((r, j) => (j === i ? { ...r, ...p } : r)));
-  function read() {
-    const found = parsePassengersText(text);
+  function read(value = text) {
+    // texto do favorito "Copiar da LATAM" (passageiros já preenchidos na tela da LATAM) ou mensagem livre
+    const found = fromLatamPayload(value) ?? parsePassengersText(value);
     if (!found.length) return toast("Não encontrei CPF ou data de nascimento no texto", "error");
     setRows(found.map(toRow));
     toast(`${found.length} ${found.length === 1 ? "passageiro lido" : "passageiros lidos"}: confira os campos`);
@@ -372,10 +384,10 @@ function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved
   return (
     <div className="space-y-3 rounded-lg bg-panel2 p-3" aria-label="Informar passageiros">
       <label className="block text-xs">
-        <span className="mb-1 block text-muted">Colar a mensagem do comprador (WhatsApp, Telegram…)</span>
-        <textarea className="input min-h-[80px] text-sm" value={text} onChange={(e) => setText(e.target.value)} placeholder={"Nicolas Eduardo Amaral\nCPF 037.355.180-01\nNasc. 23/03/2002"} aria-label="Mensagem do comprador" />
+        <span className="mb-1 block text-muted">Colar a mensagem do comprador (WhatsApp, Telegram…) ou o que o favorito <b>Copiar da LATAM</b> copiou</span>
+        <textarea className="input min-h-[80px] text-sm" value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const v = e.clipboardData.getData("text"); if (fromLatamPayload(v)) { e.preventDefault(); setText(v); read(v); } }} placeholder={"Nicolas Eduardo Amaral\nCPF 037.355.180-01\nNasc. 23/03/2002"} aria-label="Mensagem do comprador" />
       </label>
-      <button type="button" className="btn-ghost h-8 text-xs" onClick={read} disabled={!text.trim()}>Ler texto</button>
+      <button type="button" className="btn-ghost h-8 text-xs" onClick={() => read()} disabled={!text.trim()}>Ler texto</button>
       {rows.map((r, i) => (
         <fieldset key={i} className="space-y-2 rounded-lg border border-line p-2">
           <legend className="flex w-full items-center justify-between px-1 text-xs font-semibold">
@@ -492,8 +504,10 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
           Ainda sem dados dos passageiros.
           <button type="button" className="text-accent-light hover:underline disabled:opacity-60" onClick={() => void reload(true)} disabled={checking}>{checking ? "Verificando…" : "Verificar agora"}</button>
           <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Informar passageiros</button>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => setInstall(true)}>Já está na LATAM?</button>
         </p>
       )}
+      {install && deal.passengersData.length === 0 && !editingPax && <LatamBookmarklet onClose={() => setInstall(false)} />}
     </section>
   );
 }
