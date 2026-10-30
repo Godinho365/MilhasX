@@ -10,6 +10,7 @@ import * as deals from "@/app/api/miles-deals/route";
 import * as deal from "@/app/api/miles-deals/[id]/route";
 import * as move from "@/app/api/miles-deals/[id]/move/route";
 import * as share from "@/app/api/miles-deals/[id]/share/route";
+import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
 import { publicDeal } from "@/server/services/miles-deals";
@@ -127,6 +128,17 @@ describe("CRM Milhas", () => {
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
     expect(s.totalCents).toBe(26125);
     expect(s.items[0]).toMatchObject({ salePriceCents: 22550, reservation: "ABC123", costs: [{ type: "TAXA_EMBARQUE", amountCents: 3575 }] });
+  });
+
+  it("usuário informa os passageiros que o comprador mandou pelo WhatsApp (e pode limpar)", async () => {
+    const d = (await newDeal({ accountId: lat, points: 8673, saleCpmCents: 2600, passengers: 1 })).data.item;
+    const r = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "037.355.180-01", birthDate: "2002-03-23", gender: "M", phone: "(21) 99493-4776" }] }, { id: d.id });
+    expect(r.status).toBe(200);
+    expect(r.data.item.passengersData).toEqual([{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "03735518001", birthDate: "2002-03-23", gender: "M", phone: "(21) 99493-4776" }]);
+    expect(r.data.item.passengersAt).toBeTruthy();
+    expect((await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana", cpf: "123", birthDate: "2002-03-23" }] }, { id: d.id })).status).toBe(400);
+    const cleared = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [] }, { id: d.id });
+    expect(cleared.data.item).toMatchObject({ passengersData: [], passengersAt: null });
   });
 
   it("isola por usuário", async () => {

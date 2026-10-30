@@ -220,6 +220,16 @@ export async function publicDeal(slug: string, token: string) {
 }
 export type PublicDeal = NonNullable<Awaited<ReturnType<typeof publicDeal>>>["deal"];
 
+const cleanPassenger = (p: Passenger) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined });
+
+/** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */
+export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
+  const d = await own(userId, id);
+  const data = passengers.map(cleanPassenger);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
+  return getDeal(userId, id);
+}
+
 /** O comprador envia os passageiros; pode corrigir até a emissão (localizador informado). */
 export async function submitDealPassengers(slug: string, token: string, passengers: Passenger[], ip: string) {
   const d = await dealByToken(slug, token);
@@ -230,7 +240,7 @@ export async function submitDealPassengers(slug: string, token: string, passenge
   const ipHash = sha(`deal:${ip}`).slice(0, 32);
   if ((await prisma.loginAttempt.count({ where: { email: key, ip: ipHash, createdAt: { gte: new Date(Date.now() - 3600_000) } } })) >= SUBMITS_PER_HOUR) throw new DomainError(429, "Muitos envios. Tente de novo mais tarde.");
   await prisma.loginAttempt.create({ data: { email: key, ip: ipHash, success: true } });
-  const data = passengers.map((p) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined }));
+  const data = passengers.map(cleanPassenger);
   await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: new Date() } });
   await prisma.notification.create({ data: { userId: d.userId, title: "Passageiros recebidos", body: `${d.customerName} enviou ${data.length === 1 ? "o passageiro" : `${data.length} passageiros`} da negociação #${d.number} (CRM Milhas).` } });
   return { ok: true };

@@ -9,7 +9,7 @@ import { fmtBRL, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
-import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
+import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
 import { LATAM_BOOKMARKLET, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
@@ -53,11 +53,17 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   const manualProfit = profitIn.trim() ? parseBRLToCents(profitIn) : null;
   const profit = manualProfit ?? estimated;
 
+  // Link do pedido da LATAM (…?orderId=LA9571716CUFU): o orderId vira o localizador, se ainda não houver um
+  function changeOrderLink(v: string) {
+    setOrderLink(v);
+    const id = v.match(/[?&]orderId=([A-Za-z0-9]+)/)?.[1];
+    if (id && !locator.trim()) setLocator(id.toUpperCase());
+  }
   // Colar o que o comprador mandou: link do pedido, "8.673K", "1CPF", "Taxas: R$35,75"
   function onPaste(text: string) {
     setPaste(text);
     const p = parseDealPaste(text);
-    if (p.orderLink) setOrderLink(p.orderLink);
+    if (p.orderLink) changeOrderLink(p.orderLink);
     if (p.points && !locked) setPoints(pts(p.points));
     if (p.passengers) setPassengers(String(p.passengers));
     if (p.taxesCents != null && !locked) setTaxes(fmtBRL(p.taxesCents));
@@ -163,7 +169,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
           <Field label="Taxas (R$)"><input className="input" inputMode="decimal" value={taxes} onChange={(e) => setTaxes(e.target.value)} disabled={locked} placeholder="R$ 0,00" title="Pagas por você na emissão e cobradas do comprador" /></Field>
           <Field label="Link do pedido">
             <div className="flex gap-1.5">
-              <input className="input min-w-0 flex-1" value={orderLink} onChange={(e) => setOrderLink(e.target.value)} placeholder="https://…" inputMode="url" />
+              <input className="input min-w-0 flex-1" value={orderLink} onChange={(e) => changeOrderLink(e.target.value)} placeholder="https://…" inputMode="url" />
               {/^https?:\/\//.test(orderLink) && <a href={orderLink} target="_blank" rel="noopener noreferrer" className="btn-ghost h-10 w-10 shrink-0 px-0" aria-label="Abrir o link do pedido"><ExternalLink className="h-4 w-4" /></a>}
             </div>
           </Field>
@@ -273,6 +279,73 @@ function LatamBookmarklet({ onClose }: { onClose: () => void }) {
   );
 }
 
+/* ---------------- Passageiros informados pelo usuário ---------------- */
+
+type PaxRow = { firstName: string; lastName: string; cpf: string; birthDate: string; gender: "M" | "F" | ""; email: string; phone: string };
+const toRow = (p: Passenger): PaxRow => {
+  const parts = p.name.trim().split(/\s+/);
+  return { firstName: p.firstName ?? parts[0] ?? "", lastName: p.lastName ?? parts.slice(1).join(" "), cpf: p.cpf, birthDate: p.birthDate, gender: p.gender ?? "", email: p.email ?? "", phone: p.phone ?? "" };
+};
+const emptyRow = (): PaxRow => ({ firstName: "", lastName: "", cpf: "", birthDate: "", gender: "", email: "", phone: "" });
+
+/** O comprador mandou os dados pelo WhatsApp/Telegram: colar a mensagem (o sistema separa os campos) ou digitar. */
+function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved: (d: DealView) => void; onCancel: () => void }) {
+  const [rows, setRows] = useState<PaxRow[]>(() => (deal.passengersData.length ? deal.passengersData.map(toRow) : Array.from({ length: deal.passengers ?? 1 }, emptyRow)));
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (i: number, p: Partial<PaxRow>) => setRows((l) => l.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  function read() {
+    const found = parsePassengersText(text);
+    if (!found.length) return toast("Não encontrei CPF ou data de nascimento no texto", "error");
+    setRows(found.map(toRow));
+    toast(`${found.length} ${found.length === 1 ? "passageiro lido" : "passageiros lidos"}: confira os campos`);
+  }
+  async function save() {
+    const bad = rows.findIndex((r) => !r.firstName.trim() || !r.lastName.trim() || r.cpf.replace(/\D/g, "").length !== 11 || !r.birthDate);
+    if (bad >= 0) return toast(`Passageiro ${bad + 1}: preencha nome, sobrenome, CPF (11 dígitos) e nascimento`, "error");
+    setBusy(true);
+    const passengers = rows.map((r) => ({ ...r, name: `${r.firstName.trim()} ${r.lastName.trim()}`, gender: r.gender || undefined }));
+    const res = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/passengers`, "PUT", { passengers });
+    setBusy(false);
+    if (!res.ok) return toast(res.erro, "error");
+    toast("Passageiros salvos");
+    onSaved(res.data.item);
+  }
+  const inp = "input h-9 text-sm";
+  return (
+    <div className="space-y-3 rounded-lg bg-panel2 p-3" aria-label="Informar passageiros">
+      <label className="block text-xs">
+        <span className="mb-1 block text-muted">Colar a mensagem do comprador (WhatsApp, Telegram…)</span>
+        <textarea className="input min-h-[80px] text-sm" value={text} onChange={(e) => setText(e.target.value)} placeholder={"Nicolas Eduardo Amaral\nCPF 037.355.180-01\nNasc. 23/03/2002"} aria-label="Mensagem do comprador" />
+      </label>
+      <button type="button" className="btn-ghost h-8 text-xs" onClick={read} disabled={!text.trim()}>Ler texto</button>
+      {rows.map((r, i) => (
+        <fieldset key={i} className="space-y-2 rounded-lg border border-line p-2">
+          <legend className="flex w-full items-center justify-between px-1 text-xs font-semibold">
+            <span>Passageiro {i + 1}</span>
+            {rows.length > 1 && <button type="button" className="text-muted hover:text-zinc-100" onClick={() => setRows((l) => l.filter((_, j) => j !== i))} aria-label={`Remover passageiro ${i + 1}`}><Trash2 className="h-3.5 w-3.5" /></button>}
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input className={inp} value={r.firstName} onChange={(e) => set(i, { firstName: e.target.value })} placeholder="Nome *" aria-label={`Nome do passageiro ${i + 1}`} />
+            <input className={inp} value={r.lastName} onChange={(e) => set(i, { lastName: e.target.value })} placeholder="Sobrenome *" aria-label={`Sobrenome do passageiro ${i + 1}`} />
+            <input className={inp} value={r.cpf} onChange={(e) => set(i, { cpf: e.target.value })} placeholder="CPF *" inputMode="numeric" aria-label={`CPF do passageiro ${i + 1}`} />
+            <input className={inp} type="date" value={r.birthDate} onChange={(e) => set(i, { birthDate: e.target.value })} aria-label={`Nascimento do passageiro ${i + 1}`} />
+            <select className={inp} value={r.gender} onChange={(e) => set(i, { gender: e.target.value as PaxRow["gender"] })} aria-label={`Sexo do passageiro ${i + 1}`}><option value="">Sexo</option><option value="M">Masculino</option><option value="F">Feminino</option></select>
+            <input className={inp} value={r.phone} onChange={(e) => set(i, { phone: e.target.value })} placeholder="Telefone" inputMode="tel" aria-label={`Telefone do passageiro ${i + 1}`} />
+            <input className={`${inp} sm:col-span-2`} type="email" value={r.email} onChange={(e) => set(i, { email: e.target.value })} placeholder="E-mail" aria-label={`E-mail do passageiro ${i + 1}`} />
+          </div>
+        </fieldset>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        {rows.length < 9 && <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setRows((l) => [...l, emptyRow()])}><Plus className="mr-1 inline h-3.5 w-3.5" />Adicionar passageiro</button>}
+        <span className="flex-1" />
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="btn-primary h-8 text-xs" onClick={save} disabled={busy}>{busy ? "Salvando…" : "Salvar passageiros"}</button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Página do comprador ---------------- */
 
 const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
@@ -315,6 +388,8 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
   }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
   const [install, setInstall] = useState(false);
+  const [editingPax, setEditingPax] = useState(false);
+  const paxSaved = (d: DealView) => { setDeal(d); setEditingPax(false); refreshSafe(router); };
   const latamLink = deal.orderLink && /latamairlines\.com/.test(deal.orderLink) ? deal.orderLink : null;
   return (
     <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Página do comprador">
@@ -325,9 +400,14 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
       </div>
       <p className="text-xs text-muted">O comprador vê o resumo (milhas, CPFs, taxas e total), envia os dados dos passageiros e, com o localizador salvo, vê a emissão confirmada.</p>
       {link && <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px] text-muted">{link}</p>}
-      {deal.passengersData.length > 0 ? (
+      {editingPax ? (
+        <PassengersEditor deal={deal} onSaved={paxSaved} onCancel={() => setEditingPax(false)} />
+      ) : deal.passengersData.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-xs text-muted">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</p>
+          <p className="flex items-center gap-2 text-xs text-muted">
+            <span className="flex-1">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</span>
+            <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Editar passageiros</button>
+          </p>
           <div className="flex flex-wrap items-center gap-2" aria-label="Preencher na LATAM">
             <button type="button" className="btn-primary h-8 text-xs" onClick={() => copy(latamPayload(deal.passengersData), "Passageiros para a LATAM")}><Copy className="h-3.5 w-3.5" />Copiar para a LATAM</button>
             {latamLink && <a className="btn-ghost h-8 text-xs" href={latamLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir na LATAM</a>}
@@ -354,6 +434,7 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
         <p className="flex items-center gap-2 text-xs text-amber-300">
           Ainda sem dados dos passageiros.
           <button type="button" className="text-accent-light hover:underline disabled:opacity-60" onClick={() => void reload(true)} disabled={checking}>{checking ? "Verificando…" : "Verificar agora"}</button>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Informar passageiros</button>
         </p>
       )}
     </section>

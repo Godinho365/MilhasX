@@ -436,8 +436,7 @@ export const dealSchema = z.object({
   notes: optText(2000),
 });
 export const dealMoveSchema = z.object({ stage: z.enum(["NEW", "NEGOTIATION", "AWAITING", "ISSUED", "PAID"]), position: z.number().int().min(0).max(10_000).optional() });
-export const dealPassengersSchema = z.object({
-  passengers: z.array(z.object({
+const dealPassengerSchema = z.object({
     name: z.string().trim().min(5, "Informe o nome completo").max(120),
     firstName: z.string().trim().min(2, "Informe o nome").max(60).optional(),
     lastName: z.string().trim().min(2, "Informe o sobrenome").max(60).optional(),
@@ -446,9 +445,13 @@ export const dealPassengersSchema = z.object({
     email: z.string().trim().email("E-mail inválido").max(200).optional().or(z.literal("")),
     phone: z.string().trim().max(30).optional(),
     gender: z.enum(["M", "F"]).optional().or(z.literal("")),
-  })).min(1).max(9),
+});
+export const dealPassengersSchema = z.object({
+  passengers: z.array(dealPassengerSchema).min(1).max(9),
   website: z.string().max(0).optional(), // honeypot
 });
+/** Passageiros informados pelo próprio usuário (o comprador mandou pelo WhatsApp/Telegram); lista vazia limpa. */
+export const ownerPassengersSchema = z.object({ passengers: z.array(dealPassengerSchema).max(9) });
 export const orderArchiveSchema = z.object({ reason: z.string().trim().min(1).max(120) });
 const searchParamsSchema = z.object({ origin: iataCode, destination: iataCode, departDate: ymd, returnDate: ymd.nullable().optional(), adults: z.number().int().min(1).max(9), children: z.number().int().min(0).max(8), infants: z.number().int().min(0).max(8), cabin: z.enum(["ECONOMY", "PREMIUM", "BUSINESS", "FIRST"]) });
 export const flightSearchSchema = z.object({ params: searchParamsSchema, programs: z.array(z.string().max(30)).max(40) });
