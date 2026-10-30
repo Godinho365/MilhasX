@@ -420,9 +420,22 @@ export const dealSchema = z.object({
   saleCpmCents: z.number().int().min(1).max(1_000_000).nullable().optional(),
   profitCents: z.number().int().min(-100_000_000_00).max(100_000_000_00).nullable().optional(),
   passengers: z.number().int().min(1).max(99).nullable().optional(),
+  taxesCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  orderLink: z.string().trim().url("Link inválido").max(1000).nullable().optional().or(z.literal("")),
+  locator: optText(20),
   notes: optText(2000),
 });
 export const dealMoveSchema = z.object({ stage: z.enum(["NEW", "NEGOTIATION", "AWAITING", "ISSUED", "PAID"]), position: z.number().int().min(0).max(10_000).optional() });
+export const dealPassengersSchema = z.object({
+  passengers: z.array(z.object({
+    name: z.string().trim().min(5, "Informe o nome completo").max(120),
+    cpf: z.string().trim().refine((v) => v.replace(/\D/g, "").length === 11, "CPF precisa ter 11 dígitos"),
+    birthDate: ymd,
+    email: z.string().trim().email("E-mail inválido").max(200).optional().or(z.literal("")),
+    phone: z.string().trim().max(30).optional(),
+  })).min(1).max(9),
+  website: z.string().max(0).optional(), // honeypot
+});
 export const orderArchiveSchema = z.object({ reason: z.string().trim().min(1).max(120) });
 const searchParamsSchema = z.object({ origin: iataCode, destination: iataCode, departDate: ymd, returnDate: ymd.nullable().optional(), adults: z.number().int().min(1).max(9), children: z.number().int().min(0).max(8), infants: z.number().int().min(0).max(8), cabin: z.enum(["ECONOMY", "PREMIUM", "BUSINESS", "FIRST"]) });
 export const flightSearchSchema = z.object({ params: searchParamsSchema, programs: z.array(z.string().max(30)).max(40) });
