@@ -13,6 +13,7 @@ import { Modal, Field, Alert } from "@/components/ui";
 import { Collapsible, PointsInput, parsePts } from "@/components/form-parts";
 import { toast, confirmDialog } from "@/components/feedback";
 import { fmtSize } from "../programs/holder-dialog";
+import type { SaleView } from "@/server/services/sales";
 
 export type SaleAccount = { id: string; label: string; balance: number; costCents: number };
 export type SaleSupplier = { id: string; label: string; balance: number; priceCpmCents: number };
@@ -57,6 +58,33 @@ const newItem = (kind: Kind = "FLIGHT"): Item => ({
   open: { costs: false, client: true, travel: kind === "FLIGHT", other: false },
 });
 const money = (v: string) => (v.trim() ? parseBRLToCents(v) : 0);
+const brl = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+/** Item de uma venda já salva, para editar. O valor do milheiro só é usado se reproduz o preço exato. */
+function fromView(it: SaleView["items"][number]): Item {
+  const cpmCents = it.points > 0 ? Math.round((it.salePriceCents * 1000) / it.points) : 0;
+  const byCpm = it.issuedWith === "POINTS" && cpmCents > 0 && Math.round((it.points * cpmCents) / 1000) === it.salePriceCents;
+  return {
+    kind: it.kind as Kind,
+    issuedWith: it.issuedWith as Item["issuedWith"],
+    points: it.points ? fmtPts(it.points) : "",
+    price: brl(it.salePriceCents),
+    byCpm,
+    cpm: byCpm ? brl(cpmCents) : "",
+    cashCost: it.cashCostCents ? brl(it.cashCostCents) : "",
+    costs: it.costs.length ? it.costs.map((c) => ({ type: c.type, amount: brl(c.amountCents), cardId: c.cardId ?? "" })) : [emptyCost()],
+    clientType: it.clientType as Item["clientType"],
+    customerIds: it.customerIds,
+    passengers: it.passengers != null ? String(it.passengers) : "",
+    reservation: it.reservation ?? "",
+    origin: it.origin ?? "",
+    destination: it.destination ?? "",
+    departure: it.departureDate?.slice(0, 10) ?? "",
+    ret: it.returnDate?.slice(0, 10) ?? "",
+    description: it.description ?? "",
+    observation: it.observation ?? "",
+    open: { costs: it.costs.length > 0, client: true, travel: it.kind === "FLIGHT", other: !!(it.description || it.observation) },
+  };
+}
 /** Valor dos pontos do item: digitado ou calculado pelo valor do milheiro. */
 function itemPrice(it: Item) {
   if (it.issuedWith === "POINTS" && it.byCpm) return Math.round((parsePts(it.points) * (money(it.cpm) ?? 0)) / 1000);
@@ -106,14 +134,14 @@ function CustomerPicker({ customers, kind, value, onChange, label }: { customers
   );
 }
 
-export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: { accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; onClose: () => void }) {
+export function SaleDialog({ accounts, suppliers, customers, cards, onClose, editing }: { accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; onClose: () => void; editing?: SaleView }) {
   const router = useRouter();
   const [key] = useState(newKey);
-  const [origin, setOrigin] = useState<"OWN" | "SUPPLIER">("OWN");
-  const [accountId, setAccountId] = useState("");
-  const [supplierId, setSupplierId] = useState("");
-  const [date, setDate] = useState(today());
-  const [items, setItems] = useState<Item[]>([newItem()]);
+  const [origin, setOrigin] = useState<"OWN" | "SUPPLIER">((editing?.origin as "OWN" | "SUPPLIER" | undefined) ?? "OWN");
+  const [accountId, setAccountId] = useState(editing?.accountId ?? "");
+  const [supplierId, setSupplierId] = useState(editing?.supplierAccountId ?? "");
+  const [date, setDate] = useState(editing ? editing.date.slice(0, 10) : today());
+  const [items, setItems] = useState<Item[]>(() => (editing ? editing.items.map(fromView) : [newItem()]));
   const [files, setFiles] = useState<File[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
   const [addMenu, setAddMenu] = useState(false);
@@ -136,7 +164,9 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
   const margin = revenue > 0 ? (estimate / revenue) * 100 : null;
   const saleCpm = points > 0 ? (items.reduce((t, it) => t + (it.issuedWith === "POINTS" ? itemPrice(it) : 0), 0) / points) * 1000 : null;
   const showProfit = (acc || sup) && revenue > 0;
-  const available = origin === "OWN" ? acc?.balance : sup?.balance;
+  // na edição, os pontos que esta venda já tirou da conta voltam a contar como disponíveis
+  const giveBack = editing && editing.origin === origin && (origin === "OWN" ? editing.accountId === accountId : editing.supplierAccountId === supplierId) ? editing.points : 0;
+  const available = origin === "OWN" ? (acc ? acc.balance + giveBack : undefined) : sup ? sup.balance + giveBack : undefined;
   const filesSize = files.reduce((t, f) => t + f.size, 0);
 
   function addFiles(list: FileList | File[]) {
@@ -195,7 +225,7 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
     }
     setBusy(true);
     setErro("");
-    const r = await api<{ item: { id: string } }>("/api/sales", "POST", { origin, accountId: origin === "OWN" ? accountId : null, supplierAccountId: origin === "SUPPLIER" ? supplierId : null, occurredAt: date, items: payload, idempotencyKey: key });
+    const r = await api<{ item: { id: string } }>(editing ? `/api/sales/${editing.id}` : "/api/sales", editing ? "PATCH" : "POST", { origin, accountId: origin === "OWN" ? accountId : null, supplierAccountId: origin === "SUPPLIER" ? supplierId : null, occurredAt: date, items: payload, idempotencyKey: key });
     if (!r.ok) { setBusy(false); return setErro(r.erro); }
     const failures: string[] = [];
     for (const f of files) {
@@ -203,7 +233,7 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
       if (!res.ok) failures.push(`${f.name}: ${(await res.json().catch(() => ({}))).erro ?? "falha no envio"}`);
     }
     setBusy(false);
-    toast(failures.length ? `Venda criada, mas: ${failures.join("; ")}` : "Venda registrada", failures.length ? "error" : undefined);
+    toast(failures.length ? `Venda salva, mas: ${failures.join("; ")}` : editing ? "Venda atualizada" : "Venda registrada", failures.length ? "error" : undefined);
     onClose();
     refreshSafe(router);
   }
@@ -213,7 +243,7 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
       open
       onClose={requestClose}
       size="lg"
-      title="Nova venda"
+      title={editing ? "Editar venda" : "Nova venda"}
       footer={
         <>
           <div className="mr-auto flex gap-6 text-sm">
@@ -229,7 +259,7 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose }: {
           )}
           </div>
           <button type="button" className="btn-ghost" onClick={requestClose}>Cancelar</button>
-          <button form="sale-form" className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Criar venda"}</button>
+          <button form="sale-form" className="btn-primary" disabled={busy}>{busy ? "Salvando…" : editing ? "Salvar alterações" : "Criar venda"}</button>
         </>
       }
     >

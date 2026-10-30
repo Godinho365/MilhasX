@@ -11,11 +11,12 @@ import { airportLabel } from "@/domain/airports";
 import { EntryIcon } from "@/components/entry-meta";
 import { ProgramDot } from "@/components/stat";
 import { openEntryForm } from "@/components/entry-forms";
-import { CostRows, costsPayload, emptyCost, type CostRow, type CardOpt } from "@/components/form-parts";
+import { CostRows, costsPayload, emptyCost, PaymentFields, emptyPay, toPlan, paymentDetail, type CostRow, type CardOpt, type PayState } from "@/components/form-parts";
+import { planCost, scaleCosts } from "@/domain/installments";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 
-type Row = { id: string; date: string; program: string; holder: string; color: string; type: EntryType; description: string; points: number; costCents: number; inputCostCents: number; status: string; grouped: boolean; ignored: boolean };
+type Row = { id: string; date: string; program: string; holder: string; color: string; type: EntryType; description: string; points: number; costCents: number; inputCostCents: number; status: string; grouped: boolean; groupId: string | null; ignored: boolean };
 type Opt = { id: string; name: string };
 
 const OPS: [string, string][] = [
@@ -34,6 +35,12 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
   const [filters, setFilters] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [details, setDetails] = useState<Row | null>(null);
+  // Venda e transferência são editadas inteiras, no formulário delas; o resto, aqui mesmo
+  const editRow = (row: Row) => {
+    if (row.groupId && row.type === "SALE") nav(`/app/sales?edit=${encodeURIComponent(row.groupId)}`);
+    else if (row.groupId) openEntryForm("transfer", undefined, row.groupId);
+    else setEditing(row);
+  };
   const [menu, setMenu] = useState<{ row: Row; top: number; right: number } | null>(null);
   const opened = useRef(false);
 
@@ -296,7 +303,7 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-48 animate-pop-in rounded-xl border border-line bg-panel2 p-1 text-left shadow-xl shadow-black/40" onClick={(e) => e.stopPropagation()}>
           {menuItem(<Eye className="h-4 w-4" />, "Ver detalhes", () => setDetails(menu.row))}
           {menu.row.status === "PENDING" && menuItem(<CheckCheck className="h-4 w-4 text-ok" />, "Marcar recebido", () => confirmPending([menu.row.id]))}
-          {!menu.row.grouped && menuItem(<Pencil className="h-4 w-4" />, "Editar", () => setEditing(menu.row))}
+          {menuItem(<Pencil className="h-4 w-4" />, "Editar", () => editRow(menu.row))}
           {!menu.row.grouped && MANUAL.has(menu.row.type) && menuItem(<Copy className="h-4 w-4" />, "Duplicar", () => duplicate(menu.row))}
           {menuItem(<EyeOff className="h-4 w-4" />, menu.row.ignored ? "Voltar aos relatórios" : "Ignorar nos relatórios", () => toggleIgnored(menu.row))}
           <div className="my-1 border-t border-line" />
@@ -304,7 +311,7 @@ export function EntriesView({ items, programs, accounts, cards, exportHref, open
         </div>
       )}
       {filters && <FiltersDialog accounts={accounts} cards={cards} onClose={() => setFilters(false)} />}
-      {details && <DetailsDialog row={details} onClose={() => setDetails(null)} onEdit={() => { setEditing(details); setDetails(null); }} />}
+      {details && <DetailsDialog row={details} onClose={() => setDetails(null)} onEdit={() => { editRow(details); setDetails(null); }} />}
       {editing && <EditDialog row={editing} cards={cards} onClose={() => setEditing(null)} />}
     </>
   );
@@ -434,7 +441,7 @@ function DetailsDialog({ row, onClose, onEdit }: { row: Row; onClose: () => void
       onClose={onClose}
       size="sm"
       title="Detalhes do lançamento"
-      footer={<>{!row.grouped && <button className="btn-ghost mr-auto" onClick={onEdit}><Pencil className="h-4 w-4" />Editar</button>}<button className="btn-primary" onClick={onClose}>Fechar</button></>}
+      footer={<><button className="btn-ghost mr-auto" onClick={onEdit}><Pencil className="h-4 w-4" />Editar</button><button className="btn-primary" onClick={onClose}>Fechar</button></>}
     >
       {erro && <Alert>{erro}</Alert>}
       <div className="space-y-4">
@@ -513,11 +520,20 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
   const [busy, setBusy] = useState(false);
   const types = costTypesFor(row.type);
   const [costs, setCosts] = useState<CostRow[] | null>(types.length ? null : []);
+  const [pay, setPay] = useState<PayState>(emptyPay);
+  const credit = row.points > 0;
   useEffect(() => {
     if (!types.length) return;
     api<Detail>(`/api/entries/${row.id}`).then((r) => {
       if (!r.ok) return setErro(r.erro);
-      const list = r.data.entry.costs;
+      let list = r.data.entry.costs;
+      // Compra parcelada: mostra o valor cheio nas linhas e refaz o parcelamento salvo
+      const p = (r.data.entry.details as { payment?: { installments: number; anticipated: boolean; nominalCents: number; paidCents: number } } | null)?.payment;
+      if (credit && p) {
+        list = scaleCosts(list, p.nominalCents);
+        const first = planCost(p.nominalCents, { installments: p.installments, anticipate: false, payoffCents: null }).firstCents;
+        setPay({ installments: p.installments, anticipate: p.anticipated, payoff: p.anticipated ? ((p.paidCents - first) / 100).toFixed(2).replace(".", ",") : "" });
+      }
       // Lançamento antigo sem itens: o custo vira uma linha "Outros" para não se perder
       if (!list.length && row.points > 0 && row.inputCostCents > 0) return setCosts([{ type: types.includes("OUTROS") ? "OUTROS" : types[0]!, amount: (row.inputCostCents / 100).toFixed(2).replace(".", ","), cardId: "" }]);
       setCosts(list.length ? list.map((c) => ({ type: c.type as CostType, amount: (c.amountCents / 100).toFixed(2).replace(".", ","), cardId: c.card?.id ?? "" })) : [emptyCost()]);
@@ -532,6 +548,14 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
       const c = costsPayload(costs);
       if (c.erro) return setErro(c.erro);
       body.costs = c.items;
+      if (credit) {
+        const nominal = c.items.reduce((t, x) => t + x.amountCents, 0);
+        const plan = toPlan(pay);
+        const r = planCost(nominal, plan);
+        if (pay.installments > 1 && pay.anticipate && (plan.payoffCents == null || plan.payoffCents > r.restCents)) return setErro("Valor para quitar as parcelas inválido");
+        body.costs = scaleCosts(c.items, r.effectiveCents);
+        body.payment = paymentDetail(pay, nominal);
+      }
     }
     setBusy(true);
     const res = await api(`/api/entries/${row.id}`, "PATCH", body);
@@ -558,6 +582,7 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
           <div className="sm:col-span-2">
             <span className="label">{row.points > 0 ? "Custos" : "Custos do resgate"}</span>
             {costs ? <CostRows rows={costs} setRows={setCosts} types={types} cards={cards} /> : <p className="text-sm text-muted">Carregando custos…</p>}
+            {costs && credit && <div className="mt-3"><PaymentFields totalCents={costsPayload(costs).items.reduce((t, x) => t + x.amountCents, 0)} value={pay} onChange={setPay} /></div>}
           </div>
         )}
       </form>

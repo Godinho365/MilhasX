@@ -50,6 +50,7 @@ export default async function EntriesPage({ searchParams }: { searchParams: Prom
           inputCostCents: e.inputCostCents,
           status: e.status,
           grouped: !!e.groupId,
+          groupId: e.groupId,
           ignored: e.ignored,
         }))}
       />
