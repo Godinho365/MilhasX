@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
+import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
-import { dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
+import { DEAL_STAGES, dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
+import { ANONYMOUS } from "@/domain/beneficiaries";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Pago" a negociação vira uma
 // venda em Vendas (baixa dos pontos da conta escolhida); depois disso não volta de etapa nem muda os
@@ -24,7 +26,12 @@ export type DealInput = {
   notes?: string | null;
 };
 
-const include = { account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } } } as const;
+const include = {
+  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
+  ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
+  receipt: { select: { name: true, size: true, createdAt: true } },
+  sale: { select: { occurredAt: true } }, // data da venda (dashboard)
+} as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
 
 const view = (d: Row) => {
@@ -47,7 +54,13 @@ const view = (d: Row) => {
     taxesCents: d.taxesCents,
     orderLink: d.orderLink,
     locator: d.locator,
+    // só com o bilhete anexado a negociação está emitida
+    ticket: d.ticket ? { name: d.ticket.name, size: d.ticket.size, at: d.ticket.createdAt.toISOString() } : null,
+    // só com o comprovante de pagamento a negociação vai para "Pago" (e vira venda)
+    receipt: d.receipt ? { name: d.receipt.name, size: d.receipt.size, at: d.receipt.createdAt.toISOString() } : null,
     shareToken: d.shareToken,
+    archivedAt: d.archivedAt?.toISOString() ?? null,
+    paidAt: d.sale?.occurredAt.toISOString() ?? null,
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
     chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
@@ -59,6 +72,7 @@ const view = (d: Row) => {
     profitManual: d.profitCents != null,
     profitCents: d.profitCents ?? estimatedProfitCents,
     createdAt: d.createdAt.toISOString(),
+    updatedAt: d.updatedAt.toISOString(),
   };
 };
 export type DealView = ReturnType<typeof view>;
@@ -90,9 +104,73 @@ async function own(userId: string, id: string) {
   return d;
 }
 
-export async function listDeals(userId: string) {
-  const rows = await prisma.milesDeal.findMany({ where: { userId, archivedAt: null }, include, orderBy: [{ position: "asc" }, { createdAt: "desc" }] });
+/** Uma negociação atualizada (a janela aberta busca de novo para ver os passageiros que o comprador enviou). */
+export async function getDeal(userId: string, id: string) {
+  const d = await prisma.milesDeal.findFirst({ where: { id, userId }, include });
+  if (!d) throw new DomainError(404, "Negociação não encontrada");
+  return view(d);
+}
+
+export async function listDeals(userId: string, opts: { archived?: boolean } = {}) {
+  const rows = await prisma.milesDeal.findMany({
+    where: { userId, archivedAt: opts.archived ? { not: null } : null },
+    include,
+    orderBy: opts.archived ? [{ archivedAt: "desc" }] : [{ position: "asc" }, { createdAt: "desc" }],
+  });
   return rows.map(view);
+}
+
+/** Arquiva (sai do Kanban e vai para a Lista) ou reabre a negociação. */
+export async function archiveDeal(userId: string, id: string, archived: boolean) {
+  const d = await own(userId, id);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { archivedAt: archived ? new Date() : null } });
+  return getDeal(userId, id);
+}
+
+/** Indicadores do CRM Milhas no período (pelas datas de criação e de pagamento) e o pipeline atual. */
+export async function milesDealsDashboard(userId: string, days: number | null, now = new Date()) {
+  const since = days ? new Date(now.getTime() - days * 86_400_000) : null;
+  const inPeriod = (iso: string | null) => !!iso && (!since || new Date(iso) >= since);
+  const [active, archived] = await Promise.all([listDeals(userId), listDeals(userId, { archived: true })]);
+  const all = [...active, ...archived];
+  const created = all.filter((d) => inPeriod(d.createdAt));
+  const paid = all.filter((d) => d.stage === "PAID" && inPeriod(d.paidAt));
+  const sum = (l: DealView[], f: (d: DealView) => number | null | undefined) => l.reduce((t, d) => t + (f(d) ?? 0), 0);
+  const revenue = sum(paid, (d) => d.chargeCents);
+  const points = sum(paid, (d) => d.points);
+  const pax = sum(paid, (d) => d.passengersData.length || d.passengers);
+  const profit = sum(paid, (d) => d.profitCents);
+  const byBuyer = new Map<string, { name: string; deals: number; points: number; revenueCents: number }>();
+  for (const d of paid) {
+    const k = d.customerName.trim().toLowerCase();
+    const b = byBuyer.get(k) ?? { name: d.customerName, deals: 0, points: 0, revenueCents: 0 };
+    b.deals++; b.points += d.points ?? 0; b.revenueCents += d.chargeCents ?? 0;
+    byBuyer.set(k, b);
+  }
+  const days0 = (iso: string) => Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000);
+  return {
+    totals: {
+      created: created.length,
+      paid: paid.length,
+      conversionPct: created.length ? Math.round((created.filter((d) => d.stage === "PAID").length / created.length) * 1000) / 10 : null,
+      points,
+      revenueCents: revenue,
+      profitCents: profit,
+      avgTicketCents: paid.length ? Math.round(revenue / paid.length) : null,
+      saleCpmCents: points > 0 ? Math.round((sum(paid, (d) => d.totalCents) * 1000) / points) : null,
+      profitPerCpfCents: pax > 0 ? Math.round(profit / pax) : null,
+      archived: archived.filter((d) => inPeriod(d.archivedAt)).length,
+    },
+    pipeline: DEAL_STAGES.map((stage) => {
+      const l = active.filter((d) => d.stage === stage);
+      return { stage, count: l.length, points: sum(l, (d) => d.points), chargeCents: sum(l, (d) => d.chargeCents) };
+    }),
+    byType: (["FINAL", "AGENCY", "BALCAO"] as const).map((t) => ({ type: t, deals: paid.filter((d) => d.buyerType === t).length, revenueCents: sum(paid.filter((d) => d.buyerType === t), (d) => d.chargeCents) })),
+    topBuyers: [...byBuyer.values()].sort((a, b) => b.revenueCents - a.revenueCents).slice(0, 5),
+    // paradas: sem andar há mais de 2 dias antes da emissão; emitidas esperando pagamento
+    stalled: active.filter((d) => ["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage) && days0(d.updatedAt) > 2).map((d) => ({ id: d.id, number: d.number, customerName: d.customerName, stage: d.stage, days: days0(d.updatedAt) })),
+    awaitingPayment: active.filter((d) => d.stage === "ISSUED").map((d) => ({ id: d.id, number: d.number, customerName: d.customerName, chargeCents: d.chargeCents, days: d.ticket ? days0(d.ticket.at) : 0 })),
+  };
 }
 
 export async function createDeal(userId: string, input: DealInput) {
@@ -140,7 +218,8 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       salePriceCents: dealTotalCents(d.points, d.saleCpmCents)!,
       clientType: d.buyerType === "FINAL" ? "FINAL" : "AGENCY",
       customerIds: d.customerId ? [d.customerId] : [],
-      passengers: d.passengers ?? undefined,
+      // CPFs da emissão: o combinado ou, sem ele, os passageiros informados (contam no lucro por CPF)
+      passengers: d.passengers ?? ((Array.isArray(d.passengersData) && d.passengersData.length) || undefined),
       // Taxas pagas na emissão e cobradas do comprador: entram no total como custo repassado
       costs: d.taxesCents ? [{ type: "TAXA_EMBARQUE", amountCents: d.taxesCents }] : [],
       reservation: d.locator ?? undefined,
@@ -148,13 +227,47 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       observation: d.notes ?? undefined,
     }],
   });
+  await copyFilesToSale(userId, d.id, sale.id);
+  await passengersAsBeneficiaries(userId, d, sale.id);
   return sale.id;
+}
+
+/** Quem ocupa vaga no limite de CPFs da conta são os passageiros emitidos, não o comprador (balcão/agência).
+ *  Com os passageiros informados, eles substituem os beneficiários que a venda criou pelo cliente. */
+async function passengersAsBeneficiaries(userId: string, d: Awaited<ReturnType<typeof own>>, saleId: string) {
+  const pax = (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[];
+  if (!d.accountId) return;
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { id: saleId }, select: { occurredAt: true } });
+  // sem nomes para todos os CPFs combinados, o restante fica "Anônimo"
+  const rows = [
+    ...pax.map((p) => ({ name: p.name.trim(), document: p.cpf.replace(/\D/g, "") || null })),
+    ...Array.from({ length: Math.max(0, (d.passengers ?? 0) - pax.length) }, () => ({ name: ANONYMOUS, document: null })),
+  ];
+  await prisma.$transaction([
+    prisma.accountBeneficiary.deleteMany({ where: { saleId, userId } }),
+    prisma.accountBeneficiary.createMany({ data: rows.map((r) => ({ userId, accountId: d.accountId!, saleId, ...r, usedAt: sale.occurredAt })) }),
+  ]);
+}
+
+/** Bilhete e comprovante da negociação vão para os anexos da venda (sem repetir o que já está lá). */
+async function copyFilesToSale(userId: string, dealId: string, saleId: string) {
+  const [ticket, receipt, have] = await Promise.all([
+    prisma.milesDealTicket.findUnique({ where: { dealId } }),
+    prisma.milesDealReceipt.findUnique({ where: { dealId } }),
+    prisma.saleAttachment.findMany({ where: { saleId }, select: { name: true, size: true } }),
+  ]);
+  for (const f of [ticket, receipt]) {
+    if (!f || have.some((h) => h.name === f.name && h.size === f.size)) continue;
+    await prisma.saleAttachment.create({ data: { saleId, userId, name: f.name, mime: f.mime, size: f.size, data: f.data } });
+  }
 }
 
 /** Move a negociação para a etapa (e posição) indicada; chegar em "Pago" lança a venda. */
 export async function moveDeal(userId: string, id: string, stage: MilesDealStage, position?: number) {
   const d = await own(userId, id);
   if (d.saleId && stage !== "PAID") throw new DomainError(409, "Esta negociação já virou venda: para reabrir, exclua a venda em Vendas");
+  if (stage === "ISSUED" && !(await prisma.milesDealTicket.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o bilhete para marcar como emitida");
+  if (stage === "PAID" && !d.saleId && !(await prisma.milesDealReceipt.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o comprovante de pagamento para lançar a venda");
   const saleId = stage === "PAID" && !d.saleId ? await closeAsSale(userId, d) : d.saleId;
   await prisma.$transaction(async (tx) => {
     const column = await tx.milesDeal.findMany({ where: { userId, stage, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
@@ -187,7 +300,7 @@ export async function dealShareToken(userId: string, id: string) {
 }
 
 async function dealByToken(slug: string, token: string) {
-  const d = await prisma.milesDeal.findUnique({ where: { shareToken: token }, include: { user: { select: { status: true, salesProfile: { select: { slug: true } } } } } });
+  const d = await prisma.milesDeal.findUnique({ where: { shareToken: token }, include: { user: { select: { status: true, salesProfile: { select: { slug: true } } } }, ticket: { select: { name: true } } } });
   if (!d || d.user.status !== "ACTIVE" || d.user.salesProfile?.slug !== slug.toLowerCase()) return null;
   return d;
 }
@@ -207,23 +320,116 @@ export async function publicDeal(slug: string, token: string) {
       chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
       passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
       passengersAt: d.passengersAt?.toISOString() ?? null,
-      locator: d.locator,
+      // emitido = bilhete anexado; antes disso o localizador (que pode vir do link do pedido) não aparece
+      issued: !!d.ticket,
+      locator: d.ticket ? d.locator : null,
+      ticketName: d.ticket?.name ?? null,
     },
   };
 }
 export type PublicDeal = NonNullable<Awaited<ReturnType<typeof publicDeal>>>["deal"];
 
+const cleanPassenger = (p: Passenger) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined });
+
+/* ---------------- Bilhete ---------------- */
+
+export const TICKET_MAX = 10 * 1024 * 1024;
+
+/** Anexa (ou troca) o bilhete. Com ele a negociação passa a "Emitida" se ainda estava antes disso. */
+export async function addDealTicket(userId: string, id: string, name: string, buf: Buffer) {
+  const d = await own(userId, id);
+  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
+  if (buf.length > TICKET_MAX) throw new DomainError(413, "Arquivo maior que 10 MB");
+  const mime = detectAttachment(buf);
+  if (!mime) throw new DomainError(415, "Envie o bilhete em PDF, PNG, JPEG, WEBP ou HEIC");
+  const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "bilhete";
+  const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
+  await prisma.milesDealTicket.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
+  if (["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage)) return moveDeal(userId, d.id, "ISSUED");
+  return getDeal(userId, id);
+}
+
+export async function getDealTicket(userId: string, id: string) {
+  const t = await prisma.milesDealTicket.findFirst({ where: { dealId: id, userId } });
+  if (!t) throw new DomainError(404, "Bilhete não encontrado");
+  return { name: t.name, mime: t.mime, data: Buffer.from(t.data) };
+}
+
+/** Tira o bilhete: uma negociação "Emitida" volta para "Aguardando". */
+export async function deleteDealTicket(userId: string, id: string) {
+  const d = await own(userId, id);
+  const { count } = await prisma.milesDealTicket.deleteMany({ where: { dealId: d.id, userId } });
+  if (!count) throw new DomainError(404, "Bilhete não encontrado");
+  if (d.stage === "ISSUED") return moveDeal(userId, d.id, "AWAITING");
+  return getDeal(userId, id);
+}
+
+/* ---------------- Comprovante de pagamento ---------------- */
+
+/** Anexa (ou troca) o comprovante. Com ele a negociação vai para "Pago" e a venda é lançada; se faltar algo
+ *  para lançar (conta, pontos, saldo), o comprovante fica salvo e o aviso diz o que falta. */
+export async function addDealReceipt(userId: string, id: string, name: string, buf: Buffer) {
+  const d = await own(userId, id);
+  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
+  if (buf.length > TICKET_MAX) throw new DomainError(413, "Arquivo maior que 10 MB");
+  const mime = detectAttachment(buf);
+  if (!mime) throw new DomainError(415, "Envie o comprovante em PDF, PNG, JPEG, WEBP ou HEIC");
+  const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "comprovante";
+  const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
+  await prisma.milesDealReceipt.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
+  if (d.saleId) {
+    await copyFilesToSale(userId, d.id, d.saleId);
+    return { item: await getDeal(userId, id), aviso: null };
+  }
+  try {
+    return { item: await moveDeal(userId, d.id, "PAID"), aviso: null };
+  } catch (e) {
+    if (!(e instanceof DomainError)) throw e;
+    return { item: await getDeal(userId, id), aviso: `Comprovante salvo, mas a venda não foi lançada: ${e.message}` };
+  }
+}
+
+export async function getDealReceipt(userId: string, id: string) {
+  const r = await prisma.milesDealReceipt.findFirst({ where: { dealId: id, userId } });
+  if (!r) throw new DomainError(404, "Comprovante não encontrado");
+  return { name: r.name, mime: r.mime, data: Buffer.from(r.data) };
+}
+
+export async function deleteDealReceipt(userId: string, id: string) {
+  const d = await own(userId, id);
+  if (d.saleId) throw new DomainError(409, "A venda já foi lançada: o comprovante está nos anexos dela em Vendas");
+  const { count } = await prisma.milesDealReceipt.deleteMany({ where: { dealId: d.id, userId } });
+  if (!count) throw new DomainError(404, "Comprovante não encontrado");
+  return getDeal(userId, id);
+}
+
+/** O comprador baixa o bilhete pela página dele. */
+export async function publicDealTicket(slug: string, token: string) {
+  const d = await dealByToken(slug, token);
+  if (!d?.ticket) return null;
+  const t = await prisma.milesDealTicket.findUniqueOrThrow({ where: { dealId: d.id } });
+  return { name: t.name, mime: t.mime, data: Buffer.from(t.data) };
+}
+
+/** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */
+export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
+  const d = await own(userId, id);
+  const data = passengers.map(cleanPassenger);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
+  return getDeal(userId, id);
+}
+
 /** O comprador envia os passageiros; pode corrigir até a emissão (localizador informado). */
 export async function submitDealPassengers(slug: string, token: string, passengers: Passenger[], ip: string) {
   const d = await dealByToken(slug, token);
   if (!d) throw new DomainError(404, "Página não encontrada");
-  if (d.locator || d.saleId) throw new DomainError(409, "A emissão já foi feita: fale com quem te enviou o link para mudar os passageiros");
+  if (d.ticket || d.saleId) throw new DomainError(409, "A emissão já foi feita: fale com quem te enviou o link para mudar os passageiros");
   if (d.passengers && passengers.length !== d.passengers) throw new DomainError(400, `Informe ${d.passengers} ${d.passengers === 1 ? "passageiro" : "passageiros"}`);
   const key = `deal:${d.id}`;
   const ipHash = sha(`deal:${ip}`).slice(0, 32);
   if ((await prisma.loginAttempt.count({ where: { email: key, ip: ipHash, createdAt: { gte: new Date(Date.now() - 3600_000) } } })) >= SUBMITS_PER_HOUR) throw new DomainError(429, "Muitos envios. Tente de novo mais tarde.");
   await prisma.loginAttempt.create({ data: { email: key, ip: ipHash, success: true } });
-  const data = passengers.map((p) => ({ name: p.name.trim(), cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined }));
+  const data = passengers.map(cleanPassenger);
   await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: new Date() } });
   await prisma.notification.create({ data: { userId: d.userId, title: "Passageiros recebidos", body: `${d.customerName} enviou ${data.length === 1 ? "o passageiro" : `${data.length} passageiros`} da negociação #${d.number} (CRM Milhas).` } });
   return { ok: true };

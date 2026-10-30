@@ -10,6 +10,12 @@ import * as deals from "@/app/api/miles-deals/route";
 import * as deal from "@/app/api/miles-deals/[id]/route";
 import * as move from "@/app/api/miles-deals/[id]/move/route";
 import * as share from "@/app/api/miles-deals/[id]/share/route";
+import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
+import * as ticket from "@/app/api/miles-deals/[id]/ticket/route";
+import * as receipt from "@/app/api/miles-deals/[id]/receipt/route";
+import * as archiveRoute from "@/app/api/miles-deals/[id]/archive/route";
+import { listDeals, milesDealsDashboard } from "@/server/services/miles-deals";
+import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
 import { publicDeal } from "@/server/services/miles-deals";
@@ -32,6 +38,10 @@ beforeEach(async () => {
 const acc = (id: string) => prisma.account.findUniqueOrThrow({ where: { id } });
 const newDeal = (body: Record<string, unknown> = {}) => c.call(deals.POST, "POST", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", ...body });
 
+type Upload = (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
+const sendFile = (post: Upload, id: string, body: Buffer, name: string) =>
+  post(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, "x-file-name": name }, body: new Uint8Array(body) }), { params: Promise.resolve({ id }) });
+
 describe("CRM Milhas", () => {
   it("cria com número sequencial, total e lucro estimado pelo CPM da conta", async () => {
     const a = (await newDeal({ accountId: lat, points: 10000, saleCpmCents: 3000 })).data.item;
@@ -50,6 +60,13 @@ describe("CRM Milhas", () => {
 
   it("ao mover para Pago lança a venda uma vez, baixa os pontos e trava a negociação", async () => {
     const d = (await newDeal({ customerName: "Agência Voa" })).data.item;
+    // Sem comprovante de pagamento não vai para Pago
+    expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).status).toBe(409);
+    const rec = await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.4\n"), "comprovante.pdf");
+    expect(rec.status).toBe(201);
+    const recBody = await rec.json();
+    expect(recBody.aviso).toMatch(/venda não foi lançada.*conta/);
+    expect(recBody.item).toMatchObject({ stage: "NEW", receipt: { name: "comprovante.pdf" }, saleId: null });
     // Sem conta, pontos e milheiro não fecha
     expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).status).toBe(400);
     await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 30000, saleCpmCents: 3000 }, { id: d.id });
@@ -63,6 +80,10 @@ describe("CRM Milhas", () => {
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
     expect(s).toMatchObject({ points: 10000, totalCents: 30000 });
     expect(s.items[0]).toMatchObject({ kind: "OTHER", clientType: "AGENCY", points: 10000, salePriceCents: 30000 });
+    expect(await prisma.saleAttachment.findMany({ where: { saleId: paid.saleId }, select: { name: true } })).toEqual([{ name: "comprovante.pdf" }]);
+    // venda lançada: o comprovante não sai mais da negociação (está nos anexos da venda)
+    const delRec = await receipt.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
+    expect(delRec.status).toBe(409);
 
     // De novo em Pago não duplica; voltar de etapa, mudar a venda ou excluir é bloqueado
     await c.call(move.POST, "POST", "/x", { stage: "PAID", position: 0 }, { id: d.id });
@@ -75,7 +96,7 @@ describe("CRM Milhas", () => {
     // Excluindo a venda em Vendas, os pontos voltam e a negociação pode reabrir
     expect((await c.call(sale.DELETE, "DELETE", "/x", undefined, { id: paid.saleId })).status).toBe(200);
     expect(await acc(lat)).toMatchObject({ balance: 20000 });
-    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).data.item).toMatchObject({ stage: "ISSUED", saleId: null });
+    expect((await c.call(move.POST, "POST", "/x", { stage: "AWAITING" }, { id: d.id })).data.item).toMatchObject({ stage: "AWAITING", saleId: null });
   });
 
   it("colar o pedido do comprador: link, milhares com K, CPFs e taxas", () => {
@@ -112,18 +133,86 @@ describe("CRM Milhas", () => {
     const got = (await c.call(deals.GET, "GET", "/x")).data.items[0];
     expect(got.passengersData).toEqual([{ name: "Ana Souza Lima", cpf: "12345678909", birthDate: "1990-05-20", email: "ana@x.test" }]);
     expect(got.passengersAt).toBeTruthy();
+    // a janela aberta busca a negociação de novo e já vê os passageiros
+    const one = (await c.call(deal.GET, "GET", "/x", undefined, { id: d.id })).data.item;
+    expect(one.passengersData).toHaveLength(1);
     expect(await prisma.notification.count({ where: { userId, title: "Passageiros recebidos" } })).toBe(1);
 
-    // Com o localizador salvo, a página mostra a emissão e não aceita mais mudanças
+    // Só o localizador (pode vir do link do pedido) não é emissão: a página não mostra e o comprador ainda corrige
     await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 8673, saleCpmCents: 2600, passengers: 1, taxesCents: 3575, locator: "abc123" }, { id: d.id });
-    expect((await publicDeal("ana", token))!.deal.locator).toBe("ABC123");
+    expect((await publicDeal("ana", token))!.deal).toMatchObject({ issued: false, locator: null });
+    expect((await send([ana])).status).toBe(201);
+    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).status).toBe(409); // sem bilhete
+
+    // Com o bilhete anexado: emitida, a página mostra o localizador, deixa baixar o bilhete e não aceita mais mudanças
+    const up = (body: Buffer) => ticket.POST(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, "x-file-name": "bilhete.pdf" }, body: new Uint8Array(body) }), { params: Promise.resolve({ id: d.id }) });
+    expect((await up(Buffer.from("texto qualquer"))).status).toBe(415);
+    const att = await up(Buffer.from("%PDF-1.4\n"));
+    expect(att.status).toBe(201);
+    expect((await att.json()).item).toMatchObject({ stage: "ISSUED", ticket: { name: "bilhete.pdf" } });
+    expect((await publicDeal("ana", token))!.deal).toMatchObject({ issued: true, locator: "ABC123", ticketName: "bilhete.pdf" });
+    const pubTicket = await pubTicketRoute.GET(new Request("http://localhost:3100/x"), { params: Promise.resolve({ slug: "ana", token }) });
+    expect(pubTicket.status).toBe(200);
+    expect(Buffer.from(await pubTicket.arrayBuffer()).toString()).toBe("%PDF-1.4\n");
     expect((await send([ana])).status).toBe(409);
+    // tirar o bilhete volta para "Aguardando"; anexar de novo emite outra vez
+    const del = await ticket.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
+    expect((await del.json()).item).toMatchObject({ stage: "AWAITING", ticket: null });
+    expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(201);
 
     // Em Pago, a venda cobra milhas + taxas e as taxas são custo repassado (não mudam o lucro)
-    const paid = (await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
-    const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
+    const paidRes = await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.5\n"), "pix.pdf");
+    const { item: paid, aviso } = await paidRes.json();
+    expect(aviso).toBeNull();
+    expect(paid.stage).toBe("PAID");
+    const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true, attachments: { select: { name: true } } } });
+    expect(s.attachments.map((a) => a.name).sort()).toEqual(["bilhete.pdf", "pix.pdf"]);
+    // quem ocupa vaga no limite de CPFs é o passageiro emitido, não o comprador (Agência Voa)
+    expect(await prisma.accountBeneficiary.findMany({ where: { saleId: s.id }, select: { name: true, document: true, accountId: true } })).toEqual([{ name: "Ana Souza Lima", document: "12345678909", accountId: lat }]);
     expect(s.totalCents).toBe(26125);
     expect(s.items[0]).toMatchObject({ salePriceCents: 22550, reservation: "ABC123", costs: [{ type: "TAXA_EMBARQUE", amountCents: 3575 }] });
+  });
+
+  it("usuário informa os passageiros que o comprador mandou pelo WhatsApp (e pode limpar)", async () => {
+    const d = (await newDeal({ accountId: lat, points: 8673, saleCpmCents: 2600, passengers: 1 })).data.item;
+    const r = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "037.355.180-01", birthDate: "2002-03-23", gender: "M", phone: "(21) 99493-4776" }] }, { id: d.id });
+    expect(r.status).toBe(200);
+    expect(r.data.item.passengersData).toEqual([{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "03735518001", birthDate: "2002-03-23", gender: "M", phone: "(21) 99493-4776" }]);
+    expect(r.data.item.passengersAt).toBeTruthy();
+    expect((await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana", cpf: "123", birthDate: "2002-03-23" }] }, { id: d.id })).status).toBe(400);
+    const cleared = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [] }, { id: d.id });
+    expect(cleared.data.item).toMatchObject({ passengersData: [], passengersAt: null });
+  });
+
+  it("arquivar tira do Kanban e o dashboard soma as vendas pagas", async () => {
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    const a = (await newDeal({ customerName: "Comprador A", accountId: lat, points: 10000, saleCpmCents: 3000 })).data.item;
+    const b = (await newDeal({ customerName: "Comprador B" })).data.item;
+    expect((await sendFile(receipt.POST, a.id, Buffer.from("%PDF-1.4\n"), "pix.pdf")).status).toBe(201); // paga: vira venda
+    expect((await c.call(archiveRoute.POST, "POST", "/x", { archived: true }, { id: b.id })).data.item.archivedAt).toBeTruthy();
+    expect((await listDeals(userId)).map((d) => d.customerName)).toEqual(["Comprador A"]);
+    expect((await listDeals(userId, { archived: true })).map((d) => d.customerName)).toEqual(["Comprador B"]);
+    const dash = await milesDealsDashboard(userId, 30);
+    expect(dash.totals).toMatchObject({ created: 2, paid: 1, conversionPct: 50, points: 10000, revenueCents: 30000, archived: 1, saleCpmCents: 3000 });
+    expect(dash.topBuyers[0]).toMatchObject({ name: "Comprador A", deals: 1, revenueCents: 30000 });
+    expect(dash.pipeline.find((p) => p.stage === "PAID")).toMatchObject({ count: 1, points: 10000 });
+    // reabrir volta para o Kanban
+    await c.call(archiveRoute.POST, "POST", "/x", { archived: false }, { id: b.id });
+    expect(await listDeals(userId)).toHaveLength(2);
+  });
+
+  it("sugestão de conta: passageiro repetido não gasta CPF e negociação aberta reserva milhas", async () => {
+    const { accountsCapacity, dealAccountFit } = await import("@/server/services/capacity");
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    await prisma.accountBeneficiary.create({ data: { userId, accountId: lat, name: "Ana Souza Lima", document: "12345678909", usedAt: new Date() } });
+    const d = (await newDeal({ accountId: lat, points: 8000, saleCpmCents: 2600, passengers: 1 })).data.item;
+    await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana Souza Lima", cpf: "123.456.789-09", birthDate: "1990-05-20" }] }, { id: d.id });
+    const fit = await dealAccountFit(userId, d.id);
+    const mine = fit.accounts.find((a) => a.id === lat)!;
+    expect(mine).toMatchObject({ already: 1, fit: { newCpfs: 0, enough: true } });
+    // a negociação aberta reserva as milhas dela no espaço da conta (fora da própria sugestão)
+    expect((await accountsCapacity(userId)).rows.find((r) => r.id === lat)!.load.reserved).toBe(8000);
+    expect(mine.load.reserved).toBe(0);
   });
 
   it("isola por usuário", async () => {

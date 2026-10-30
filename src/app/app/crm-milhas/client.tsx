@@ -5,12 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
-import { fmtBRL, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
-import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
+import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
+import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
+import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
 
 type Customer = { id: string; name: string; phone: string | null };
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
@@ -51,11 +53,17 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   const manualProfit = profitIn.trim() ? parseBRLToCents(profitIn) : null;
   const profit = manualProfit ?? estimated;
 
+  // Link do pedido da LATAM (…?orderId=LA9571716CUFU): o orderId vira o localizador, se ainda não houver um
+  function changeOrderLink(v: string) {
+    setOrderLink(v);
+    const id = v.match(/[?&]orderId=([A-Za-z0-9]+)/)?.[1];
+    if (id && !locator.trim()) setLocator(id.toUpperCase());
+  }
   // Colar o que o comprador mandou: link do pedido, "8.673K", "1CPF", "Taxas: R$35,75"
   function onPaste(text: string) {
     setPaste(text);
     const p = parseDealPaste(text);
-    if (p.orderLink) setOrderLink(p.orderLink);
+    if (p.orderLink) changeOrderLink(p.orderLink);
     if (p.points && !locked) setPoints(pts(p.points));
     if (p.passengers) setPassengers(String(p.passengers));
     if (p.taxesCents != null && !locked) setTaxes(fmtBRL(p.taxesCents));
@@ -85,6 +93,15 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
     onClose();
     refreshSafe(router);
   }
+  // Arquivada sai do Kanban e fica na Lista; dá para reabrir
+  async function archive(archived: boolean) {
+    if (!deal) return;
+    const r = await api(`/api/miles-deals/${deal.id}/archive`, "POST", { archived });
+    if (!r.ok) return setErro(r.erro);
+    toast(archived ? "Negociação arquivada" : "Negociação reaberta");
+    onClose();
+    refreshSafe(router);
+  }
   async function remove() {
     if (!deal || !(await confirmDialog({ title: `Excluir a negociação #${deal.number}?`, confirmLabel: "Excluir", danger: true }))) return;
     const r = await api(`/api/miles-deals/${deal.id}`, "DELETE");
@@ -96,7 +113,8 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   return (
     <Modal open onClose={onClose} title={deal ? `Negociação #${deal.number}` : "Nova negociação"} footer={
       <>
-        {deal && !locked && <button type="button" className="btn-ghost mr-auto text-red-300" onClick={remove}><Trash2 className="h-4 w-4" />Excluir</button>}
+        {deal && !locked && <button type="button" className="btn-ghost text-red-300" onClick={remove}><Trash2 className="h-4 w-4" />Excluir</button>}
+        {deal && <button type="button" className="btn-ghost mr-auto" onClick={() => archive(!deal.archivedAt)}>{deal.archivedAt ? "Reabrir" : "Arquivar"}</button>}
         <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
         <button form="deal-form" className="btn-primary" disabled={busy}>Salvar</button>
       </>
@@ -143,6 +161,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
         </Field>
+        {deal && !locked && (deal.points ?? 0) > 0 && <AccountSuggestion dealId={deal.id} chosen={accountId} onPick={setAccountId} />}
         <Field label="Colar pedido do comprador">
           <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} placeholder="Ex.: link do pedido, 8.673K, 1CPF, Taxas: R$35,75" />
         </Field>
@@ -161,7 +180,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
           <Field label="Taxas (R$)"><input className="input" inputMode="decimal" value={taxes} onChange={(e) => setTaxes(e.target.value)} disabled={locked} placeholder="R$ 0,00" title="Pagas por você na emissão e cobradas do comprador" /></Field>
           <Field label="Link do pedido">
             <div className="flex gap-1.5">
-              <input className="input min-w-0 flex-1" value={orderLink} onChange={(e) => setOrderLink(e.target.value)} placeholder="https://…" inputMode="url" />
+              <input className="input min-w-0 flex-1" value={orderLink} onChange={(e) => changeOrderLink(e.target.value)} placeholder="https://…" inputMode="url" />
               {/^https?:\/\//.test(orderLink) && <a href={orderLink} target="_blank" rel="noopener noreferrer" className="btn-ghost h-10 w-10 shrink-0 px-0" aria-label="Abrir o link do pedido"><ExternalLink className="h-4 w-4" /></a>}
             </div>
           </Field>
@@ -174,8 +193,345 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
         </p>
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
         {deal && <BuyerPage deal={deal} />}
+        {deal && <Emission deal={deal} />}
       </form>
     </Modal>
+  );
+}
+
+/* ---------------- Bilhete e comprovante ---------------- */
+
+const fmtSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+type DealFile = { name: string; size: number; at: string };
+
+/** Anexo da negociação (bilhete ou comprovante): anexar, baixar, trocar e remover. */
+function FileBox({ title, what, url, file, hint, doneHint, removable = true, onChanged }: {
+  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean;
+  onChanged: (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  async function upload(f: File) {
+    if (f.size > 10 * 1024 * 1024) return toast(`O ${what} passa de 10 MB`, "error");
+    setBusy(true);
+    const res = await fetch(url, { method: "POST", body: f, headers: { "content-type": f.type || "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return toast(j.erro ?? `Não foi possível anexar o ${what}`, "error");
+    onChanged(j, "upload");
+  }
+  async function remove() {
+    if (!(await confirmDialog({ title: `Remover o ${what}?`, body: "O arquivo será apagado.", confirmLabel: "Remover", danger: true }))) return;
+    const r = await api<{ item: DealView }>(url, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    onChanged(r.data, "remove");
+  }
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label={title}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">{title}</h3>
+        <input ref={input} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} aria-label={`Arquivo do ${what}`} />
+        {file ? (
+          <>
+            <a className="btn-ghost h-8 text-xs" href={url}><Receipt className="h-3.5 w-3.5" />Baixar</a>
+            <button type="button" className="btn-ghost h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}>Trocar</button>
+            {removable && <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label={`Remover o ${what}`}><Trash2 className="h-3.5 w-3.5" /></button>}
+          </>
+        ) : (
+          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
+        )}
+      </div>
+      {file ? (
+        <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {new Date(file.at).toLocaleString("pt-BR")}. {doneHint}</p>
+      ) : (
+        <p className="text-xs text-amber-300">{hint}</p>
+      )}
+    </section>
+  );
+}
+
+/** Emitida só com o bilhete (aí aparece a mensagem para o comprador); paga só com o comprovante (aí vira venda). */
+function Emission({ deal: initial }: { deal: DealView }) {
+  const router = useRouter();
+  const [deal, setDeal] = useState(initial);
+  useEffect(() => setDeal(initial), [initial]);
+  const changed = (msgs: { up: string; moved: string; removed: string }) => (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => {
+    const moved = r.item.stage !== deal.stage;
+    setDeal(r.item);
+    if (r.aviso) toast(r.aviso, "error");
+    else toast(action === "remove" ? msgs.removed : moved ? msgs.moved : msgs.up);
+    refreshSafe(router);
+  };
+  return (
+    <>
+      <FileBox
+        title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket}
+        hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece."
+        doneHint="O comprador pode baixar pela página dele."
+        onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: negociação emitida", removed: "Bilhete removido" })}
+      />
+      {deal.ticket && <IssuedMessage deal={deal} />}
+      {(deal.ticket || deal.receipt) && (
+        <FileBox
+          title="Comprovante de pagamento" what="comprovante" url={`/api/miles-deals/${deal.id}/receipt`} file={deal.receipt} removable={!deal.saleId}
+          hint="Quando o comprador pagar, anexe o comprovante: a negociação vai para Pago e a venda é lançada em Vendas (com o bilhete e o comprovante anexados)."
+          doneHint={deal.saleId ? "Venda lançada em Vendas, com o bilhete e o comprovante anexados." : "A venda ainda não foi lançada."}
+          onChanged={changed({ up: "Comprovante anexado", moved: "Comprovante anexado: venda lançada em Vendas", removed: "Comprovante removido" })}
+        />
+      )}
+    </>
+  );
+}
+
+/* ---------------- Sugestão de conta ---------------- */
+
+type Fit = { id: string; label: string; already: number; load: { balance: number; reserved: number; cpfFree: number; ptsPerCpf: number }; fit: { enough: boolean; newCpfs: number; balanceAfter: number; cpfAfter: number; excessAfter: number; cpfShort: boolean } };
+
+/** Qual conta usar: a que dá para emitir sem deixar milhas presas (ver domain/capacity). Usa os pontos e os
+ *  passageiros salvos na negociação. */
+function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen: string; onPick: (id: string) => void }) {
+  const [data, setData] = useState<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } } | null>(null);
+  useEffect(() => {
+    api<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } }>(`/api/miles-deals/${dealId}/fit`).then((r) => r.ok && setData(r.data));
+  }, [dealId]);
+  if (!data || !data.accounts.length) return null;
+  const top = data.accounts.slice(0, 3);
+  const note = (a: Fit) => {
+    if (!a.fit.enough) return { tone: "text-red-300", text: `Saldo insuficiente (faltam ${fmtPts(-a.fit.balanceAfter)} milhas)` };
+    if (a.fit.cpfShort) return { tone: "text-red-300", text: "Sem CPFs livres para os passageiros" };
+    if (a.fit.excessAfter > 0) return { tone: "text-amber-300", text: `Sobram ~${fmtPts(a.fit.excessAfter)} milhas sem CPF para usar` };
+    return { tone: "text-muted", text: `Depois: ${fmtPts(a.fit.balanceAfter)} milhas e ${a.fit.cpfAfter} CPFs livres` };
+  };
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Sugestão de conta">
+      <p className="text-xs text-muted">
+        <b className="text-zinc-200">Sugestão de conta</b> para {fmtPts(data.points)} milhas e {data.cpfsNeeded} {data.cpfsNeeded === 1 ? "CPF" : "CPFs"} (média ~{fmtPts(data.avg.ptsPerCpf)} por emissão): emissão grande vai para a conta com milhas sobrando; pequena, para a com CPFs sobrando.
+      </p>
+      {top.map((a, i) => {
+        const n = note(a);
+        return (
+          <div key={a.id} className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm ${chosen === a.id ? "bg-accent-soft" : "bg-panel2"}`}>
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">{i === 0 && a.fit.enough && !a.fit.cpfShort ? "✅ " : ""}{a.label}</span>
+              <span className="block text-xs text-muted">{fmtPts(a.load.balance - a.load.reserved)} milhas livres · {a.load.cpfFree} CPFs livres{a.already ? ` · 👤 ${a.already === 1 ? "passageiro já é beneficiário aqui" : `${a.already} passageiros já são beneficiários aqui`} (não gasta CPF)` : ""}</span>
+              <span className={`block text-xs ${n.tone}`}>{n.text}</span>
+            </span>
+            {chosen === a.id ? <span className="text-xs text-accent-light">Escolhida</span> : <button type="button" className="btn-ghost h-8 text-xs" onClick={() => onPick(a.id)}>Usar esta</button>}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+/* ---------------- Lista ---------------- */
+
+/** Negociações ativas e arquivadas em tabela; clicar abre a negociação. */
+export function DealsList({ active, archived, customers, accounts }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const all = [...active, ...archived];
+  const deal = all.find((d) => d.id === open) ?? null;
+  const balcoes = [...new Set([...all.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName), "HotMilhas", "MaxMilhas"])];
+  const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
+  const table = (rows: DealView[], empty: string) =>
+    rows.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{empty}</p> : (
+      <div className="overflow-x-auto">
+        <table className="table-base">
+          <thead><tr><th>Nº</th><th>Comprador</th><th className="hidden md:table-cell">Conta</th><th className="text-right">Milhas</th><th className="hidden text-right sm:table-cell">Milheiro</th><th className="text-right">Total</th><th className="hidden text-right lg:table-cell">Lucro</th><th className="hidden md:table-cell">Etapa</th><th className="hidden lg:table-cell">Criada</th></tr></thead>
+          <tbody>
+            {rows.map((d) => (
+              <tr key={d.id} className="cursor-pointer hover:bg-panel2" onClick={() => setOpen(d.id)}>
+                <td className="tabular-nums">#{d.number}</td>
+                <td><span className="font-medium">{d.customerName}</span><span className="block text-xs text-muted">{BUYER_LABELS[d.buyerType]}</span></td>
+                <td className="hidden max-w-[180px] truncate md:table-cell">{d.accountLabel ?? "-"}</td>
+                <td className="text-right tabular-nums">{d.points ? d.points.toLocaleString("pt-BR") : "-"}</td>
+                <td className="hidden text-right tabular-nums sm:table-cell">{d.saleCpmCents ? fmtBRL(d.saleCpmCents) : "-"}</td>
+                <td className="text-right tabular-nums">{d.chargeCents != null ? fmtBRL(d.chargeCents) : "-"}</td>
+                <td className={`hidden text-right tabular-nums lg:table-cell ${(d.profitCents ?? 0) >= 0 ? "text-ok" : "text-bad"}`}>{d.profitCents != null ? fmtBRL(d.profitCents) : "-"}</td>
+                <td className="hidden md:table-cell">{d.archivedAt ? <span className="text-muted">Arquivada em {fmtDay(d.archivedAt)}</span> : DEAL_STAGE_LABELS[d.stage as DealStageKey]}</td>
+                <td className="hidden text-muted lg:table-cell">{fmtDay(d.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  return (
+    <div className="space-y-4">
+      <section className="card overflow-hidden" aria-label="Negociações ativas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações ativas <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhuma negociação ativa.")}</section>
+      <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
+      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+/* ---------------- Mensagem de emissão ---------------- */
+
+/** Emitido: mensagem pronta para o comprador (agradecimento, localizador e PIX). O bilhete é anexado no WhatsApp. */
+function IssuedMessage({ deal }: { deal: DealView }) {
+  const [pix, setPix] = useState<PixInfo | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [editPix, setEditPix] = useState(false);
+  const [form, setForm] = useState<PixInfo>({ keyType: "CPF", key: "", name: "", bank: "" });
+  const [text, setText] = useState("");
+  const build = (p: PixInfo | null) =>
+    // balcão/plataforma: o "comprador" é o nome da plataforma, então a saudação fica sem nome
+    issuedMessage({ buyerName: deal.buyerType === "BALCAO" ? "" : deal.customerName, reseller: deal.buyerType !== "FINAL", locator: deal.locator, passengers: deal.passengersData.map((x) => x.name), points: deal.points, taxesCents: deal.taxesCents, chargeCents: deal.chargeCents, pix: p });
+  useEffect(() => {
+    api<{ item: { pix: PixInfo | null } }>("/api/preferences").then((r) => {
+      const p = r.ok ? r.data.item.pix : null;
+      setPix(p);
+      if (p) setForm(p);
+      setEditPix(!p);
+      setText(build(p));
+      setLoaded(true);
+    });
+  }, [deal.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function savePix() {
+    if (!form.key.trim()) return toast("Informe a chave PIX", "error");
+    const r = await api<{ item: { pix: PixInfo | null } }>("/api/preferences", "PATCH", { pix: form });
+    if (!r.ok) return toast(r.erro, "error");
+    setPix(r.data.item.pix);
+    setEditPix(false);
+    setText(build(r.data.item.pix));
+    toast("Dados do PIX salvos");
+  }
+  const wa = whatsappLink(deal.customerPhone, text);
+  if (!loaded) return null;
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Mensagem de emissão">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Mensagem de emissão</h3>
+        <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setEditPix((v) => !v)}>{pix ? "Editar dados do PIX" : "Cadastrar PIX"}</button>
+      </div>
+      {editPix && (
+        <div className="grid gap-2 rounded-lg bg-panel2 p-3 sm:grid-cols-2" aria-label="Dados do PIX">
+          <label className="text-xs"><span className="mb-1 block text-muted">Tipo de chave</span>
+            <select className="input h-9" value={form.keyType} onChange={(e) => setForm({ ...form, keyType: e.target.value as PixKeyType })}>
+              {Object.entries(PIX_KEY_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Chave PIX</span><input className="input h-9" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} maxLength={140} /></label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Nome do recebedor</span><input className="input h-9" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} /></label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Banco</span><input className="input h-9" value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} maxLength={60} /></label>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            {pix && <button type="button" className="btn-ghost h-8 text-xs" onClick={() => { setForm(pix); setEditPix(false); }}>Cancelar</button>}
+            <button type="button" className="btn-primary h-8 text-xs" onClick={savePix}>Salvar PIX</button>
+          </div>
+        </div>
+      )}
+      <textarea className="input min-h-[220px] font-mono text-xs leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} aria-label="Texto da mensagem" />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-primary h-8 text-xs" onClick={() => navigator.clipboard.writeText(text).then(() => toast("Mensagem copiada"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar mensagem</button>
+        {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Abrir no WhatsApp</a>}
+        <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(build(pix))}>Refazer texto</button>
+      </div>
+      <p className="text-xs text-muted">Anexe o bilhete (PDF ou print) na conversa do WhatsApp antes de enviar.</p>
+    </section>
+  );
+}
+
+/* ---------------- Preencher LATAM ---------------- */
+
+/** Instruções e o favorito para arrastar até a barra de favoritos. O href é posto pelo DOM porque o React
+ *  não aceita links "javascript:" (é o que um favorito é). */
+function LatamBookmarklet({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const refCopy = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { ref.current?.setAttribute("href", LATAM_BOOKMARKLET); refCopy.current?.setAttribute("href", LATAM_COPY_BOOKMARKLET); }, []);
+  return (
+    <Modal open onClose={onClose} title="Favorito Preencher LATAM" footer={<button className="btn-primary" onClick={onClose}>Entendi</button>}>
+      <div className="space-y-4 text-sm">
+        <p>Instale uma vez e use sempre que for emitir na LATAM:</p>
+        <ol className="list-decimal space-y-2 pl-5">
+          <li>Mostre a barra de favoritos do navegador (<b>Ctrl + Shift + B</b>).</li>
+          <li>Arraste este botão até a barra de favoritos:
+            <div className="mt-2"><a ref={ref} draggable onClick={(e) => { e.preventDefault(); toast("Arraste o botão para a barra de favoritos", "error"); }} className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 font-semibold text-white">✈ Preencher LATAM</a></div>
+          </li>
+          <li>Aqui no CRM, clique em <b>Copiar para a LATAM</b> na negociação.</li>
+          <li>Na tela <b>Passageiros</b> da LATAM, clique no favorito <b>Preencher LATAM</b>. Se o navegador pedir, permita ler a área de transferência.</li>
+        </ol>
+        <p className="text-xs text-muted">Ele preenche nome, sobrenome, nascimento, CPF, sexo, e-mail e telefone de cada passageiro. Nada é enviado: confira e continue na LATAM.</p>
+        <div className="space-y-2 border-t border-line pt-4">
+          <p><b>O passageiro já está preenchido na LATAM?</b> Use o caminho inverso:</p>
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Arraste também este botão para a barra de favoritos:
+              <div className="mt-2"><a ref={refCopy} draggable onClick={(e) => { e.preventDefault(); toast("Arraste o botão para a barra de favoritos", "error"); }} className="inline-flex items-center gap-2 rounded-xl border border-line bg-panel2 px-4 py-2 font-semibold">⇩ Copiar da LATAM</a></div>
+            </li>
+            <li>Na tela <b>Passageiros</b> da LATAM, clique em <b>Copiar da LATAM</b>.</li>
+            <li>Aqui na negociação, em <b>Informar passageiros</b>, cole no campo de texto: os passageiros se preenchem sozinhos.</li>
+          </ol>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------------- Passageiros informados pelo usuário ---------------- */
+
+type PaxRow = { firstName: string; lastName: string; cpf: string; birthDate: string; gender: "M" | "F" | ""; email: string; phone: string };
+const toRow = (p: Passenger): PaxRow => {
+  const parts = p.name.trim().split(/\s+/);
+  return { firstName: p.firstName ?? parts[0] ?? "", lastName: p.lastName ?? parts.slice(1).join(" "), cpf: p.cpf, birthDate: p.birthDate, gender: p.gender ?? "", email: p.email ?? "", phone: p.phone ?? "" };
+};
+const emptyRow = (): PaxRow => ({ firstName: "", lastName: "", cpf: "", birthDate: "", gender: "", email: "", phone: "" });
+
+/** O comprador mandou os dados pelo WhatsApp/Telegram: colar a mensagem (o sistema separa os campos) ou digitar. */
+function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved: (d: DealView) => void; onCancel: () => void }) {
+  const [rows, setRows] = useState<PaxRow[]>(() => (deal.passengersData.length ? deal.passengersData.map(toRow) : Array.from({ length: deal.passengers ?? 1 }, emptyRow)));
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (i: number, p: Partial<PaxRow>) => setRows((l) => l.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  function read(value = text) {
+    // texto do favorito "Copiar da LATAM" (passageiros já preenchidos na tela da LATAM) ou mensagem livre
+    const found = fromLatamPayload(value) ?? parsePassengersText(value);
+    if (!found.length) return toast("Não encontrei CPF ou data de nascimento no texto", "error");
+    setRows(found.map(toRow));
+    toast(`${found.length} ${found.length === 1 ? "passageiro lido" : "passageiros lidos"}: confira os campos`);
+  }
+  async function save() {
+    const bad = rows.findIndex((r) => !r.firstName.trim() || !r.lastName.trim() || r.cpf.replace(/\D/g, "").length !== 11 || !r.birthDate);
+    if (bad >= 0) return toast(`Passageiro ${bad + 1}: preencha nome, sobrenome, CPF (11 dígitos) e nascimento`, "error");
+    setBusy(true);
+    const passengers = rows.map((r) => ({ ...r, name: `${r.firstName.trim()} ${r.lastName.trim()}`, gender: r.gender || undefined }));
+    const res = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/passengers`, "PUT", { passengers });
+    setBusy(false);
+    if (!res.ok) return toast(res.erro, "error");
+    toast("Passageiros salvos");
+    onSaved(res.data.item);
+  }
+  const inp = "input h-9 text-sm";
+  return (
+    <div className="space-y-3 rounded-lg bg-panel2 p-3" aria-label="Informar passageiros">
+      <label className="block text-xs">
+        <span className="mb-1 block text-muted">Colar a mensagem do comprador (WhatsApp, Telegram…) ou o que o favorito <b>Copiar da LATAM</b> copiou</span>
+        <textarea className="input min-h-[80px] text-sm" value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const v = e.clipboardData.getData("text"); if (fromLatamPayload(v)) { e.preventDefault(); setText(v); read(v); } }} placeholder={"Nicolas Eduardo Amaral\nCPF 037.355.180-01\nNasc. 23/03/2002"} aria-label="Mensagem do comprador" />
+      </label>
+      <button type="button" className="btn-ghost h-8 text-xs" onClick={() => read()} disabled={!text.trim()}>Ler texto</button>
+      {rows.map((r, i) => (
+        <fieldset key={i} className="space-y-2 rounded-lg border border-line p-2">
+          <legend className="flex w-full items-center justify-between px-1 text-xs font-semibold">
+            <span>Passageiro {i + 1}</span>
+            {rows.length > 1 && <button type="button" className="text-muted hover:text-zinc-100" onClick={() => setRows((l) => l.filter((_, j) => j !== i))} aria-label={`Remover passageiro ${i + 1}`}><Trash2 className="h-3.5 w-3.5" /></button>}
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input className={inp} value={r.firstName} onChange={(e) => set(i, { firstName: e.target.value })} placeholder="Nome *" aria-label={`Nome do passageiro ${i + 1}`} />
+            <input className={inp} value={r.lastName} onChange={(e) => set(i, { lastName: e.target.value })} placeholder="Sobrenome *" aria-label={`Sobrenome do passageiro ${i + 1}`} />
+            <input className={inp} value={r.cpf} onChange={(e) => set(i, { cpf: e.target.value })} placeholder="CPF *" inputMode="numeric" aria-label={`CPF do passageiro ${i + 1}`} />
+            <input className={inp} type="date" value={r.birthDate} onChange={(e) => set(i, { birthDate: e.target.value })} aria-label={`Nascimento do passageiro ${i + 1}`} />
+            <select className={inp} value={r.gender} onChange={(e) => set(i, { gender: e.target.value as PaxRow["gender"] })} aria-label={`Sexo do passageiro ${i + 1}`}><option value="">Sexo</option><option value="M">Masculino</option><option value="F">Feminino</option></select>
+            <input className={inp} value={r.phone} onChange={(e) => set(i, { phone: e.target.value })} placeholder="Telefone" inputMode="tel" aria-label={`Telefone do passageiro ${i + 1}`} />
+            <input className={`${inp} sm:col-span-2`} type="email" value={r.email} onChange={(e) => set(i, { email: e.target.value })} placeholder="E-mail" aria-label={`E-mail do passageiro ${i + 1}`} />
+          </div>
+        </fieldset>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        {rows.length < 9 && <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setRows((l) => [...l, emptyRow()])}><Plus className="mr-1 inline h-3.5 w-3.5" />Adicionar passageiro</button>}
+        <span className="flex-1" />
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="btn-primary h-8 text-xs" onClick={save} disabled={busy}>{busy ? "Salvando…" : "Salvar passageiros"}</button>
+      </div>
+    </div>
   );
 }
 
@@ -184,8 +540,31 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
 const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
 const fmtDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v);
 
-function BuyerPage({ deal }: { deal: DealView }) {
+function BuyerPage({ deal: initial }: { deal: DealView }) {
+  const router = useRouter();
   const [link, setLink] = useState<string | null>(null);
+  const [deal, setDeal] = useState(initial);
+  const [checking, setChecking] = useState(false);
+  // O comprador envia os passageiros pela página dele: busca de novo ao abrir, ao voltar para a aba
+  // e a cada 15 s enquanto não chegam (a janela foi aberta com os dados de quando a página carregou)
+  async function reload(manual = false) {
+    if (manual) setChecking(true);
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${initial.id}`);
+    if (manual) setChecking(false);
+    if (!r.ok) return manual && toast(r.erro, "error");
+    const arrived = r.data.item.passengersData.length > 0 && deal.passengersData.length === 0;
+    setDeal(r.data.item);
+    if (arrived) { toast("Dados dos passageiros recebidos"); refreshSafe(router); }
+    else if (manual && !r.data.item.passengersData.length) toast("Ainda sem dados dos passageiros");
+  }
+  const waiting = deal.passengersData.length === 0;
+  useEffect(() => {
+    void reload();
+    const onFocus = () => void reload();
+    window.addEventListener("focus", onFocus);
+    const t = waiting ? window.setInterval(() => void reload(), 15_000) : undefined;
+    return () => { window.removeEventListener("focus", onFocus); if (t) window.clearInterval(t); };
+  }, [initial.id, waiting]); // eslint-disable-line react-hooks/exhaustive-deps
   async function share(open: boolean) {
     const r = await api<{ token: string; slug: string | null }>(`/api/miles-deals/${deal.id}/share`, "POST");
     if (!r.ok) return toast(r.erro, "error");
@@ -197,6 +576,10 @@ function BuyerPage({ deal }: { deal: DealView }) {
     toast("Link da página do comprador copiado");
   }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
+  const [install, setInstall] = useState(false);
+  const [editingPax, setEditingPax] = useState(false);
+  const paxSaved = (d: DealView) => { setDeal(d); setEditingPax(false); refreshSafe(router); };
+  const latamLink = deal.orderLink && /latamairlines\.com/.test(deal.orderLink) ? deal.orderLink : null;
   return (
     <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Página do comprador">
       <div className="flex flex-wrap items-center gap-2">
@@ -206,9 +589,20 @@ function BuyerPage({ deal }: { deal: DealView }) {
       </div>
       <p className="text-xs text-muted">O comprador vê o resumo (milhas, CPFs, taxas e total), envia os dados dos passageiros e, com o localizador salvo, vê a emissão confirmada.</p>
       {link && <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px] text-muted">{link}</p>}
-      {deal.passengersData.length > 0 ? (
+      {editingPax ? (
+        <PassengersEditor deal={deal} onSaved={paxSaved} onCancel={() => setEditingPax(false)} />
+      ) : deal.passengersData.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-xs text-muted">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</p>
+          <p className="flex items-center gap-2 text-xs text-muted">
+            <span className="flex-1">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</span>
+            <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Editar passageiros</button>
+          </p>
+          <div className="flex flex-wrap items-center gap-2" aria-label="Preencher na LATAM">
+            <button type="button" className="btn-primary h-8 text-xs" onClick={() => copy(latamPayload(deal.passengersData), "Passageiros para a LATAM")}><Copy className="h-3.5 w-3.5" />Copiar para a LATAM</button>
+            {latamLink && <a className="btn-ghost h-8 text-xs" href={latamLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir na LATAM</a>}
+            <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setInstall(true)}>Como preencher sozinho?</button>
+          </div>
+          {install && <LatamBookmarklet onClose={() => setInstall(false)} />}
           {deal.passengersData.map((p, i) => (
             <div key={i} className="rounded-lg bg-panel2 px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
@@ -218,6 +612,7 @@ function BuyerPage({ deal }: { deal: DealView }) {
               <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted">
                 <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.cpf, "CPF")} title="Copiar CPF">CPF {fmtCpf(p.cpf)}</button>
                 <button type="button" className="hover:text-zinc-100" onClick={() => copy(fmtDay(p.birthDate), "Nascimento")} title="Copiar nascimento">Nasc. {fmtDay(p.birthDate)}</button>
+                {p.gender && <span>{p.gender === "F" ? "Feminino" : "Masculino"}</span>}
                 {p.email && <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.email!, "E-mail")} title="Copiar e-mail">{p.email}</button>}
                 {p.phone && <span>{p.phone}</span>}
               </p>
@@ -225,8 +620,14 @@ function BuyerPage({ deal }: { deal: DealView }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-amber-300">Ainda sem dados dos passageiros.</p>
+        <p className="flex items-center gap-2 text-xs text-amber-300">
+          Ainda sem dados dos passageiros.
+          <button type="button" className="text-accent-light hover:underline disabled:opacity-60" onClick={() => void reload(true)} disabled={checking}>{checking ? "Verificando…" : "Verificar agora"}</button>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Informar passageiros</button>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => setInstall(true)}>Já está na LATAM?</button>
+        </p>
       )}
+      {install && deal.passengersData.length === 0 && !editingPax && <LatamBookmarklet onClose={() => setInstall(false)} />}
     </section>
   );
 }
@@ -255,6 +656,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
           {d.passengers ? <span className="rounded-full bg-panel2 px-2 py-0.5">{d.passengers} CPF{d.passengers > 1 ? "s" : ""}</span> : null}
           {d.passengersAt && <span className="flex items-center gap-0.5 rounded-full bg-blue-500/15 px-2 py-0.5 text-blue-300"><UserCheck className="h-3 w-3" />dados recebidos</span>}
           {d.locator && <span className="rounded-full bg-panel2 px-2 py-0.5 font-mono">{d.locator}</span>}
+          {d.ticket && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-accent" title={`Bilhete: ${d.ticket.name}`}>Bilhete</span>}
           {d.profitCents != null && <span className={`rounded-full px-2 py-0.5 font-medium ${d.profitCents >= 0 ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"}`}>lucro {fmtBRL(d.profitCents)}</span>}
           {d.saleId && <span className="flex items-center gap-0.5 rounded-full bg-panel2 px-2 py-0.5"><Receipt className="h-3 w-3" />venda lançada</span>}
         </div>

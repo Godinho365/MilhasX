@@ -19,13 +19,21 @@ export function windowStart(window: BeneficiaryWindow, now = new Date()) {
     : new Date(Date.UTC(now.getUTCFullYear() - 1, now.getUTCMonth(), now.getUTCDate()));
 }
 
-export const beneficiaryKey = (b: { name: string; document: string | null }) => {
+/** Passageiro emitido sem nome registrado: ocupa uma vaga própria até alguém informar o nome. */
+export const ANONYMOUS = "Anônimo";
+const plain = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+export const isAnonymous = (b: { name: string; document: string | null }) => !(b.document ?? "").replace(/\D/g, "") && plain(b.name) === "anonimo";
+
+export const beneficiaryKey = (b: { name: string; document: string | null; id?: string }) => {
   const doc = (b.document ?? "").replace(/\D/g, "");
-  return doc ? `cpf:${doc}` : `nome:${b.name.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase().replace(/\s+/g, " ")}`;
+  if (doc) return `cpf:${doc}`;
+  // cada "Anônimo" é uma pessoa diferente (não dá para juntar pelo nome)
+  if (isAnonymous(b)) return `anon:${b.id ?? Math.random()}`;
+  return `nome:${plain(b.name)}`;
 };
 
 /** Beneficiários distintos usados desde o início da janela. */
-export function countDistinct(list: { name: string; document: string | null; usedAt: Date | string }[], since: Date) {
+export function countDistinct(list: { name: string; document: string | null; usedAt: Date | string; id?: string }[], since: Date) {
   const seen = new Set<string>();
   for (const b of list) if (new Date(b.usedAt) >= since) seen.add(beneficiaryKey(b));
   return seen.size;

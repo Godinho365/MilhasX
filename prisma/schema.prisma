@@ -264,6 +264,7 @@ model Account {
   cpfAvailable      Int? // CPFs (passageiros) que ainda podem ser emitidos
   beneficiaryLimit  Int? // limite de beneficiários (CPFs distintos) do programa; vazio = sugestão do programa
   beneficiaryWindow String   @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
+  transferBonusPct  Int? // bônus que esta conta recebe em transferências enquanto o clube está ativo (ex.: 30)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -498,6 +499,7 @@ model UserPreference {
   hideVideoTutorials Boolean   @default(false)
   valuesMode         String    @default("VISIBLE")
   notifications      Json      @default("{}")
+  pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
 }
 
 model AuditLog {
@@ -1147,10 +1149,36 @@ model MilesDeal {
   locator        String? // localizador da emissão (aparece na página do comprador)
   saleId         String?        @unique // venda criada ao chegar em "Pago"
   sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  ticket         MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
+  receipt        MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
   archivedAt     DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@unique([userId, number])
   @@index([userId, stage])
+}
+
+/// Comprovante de pagamento da negociação do CRM Milhas (vai junto para os anexos da venda)
+model MilesDealReceipt {
+  dealId    String    @id
+  deal      MilesDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime  @default(now())
+}
+
+/// Bilhete (passagem) da negociação do CRM Milhas; os bytes ficam fora da tabela principal
+model MilesDealTicket {
+  dealId    String    @id
+  deal      MilesDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime  @default(now())
 }

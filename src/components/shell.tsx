@@ -103,7 +103,7 @@ export function Shell(props: {
           ? { label: "Criar nova compra", event: "mm:new-purchase", icon: <ShoppingBag className="h-5 w-5" /> }
         : path === "/app/crm" && search.get("view") !== "dashboard"
           ? { label: "Novo pedido", event: "mm:new-order", icon: <FilePlus2 className="h-5 w-5" /> }
-        : path === "/app/crm-milhas"
+        : path === "/app/crm-milhas" && !search.get("view") // só no Kanban, que é quem abre a negociação nova
           ? { label: "Nova negociação", event: "mm:new-deal", icon: <Coins className="h-5 w-5" /> }
         : path === "/app/credit-cards"
           ? { label: "Novo cartão", event: "mm:new-card", icon: <CreditCard className="h-5 w-5" /> }
@@ -128,9 +128,11 @@ export function Shell(props: {
     if (r.ok) refreshSafe(router);
   }
   const userRef = useRef<HTMLDivElement>(null);
-  const active = (href: string) => (href === "/app" ? path === "/app" : path.startsWith(href));
-  const title = TITLES.find(([p]) => path.startsWith(p))?.[1];
-  const tutorialTag = path === "/app" ? "Painel" : TUTORIAL_TAGS.find(([p]) => path.startsWith(p))?.[1];
+  // "/app/crm" não pode marcar "/app/crm-milhas": a seção vale para o próprio endereço e o que vem depois de "/"
+  const under = (p: string) => path === p || path.startsWith(`${p}/`);
+  const active = (href: string) => (href === "/app" ? path === "/app" : under(href));
+  const title = TITLES.find(([p]) => under(p))?.[1];
+  const tutorialTag = path === "/app" ? "Painel" : TUTORIAL_TAGS.find(([p]) => under(p))?.[1];
   const tutorial = props.prefs.hideTutorials || !tutorialTag
     ? null
     : [...props.guides].sort((a, b) => Number(b.video) - Number(a.video)).find((g) => g.tags.includes(tutorialTag));

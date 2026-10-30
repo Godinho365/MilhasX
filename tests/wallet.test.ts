@@ -343,3 +343,20 @@ describe("editar transferência", () => {
     expect(await prisma.entry.count({ where: { groupId } })).toBe(2);
   });
 });
+
+describe("bônus de transferência com clube", () => {
+  it("guarda o bônus da conta e só considera o clube ativo com recorrência ou crédito de clube recente", async () => {
+    const { clubActiveAccounts, updateAccount } = await import("@/server/services/wallet");
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    await updateAccount(userId, lat, { transferBonusPct: 30 });
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: lat } })).transferBonusPct).toBe(30);
+    const now = new Date("2026-10-30T12:00:00Z");
+    expect((await clubActiveAccounts(userId, now)).has(lat)).toBe(false);
+    await add({ accountId: lat, type: "CLUB", points: 1000, occurredAt: "2026-10-10", costs: [{ type: "MENSALIDADE", amountCents: 4000 }], idempotencyKey: randomUUID() });
+    expect((await clubActiveAccounts(userId, now)).has(lat)).toBe(true);
+    // 2 meses depois sem novo crédito nem recorrência: o clube não conta mais como ativo
+    expect((await clubActiveAccounts(userId, new Date("2026-12-30T12:00:00Z"))).has(lat)).toBe(false);
+    await prisma.recurrence.create({ data: { userId, accountId: lat, type: "CLUB", description: "Clube", points: 1000, nextDate: new Date("2026-12-10") } });
+    expect((await clubActiveAccounts(userId, new Date("2026-12-30T12:00:00Z"))).has(lat)).toBe(true);
+  });
+});

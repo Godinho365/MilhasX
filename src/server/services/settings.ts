@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import type { Plan, Prisma } from "@prisma/client";
+import { Prisma, type Plan } from "@prisma/client";
+import type { PixInfo } from "@/domain/deal-message";
 import { prisma, DomainError, audit } from "../db";
 import { mpEnabled, currentSubscription } from "./billing-mp";
 import { assertFeature, hasFeature } from "./plan-limits";
@@ -18,10 +19,11 @@ export interface PreferenceInput {
   hideVideoTutorials?: boolean;
   valuesMode?: ValuesMode;
   notifications?: Record<string, { email?: boolean; push?: boolean }>;
+  pix?: PixInfo | null;
 }
 
 export async function savePreferences(userId: string, input: PreferenceInput) {
-  const data: Prisma.UserPreferenceUpdateInput = { ...input, notifications: undefined };
+  const data: Prisma.UserPreferenceUpdateInput = { ...input, notifications: undefined, pix: input.pix === undefined ? undefined : input.pix ?? Prisma.DbNull };
   // "Mostrar valores" e o modo de visibilidade andam juntos
   if (input.valuesMode) data.showValues = input.valuesMode === "VISIBLE";
   else if (input.showValues !== undefined) data.valuesMode = input.showValues ? "VISIBLE" : "PARTIAL";
@@ -53,6 +55,7 @@ export async function getPreferences(userId: string) {
     hideVideoTutorials: !!p?.hideVideoTutorials,
     valuesMode: ((["VISIBLE", "PARTIAL", "HIDDEN"] as const).find((m) => m === p?.valuesMode) ?? (p?.showValues === false ? "PARTIAL" : "VISIBLE")) as ValuesMode,
     notifications: notifyPrefs(p?.notifications),
+    pix: (p?.pix as PixInfo | null) ?? null,
   };
 }
 

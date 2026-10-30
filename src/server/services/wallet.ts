@@ -83,7 +83,7 @@ export async function deleteAccount(userId: string, id: string) {
 }
 
 /** Organização da conta: nome, fixar na barra lateral, arquivar, tags e CPFs disponíveis. */
-export async function updateAccount(userId: string, id: string, input: { nickname?: string | null; pinned?: boolean; archived?: boolean; tags?: string[]; cpfAvailable?: number | null }) {
+export async function updateAccount(userId: string, id: string, input: { nickname?: string | null; pinned?: boolean; archived?: boolean; tags?: string[]; cpfAvailable?: number | null; transferBonusPct?: number | null }) {
   const acc = await prisma.account.findFirst({ where: { id, userId } });
   if (!acc) throw new DomainError(404, "Conta não encontrada");
   return prisma.account.update({
@@ -96,8 +96,20 @@ export async function updateAccount(userId: string, id: string, input: { nicknam
       ...(input.archived ? { pinned: false } : {}),
       tags: input.tags === undefined ? undefined : [...new Set(input.tags.map((t) => t.trim()).filter(Boolean))],
       cpfAvailable: input.cpfAvailable,
+      transferBonusPct: input.transferBonusPct,
     },
   });
+}
+
+/** Contas com clube ativo: recorrência de clube ligada ou crédito de clube nos últimos 35 dias.
+ *  O bônus de transferência da conta (ex.: 30% na LATAM) só vale com o clube ativo. */
+export async function clubActiveAccounts(userId: string, now = new Date()) {
+  const since = new Date(now.getTime() - 35 * 86_400_000);
+  const [recs, entries] = await Promise.all([
+    prisma.recurrence.findMany({ where: { userId, type: "CLUB", active: true, OR: [{ endDate: null }, { endDate: { gte: now } }] }, select: { accountId: true } }),
+    prisma.entry.findMany({ where: { userId, type: "CLUB", occurredAt: { gte: since, lte: now } }, select: { accountId: true }, distinct: ["accountId"] }),
+  ]);
+  return new Set([...recs, ...entries].map((r) => r.accountId));
 }
 
 export async function listAccounts(userId: string, holderId?: string) {
@@ -141,6 +153,7 @@ export async function walletSummary(userId: string, holderId?: string) {
     archived: a.archived,
     tags: a.tags,
     cpfAvailable: a.cpfAvailable,
+    transferBonusPct: a.transferBonusPct,
     // "Atualizado": último lançamento registrado na conta
     updatedAt: (lastBy.get(a.id) ?? a.createdAt).toISOString(),
   }));

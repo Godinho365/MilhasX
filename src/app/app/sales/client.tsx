@@ -85,7 +85,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
           <div className="overflow-x-auto">
             <table className="table-base">
               <thead>
-                <tr><th>{sortHeader("occurredAt", "Data")}</th><th>Programa</th><th>Descrição</th><th className="text-right">{sortHeader("points", "Pontos")}</th><th className="text-right">{sortHeader("totalCents", "Valor")}</th><th className="text-right">Resultado</th><th className="text-right">ROE</th><th className="text-right">Lucro/CPF</th><th className="w-16 text-right">Ações</th></tr>
+                <tr><th>{sortHeader("occurredAt", "Data")}</th><th>Programa</th><th>Descrição</th><th className="text-right">{sortHeader("points", "Pontos")}</th><th className="text-right" title="Preço do milheiro vendido (valor dos pontos ÷ pontos × 1.000)">Milheiro</th><th className="text-right" title="CPFs emitidos">CPFs</th><th className="text-right">{sortHeader("totalCents", "Valor")}</th><th className="text-right">Resultado</th><th className="text-right">ROE</th><th className="text-right">Lucro/CPF</th><th className="w-16 text-right">Ações</th></tr>
               </thead>
               <tbody>
                 {sales.map((s) => (
@@ -97,6 +97,8 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
                       {s.customers.length > 0 && <span className="block truncate text-xs text-muted">{s.customers.join(", ")}</span>}
                     </td>
                     <td className="text-right tabular-nums">{s.points ? fmtPts(s.points) : "-"}</td>
+                    <td className="text-right tabular-nums">{s.points > 0 && s.pointsValueCents > 0 ? fmtBRL(Math.round((s.pointsValueCents * 1000) / s.points)) : "-"}</td>
+                    <td className="text-right tabular-nums">{s.cpfs || "-"}</td>
                     <td className="text-right tabular-nums">{fmtBRL(s.totalCents)}</td>
                     <td className={`text-right font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}</td>
                     <td className="text-right tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</td>

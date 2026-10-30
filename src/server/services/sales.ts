@@ -1,6 +1,7 @@
 // Vendas de emissão: venda com itens (passagem, bagagem, assento, hospedagem, carro, outro),
 // origem dos pontos (minha conta ou fornecedor), custos repassados, clientes e anexos.
 import { randomUUID } from "node:crypto";
+import { ANONYMOUS } from "@/domain/beneficiaries";
 import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { assertFeature } from "./plan-limits";
@@ -99,9 +100,12 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
 
-/** CPFs emitidos: passageiros das passagens emitidas com pontos (sem o número, os clientes do item, ou 1). */
+/** CPFs emitidos com pontos: os passageiros das passagens (sem o número, os clientes do item, ou 1) e de
+ *  outros itens que informam passageiros, como a venda de milhas do CRM Milhas (uma emissão para o comprador). */
 export function saleCpfs(items: { kind: string; issuedWith: string; passengers: number | null; customers: unknown[] }[]) {
-  return items.filter((i) => i.kind === "FLIGHT" && i.issuedWith === "POINTS").reduce((t, i) => t + (i.passengers ?? Math.max(1, i.customers.length)), 0);
+  return items
+    .filter((i) => i.issuedWith === "POINTS")
+    .reduce((t, i) => t + (i.kind === "FLIGHT" ? (i.passengers ?? Math.max(1, i.customers.length)) : (i.passengers ?? 0)), 0);
 }
 
 function validate(input: SaleInput) {
@@ -191,13 +195,21 @@ async function writeItems(tx: Tx, userId: string, sale: { id: string; groupId: s
       },
     });
   }
-  // Beneficiários: os clientes dos itens emitidos com pontos próprios contam no limite de CPFs da conta
+  // Beneficiários: os clientes dos itens emitidos com pontos próprios contam no limite de CPFs da conta;
+  // passageiros sem cliente nomeado entram como "Anônimo" (cada um ocupa uma vaga)
   if (input.origin === "OWN") {
-    const ids = [...new Set(input.items.filter((i) => i.issuedWith === "POINTS").flatMap((i) => i.customerIds ?? []))];
-    if (ids.length) {
-      const cs = await tx.customer.findMany({ where: { id: { in: ids }, userId }, select: { name: true, docNumber: true } });
-      await tx.accountBeneficiary.createMany({ data: cs.map((c) => ({ userId, accountId: accountId!, saleId: sale.id, name: c.name, document: c.docNumber?.replace(/\D/g, "") || null, usedAt: input.occurredAt })) });
-    }
+    const emitted = input.items.filter((i) => i.issuedWith === "POINTS");
+    const ids = [...new Set(emitted.flatMap((i) => i.customerIds ?? []))];
+    const cs = ids.length ? await tx.customer.findMany({ where: { id: { in: ids }, userId }, select: { name: true, docNumber: true } }) : [];
+    const anonymous = emitted.reduce((t, i) => {
+      const pax = i.kind === "FLIGHT" ? (i.passengers ?? Math.max(1, i.customerIds?.length ?? 0)) : (i.passengers ?? 0);
+      return t + Math.max(0, pax - (i.customerIds?.length ?? 0));
+    }, 0);
+    const rows = [
+      ...cs.map((c) => ({ name: c.name, document: c.docNumber?.replace(/\D/g, "") || null })),
+      ...Array.from({ length: anonymous }, () => ({ name: ANONYMOUS, document: null })),
+    ];
+    if (rows.length) await tx.accountBeneficiary.createMany({ data: rows.map((r) => ({ userId, accountId: accountId!, saleId: sale.id, ...r, usedAt: input.occurredAt })) });
   }
 }
 

@@ -6,8 +6,15 @@ import { Alert } from "@/components/ui";
 import { waLink } from "../../central";
 import type { PublicDeal } from "@/server/services/miles-deals";
 
-type Pax = { name: string; cpf: string; birthDate: string; email: string; phone: string };
-const empty = (): Pax => ({ name: "", cpf: "", birthDate: "", email: "", phone: "" });
+// Nome e sobrenome separados, como a companhia aérea pede na emissão
+type Pax = { firstName: string; lastName: string; cpf: string; birthDate: string; gender: "M" | "F" | ""; email: string; phone: string };
+const empty = (): Pax => ({ firstName: "", lastName: "", cpf: "", birthDate: "", gender: "", email: "", phone: "" });
+/** Passageiro já enviado: usa nome/sobrenome salvos ou separa o nome completo (envios antigos). */
+const fromSaved = (p: PublicDeal["passengersData"][number]) => {
+  const parts = p.name.trim().split(/\s+/);
+  return { firstName: p.firstName ?? parts[0] ?? "", lastName: p.lastName ?? parts.slice(1).join(" ") };
+};
+const GENDER = { M: "Masculino", F: "Feminino" } as const;
 const maskCpf = (v: string) => v.replace(/\D/g, "").slice(0, 11).replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})\.(\d{3})(\d)/, "$1.$2.$3").replace(/(\d{3})-?(\d{1,2})$/, "$1-$2");
 const showCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
 const showDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v);
@@ -16,21 +23,21 @@ const showDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").re
 export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: string; token: string; agency: string; whatsapp: string | null; deal: PublicDeal }) {
   const fixed = deal.passengers ?? null; // quantidade combinada: o comprador não muda
   const start = deal.passengersData.length
-    ? deal.passengersData.map((p) => ({ name: p.name, cpf: maskCpf(p.cpf), birthDate: p.birthDate, email: p.email ?? "", phone: p.phone ?? "" }))
+    ? deal.passengersData.map((p) => ({ ...fromSaved(p), cpf: maskCpf(p.cpf), birthDate: p.birthDate, gender: p.gender ?? "", email: p.email ?? "", phone: p.phone ?? "" }))
     : Array.from({ length: fixed ?? 1 }, empty);
   const [pax, setPax] = useState<Pax[]>(start);
   const [editing, setEditing] = useState(!deal.passengersAt);
   const [website, setWebsite] = useState("");
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
-  const issued = !!deal.locator;
+  const issued = deal.issued; // emitido = bilhete anexado
   const wa = waLink(whatsapp, `Olá! Sobre a emissão #${deal.number}.`);
   const set = (i: number, p: Partial<Pax>) => setPax((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const r = await fetch(`/api/public/miles-deal/${encodeURIComponent(slug)}/${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ passengers: pax, website }) });
+    const r = await fetch(`/api/public/miles-deal/${encodeURIComponent(slug)}/${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ passengers: pax.map((p) => ({ ...p, name: `${p.firstName.trim()} ${p.lastName.trim()}` })), website }) });
     const j = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) return setErro(j.erro ?? "Não foi possível enviar. Tente de novo.");
@@ -62,7 +69,10 @@ export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: str
         <section className="card p-5 text-center" aria-label="Localizador">
           <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
           <p className="mt-2 text-sm text-muted">Localizador</p>
-          <p className="text-2xl font-bold tracking-widest">{deal.locator}</p>
+          {deal.locator && <p className="text-2xl font-bold tracking-widest">{deal.locator}</p>}
+          {deal.ticketName && (
+            <a className="btn-primary mt-4 inline-flex h-11 items-center justify-center px-5" href={`/api/public/miles-deal/${encodeURIComponent(slug)}/${encodeURIComponent(token)}/ticket`}>Baixar bilhete</a>
+          )}
         </section>
       )}
 
@@ -73,7 +83,7 @@ export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: str
             {deal.passengersData.map((p, i) => (
               <li key={i} className="rounded-xl bg-panel2 px-3 py-2">
                 <p className="font-semibold">{p.name}</p>
-                <p className="text-xs text-muted">CPF {showCpf(p.cpf)} · nascimento {showDate(p.birthDate)}{p.email ? ` · ${p.email}` : ""}{p.phone ? ` · ${p.phone}` : ""}</p>
+                <p className="text-xs text-muted">CPF {showCpf(p.cpf)} · nascimento {showDate(p.birthDate)}{p.gender ? ` · ${GENDER[p.gender]}` : ""}{p.email ? ` · ${p.email}` : ""}{p.phone ? ` · ${p.phone}` : ""}</p>
               </li>
             ))}
           </ul>
@@ -92,10 +102,14 @@ export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: str
                 <span>Passageiro {i + 1}</span>
                 {!fixed && pax.length > 1 && <button type="button" className="text-muted hover:text-zinc-100" onClick={() => setPax((l) => l.filter((_, j) => j !== i))} aria-label={`Remover passageiro ${i + 1}`}><Trash2 className="h-4 w-4" /></button>}
               </legend>
-              <label className="block"><span className={lab}>Nome completo *</span><input className={field} value={p.name} onChange={(e) => set(i, { name: e.target.value })} required minLength={5} maxLength={120} autoComplete="name" /></label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block"><span className={lab}>Nome *</span><input className={field} value={p.firstName} onChange={(e) => set(i, { firstName: e.target.value })} required minLength={2} maxLength={60} autoComplete="given-name" placeholder="Como no documento" /></label>
+                <label className="block"><span className={lab}>Sobrenome *</span><input className={field} value={p.lastName} onChange={(e) => set(i, { lastName: e.target.value })} required minLength={2} maxLength={60} autoComplete="family-name" placeholder="Como no documento" /></label>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block"><span className={lab}>CPF *</span><input className={field} value={p.cpf} onChange={(e) => set(i, { cpf: maskCpf(e.target.value) })} required inputMode="numeric" placeholder="000.000.000-00" /></label>
                 <label className="block"><span className={lab}>Data de nascimento *</span><input type="date" className={field} value={p.birthDate} onChange={(e) => set(i, { birthDate: e.target.value })} required /></label>
+                <label className="block"><span className={lab}>Sexo *</span><select className={field} value={p.gender} onChange={(e) => set(i, { gender: e.target.value as Pax["gender"] })} required><option value="" disabled>Selecione</option><option value="M">Masculino</option><option value="F">Feminino</option></select></label>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block"><span className={lab}>E-mail</span><input type="email" className={field} value={p.email} onChange={(e) => set(i, { email: e.target.value })} maxLength={200} /></label>

@@ -159,7 +159,8 @@ describe("editar venda", () => {
     expect(after).toHaveLength(1);
     expect(after[0]!.points).toBe(-8000);
     expect(after[0]!.createdAt.getTime()).toBe(before.createdAt.getTime());
-    expect(await prisma.accountBeneficiary.count({ where: { saleId: id } })).toBe(0);
+    // sem cliente nomeado, o passageiro da venda editada fica "Anônimo" (ocupa a vaga)
+    expect(await prisma.accountBeneficiary.findMany({ where: { saleId: id }, select: { name: true, document: true } })).toEqual([{ name: "Anônimo", document: null }]);
   });
 
   it("edição com conta inválida não muda nada", async () => {
@@ -169,5 +170,17 @@ describe("editar venda", () => {
     expect(bad.status).toBe(404);
     expect(await view(id)).toMatchObject({ points: 10000 });
     expect(await acc(lat)).toMatchObject({ balance: 10000 });
+  });
+});
+
+describe("CPFs emitidos", () => {
+  it("contam passagens e também a venda de milhas do CRM (item com passageiros)", async () => {
+    const { saleCpfs } = await import("@/server/services/sales");
+    expect(saleCpfs([
+      { kind: "FLIGHT", issuedWith: "POINTS", passengers: 2, customers: [] },
+      { kind: "OTHER", issuedWith: "POINTS", passengers: 1, customers: [] }, // CRM Milhas
+      { kind: "BAGGAGE", issuedWith: "POINTS", passengers: null, customers: [] },
+      { kind: "FLIGHT", issuedWith: "CASH", passengers: 3, customers: [] },
+    ])).toBe(3);
   });
 });
