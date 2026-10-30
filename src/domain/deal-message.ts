@@ -1,5 +1,7 @@
 // Mensagem para o comprador quando a emissão sai (CRM Milhas): agradece, passa o localizador e os
 // passageiros e cobra pelo PIX. O usuário copia ou abre no WhatsApp e anexa o bilhete por lá.
+// Duas versões: cliente final (quem viaja) e revendedor (balcão/agência que compra as milhas para
+// emitir para o cliente dele — o tom é de parceria e o bilhete é para repassar).
 
 export const PIX_KEY_TYPES = { CPF: "CPF", CNPJ: "CNPJ", EMAIL: "E-mail", TELEFONE: "Telefone", ALEATORIA: "Chave aleatória" } as const;
 export type PixKeyType = keyof typeof PIX_KEY_TYPES;
@@ -15,19 +17,21 @@ export function formatPixKey(p: Pick<PixInfo, "keyType" | "key">) {
   return p.key.trim();
 }
 
-export function issuedMessage(i: { buyerName: string; locator: string | null; passengers: string[]; points: number | null; taxesCents?: number | null; chargeCents: number | null; pix: PixInfo | null }) {
+export function issuedMessage(i: { buyerName: string; reseller?: boolean; locator: string | null; passengers: string[]; points: number | null; taxesCents?: number | null; chargeCents: number | null; pix: PixInfo | null }) {
   const first = i.buyerName.trim().split(/\s+/)[0] ?? "";
   const lines = [
     `Olá${first ? `, ${first}` : ""}! 😊`,
     "",
-    "Muito obrigado pela sua compra! Sua emissão foi concluída com sucesso. ✈️",
+    i.reseller ? "Emissão concluída com sucesso! ✅ Obrigado pela compra das milhas." : "Muito obrigado pela sua compra! Sua emissão foi concluída com sucesso. ✈️",
     "",
     ...(i.locator ? [`*Localizador:* ${i.locator}`] : []),
     ...(i.passengers.length ? [`*${i.passengers.length > 1 ? "Passageiros" : "Passageiro"}:* ${i.passengers.join(", ")}`] : []),
     ...(i.points ? [`*Milhas:* ${i.points.toLocaleString("pt-BR")}`] : []),
     ...(i.taxesCents ? [`*Taxas de embarque:* ${brl(i.taxesCents)}`] : []),
     "",
-    "Segue o bilhete em anexo. Confira os dados e, se notar qualquer divergência, me avise.",
+    i.reseller
+      ? "Segue o bilhete em anexo para você repassar ao seu cliente. Confira os dados do passageiro e, se houver qualquer divergência, me avise o quanto antes."
+      : "Segue o bilhete em anexo. Confira os dados e, se notar qualquer divergência, me avise.",
   ];
   if (i.chargeCents != null || i.pix) {
     lines.push("", "*Pagamento*");
@@ -42,6 +46,6 @@ export function issuedMessage(i: { buyerName: string; locator: string | null; pa
     }
     lines.push("", "Assim que fizer o PIX, me envie o comprovante, por favor.");
   }
-  lines.push("", "Qualquer dúvida, estou à disposição. Boa viagem! 🙌");
+  lines.push("", i.reseller ? "Obrigado pela parceria! Fico à disposição para as próximas emissões. 🤝" : "Qualquer dúvida, estou à disposição. Boa viagem! 🙌");
   return lines.join("\n");
 }

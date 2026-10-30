@@ -27,6 +27,16 @@ describe("mensagem de emissão", () => {
     expect(m).not.toContain("💰 Valor:");
   });
 
+  it("revendedor (balcão/agência): tom de parceria, bilhete para repassar e sem 'boa viagem'", () => {
+    const m = issuedMessage({ buyerName: "", reseller: true, locator: "LA9571716CUFU", passengers: ["Fulano Silva"], points: 140000, chargeCents: 355000, pix });
+    expect(m.startsWith("Olá! 😊")).toBe(true);
+    expect(m).toContain("Emissão concluída com sucesso! ✅ Obrigado pela compra das milhas.");
+    expect(m).toContain("para você repassar ao seu cliente");
+    expect(m).toContain("Obrigado pela parceria!");
+    expect(m).not.toContain("Boa viagem");
+    expect(m).not.toContain("sua compra! Sua emissão");
+  });
+
   it("sem PIX nem valor, não mostra a parte de pagamento", () => {
     const m = issuedMessage({ buyerName: "", locator: "XYZ9", passengers: ["A B", "C D"], points: null, chargeCents: null, pix: null });
     expect(m).toContain("*Passageiros:* A B, C D");
