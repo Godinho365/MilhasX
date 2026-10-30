@@ -2,14 +2,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Search, Coins, MessageCircle, Trash2, Receipt } from "lucide-react";
+import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
 import { fmtBRL, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
-import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealProfitCents, dealTotalCents, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
+import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
 
 type Customer = { id: string; name: string; phone: string | null };
@@ -33,6 +33,10 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   const [cpm, setCpm] = useState(deal?.saleCpmCents ? fmtBRL(deal.saleCpmCents) : "");
   const [profitIn, setProfitIn] = useState(deal?.profitManual && deal.profitCents != null ? fmtBRL(deal.profitCents) : ""); // lucro informado à mão
   const [passengers, setPassengers] = useState(deal?.passengers ? String(deal.passengers) : "");
+  const [taxes, setTaxes] = useState(deal?.taxesCents != null ? fmtBRL(deal.taxesCents) : "");
+  const [orderLink, setOrderLink] = useState(deal?.orderLink ?? "");
+  const [locator, setLocator] = useState(deal?.locator ?? "");
+  const [paste, setPaste] = useState("");
   const [notes, setNotes] = useState(deal?.notes ?? "");
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,10 +45,22 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   const acc = accounts.find((a) => a.id === accountId);
   const nPoints = Number(points.replace(/\D/g, "")) || null;
   const cpmCents = cpm.trim() ? parseBRLToCents(cpm) : null;
-  const total = dealTotalCents(nPoints, cpmCents);
+  const taxesCents = taxes.trim() ? parseBRLToCents(taxes) : null;
+  const total = dealChargeCents(nPoints, cpmCents, taxesCents);
   const estimated = dealProfitCents(nPoints, cpmCents, acc?.cpmCents ?? null);
   const manualProfit = profitIn.trim() ? parseBRLToCents(profitIn) : null;
   const profit = manualProfit ?? estimated;
+
+  // Colar o que o comprador mandou: link do pedido, "8.673K", "1CPF", "Taxas: R$35,75"
+  function onPaste(text: string) {
+    setPaste(text);
+    const p = parseDealPaste(text);
+    if (p.orderLink) setOrderLink(p.orderLink);
+    if (p.points && !locked) setPoints(pts(p.points));
+    if (p.passengers) setPassengers(String(p.passengers));
+    if (p.taxesCents != null && !locked) setTaxes(fmtBRL(p.taxesCents));
+  }
+  const pasted = paste.trim() ? parseDealPaste(paste) : null;
 
   function pickCustomer(id: string) {
     setCustomerId(id);
@@ -58,9 +74,10 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
     e.preventDefault();
     if (cpm.trim() && cpmCents === null) return setErro("Preço do milheiro inválido");
     if (profitIn.trim() && manualProfit === null) return setErro("Lucro inválido");
+    if (taxes.trim() && taxesCents === null) return setErro("Taxas inválidas");
     setBusy(true);
     const balcao = buyerType === "BALCAO";
-    const body = { buyerType, customerId: balcao ? null : customerId || null, customerName: name, customerPhone: balcao ? null : phone || null, accountId: accountId || null, points: nPoints, saleCpmCents: cpmCents, profitCents: manualProfit, passengers: Number(passengers) || null, notes: notes || null };
+    const body = { buyerType, customerId: balcao ? null : customerId || null, customerName: name, customerPhone: balcao ? null : phone || null, accountId: accountId || null, points: nPoints, saleCpmCents: cpmCents, profitCents: manualProfit, passengers: Number(passengers) || null, taxesCents, orderLink: orderLink.trim() || null, locator: locator.trim() || null, notes: notes || null };
     const r = deal ? await api(`/api/miles-deals/${deal.id}`, "PUT", body) : await api("/api/miles-deals", "POST", body);
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
@@ -126,20 +143,91 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
         </Field>
+        <Field label="Colar pedido do comprador">
+          <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} placeholder="Ex.: link do pedido, 8.673K, 1CPF, Taxas: R$35,75" />
+        </Field>
+        {pasted && (
+          <p className="-mt-2 text-xs text-muted">
+            {[pasted.orderLink && "link do pedido", pasted.points && `${pts(pasted.points)} pontos`, pasted.passengers && `${pasted.passengers} CPF${pasted.passengers > 1 ? "s" : ""}`, pasted.taxesCents != null && `taxas ${fmtBRL(pasted.taxesCents)}`].filter(Boolean).join(" · ") || "Nada reconhecido no texto."}
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-4">
           <Field label="Pontos"><input className="input" inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} disabled={locked} placeholder="0" /></Field>
           <Field label="Milheiro venda (R$)"><input className="input" inputMode="decimal" value={cpm} onChange={(e) => setCpm(e.target.value)} disabled={locked} placeholder="R$ 0,00" /></Field>
           <Field label="Lucro (R$)"><input className="input" inputMode="decimal" value={profitIn} onChange={(e) => setProfitIn(e.target.value)} placeholder={estimated != null ? fmtBRL(estimated) : "R$ 0,00"} title="Vazio: estimado pelos pontos, milheiro e CPM da conta" /></Field>
-          <Field label="Passageiros"><input className="input" inputMode="numeric" value={passengers} onChange={(e) => setPassengers(e.target.value.replace(/\D/g, ""))} placeholder="Opcional" /></Field>
+          <Field label="Passageiros (CPFs)"><input className="input" inputMode="numeric" value={passengers} onChange={(e) => setPassengers(e.target.value.replace(/\D/g, ""))} placeholder="Opcional" /></Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_2fr_1fr]">
+          <Field label="Taxas (R$)"><input className="input" inputMode="decimal" value={taxes} onChange={(e) => setTaxes(e.target.value)} disabled={locked} placeholder="R$ 0,00" title="Pagas por você na emissão e cobradas do comprador" /></Field>
+          <Field label="Link do pedido">
+            <div className="flex gap-1.5">
+              <input className="input min-w-0 flex-1" value={orderLink} onChange={(e) => setOrderLink(e.target.value)} placeholder="https://…" inputMode="url" />
+              {/^https?:\/\//.test(orderLink) && <a href={orderLink} target="_blank" rel="noopener noreferrer" className="btn-ghost h-10 w-10 shrink-0 px-0" aria-label="Abrir o link do pedido"><ExternalLink className="h-4 w-4" /></a>}
+            </div>
+          </Field>
+          <Field label="Localizador"><input className="input uppercase" value={locator} onChange={(e) => setLocator(e.target.value)} maxLength={20} placeholder="Após emitir" /></Field>
         </div>
         <p className="text-sm text-muted">
-          {total != null ? <>Total da venda: <span className="font-semibold text-zinc-100 tabular-nums">{fmtBRL(total)}</span></> : manualProfit == null ? "Informe pontos e milheiro para ver o total, ou digite o lucro." : null}
+          {total != null ? <>Total a cobrar: <span className="font-semibold text-zinc-100 tabular-nums">{fmtBRL(total)}</span>{taxesCents ? <span className="text-xs"> (com {fmtBRL(taxesCents)} de taxas)</span> : null}</> : manualProfit == null ? "Informe pontos e milheiro para ver o total, ou digite o lucro." : null}
           {profit != null && <> · {manualProfit != null ? "Lucro" : "Lucro estimado"}: <span className={`font-semibold tabular-nums ${profit >= 0 ? "text-green-300" : "text-red-300"}`}>{fmtBRL(profit)}</span>{manualProfit == null && acc?.cpmCents ? <span className="text-xs"> (CPM da conta {fmtBRL(acc.cpmCents)})</span> : null}</>}
           {acc && nPoints && nPoints > acc.balance ? <span className="block text-xs text-amber-300">A conta tem só {pts(acc.balance)} pontos.</span> : null}
         </p>
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
+        {deal && <BuyerPage deal={deal} />}
       </form>
     </Modal>
+  );
+}
+
+/* ---------------- Página do comprador ---------------- */
+
+const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
+const fmtDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v);
+
+function BuyerPage({ deal }: { deal: DealView }) {
+  const [link, setLink] = useState<string | null>(null);
+  async function share(open: boolean) {
+    const r = await api<{ token: string; slug: string | null }>(`/api/miles-deals/${deal.id}/share`, "POST");
+    if (!r.ok) return toast(r.erro, "error");
+    if (!r.data.slug) return toast("Crie sua página em Configurações › Sua MilhasX primeiro", "error");
+    const url = `${window.location.origin}/p/${r.data.slug}/emissao/${r.data.token}`;
+    setLink(url);
+    if (open) return void window.open(url, "_blank", "noopener");
+    await navigator.clipboard.writeText(url).catch(() => {});
+    toast("Link da página do comprador copiado");
+  }
+  const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Página do comprador">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Página do comprador</h3>
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => share(false)}><Link2 className="h-3.5 w-3.5" />Copiar link</button>
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => share(true)}><ExternalLink className="h-3.5 w-3.5" />Ver</button>
+      </div>
+      <p className="text-xs text-muted">O comprador vê o resumo (milhas, CPFs, taxas e total), envia os dados dos passageiros e, com o localizador salvo, vê a emissão confirmada.</p>
+      {link && <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px] text-muted">{link}</p>}
+      {deal.passengersData.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</p>
+          {deal.passengersData.map((p, i) => (
+            <div key={i} className="rounded-lg bg-panel2 px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="flex-1 font-semibold">{p.name}</span>
+                <button type="button" className="text-muted hover:text-zinc-100" onClick={() => copy(p.name, "Nome")} aria-label={`Copiar nome de ${p.name}`}><Copy className="h-3.5 w-3.5" /></button>
+              </div>
+              <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted">
+                <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.cpf, "CPF")} title="Copiar CPF">CPF {fmtCpf(p.cpf)}</button>
+                <button type="button" className="hover:text-zinc-100" onClick={() => copy(fmtDay(p.birthDate), "Nascimento")} title="Copiar nascimento">Nasc. {fmtDay(p.birthDate)}</button>
+                {p.email && <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.email!, "E-mail")} title="Copiar e-mail">{p.email}</button>}
+                {p.phone && <span>{p.phone}</span>}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-amber-300">Ainda sem dados dos passageiros.</p>
+      )}
+    </section>
   );
 }
 
@@ -163,7 +251,10 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
           <p className="mt-1 truncate text-[11px] text-muted">{d.accountLabel ?? "Conta a definir"}</p>
         </div>
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
-          {d.totalCents != null && <span className="rounded-full bg-panel2 px-2 py-0.5 font-medium text-zinc-300">{fmtBRL(d.totalCents)}</span>}
+          {d.chargeCents != null && <span className="rounded-full bg-panel2 px-2 py-0.5 font-medium text-zinc-300">{fmtBRL(d.chargeCents)}</span>}
+          {d.passengers ? <span className="rounded-full bg-panel2 px-2 py-0.5">{d.passengers} CPF{d.passengers > 1 ? "s" : ""}</span> : null}
+          {d.passengersAt && <span className="flex items-center gap-0.5 rounded-full bg-blue-500/15 px-2 py-0.5 text-blue-300"><UserCheck className="h-3 w-3" />dados recebidos</span>}
+          {d.locator && <span className="rounded-full bg-panel2 px-2 py-0.5 font-mono">{d.locator}</span>}
           {d.profitCents != null && <span className={`rounded-full px-2 py-0.5 font-medium ${d.profitCents >= 0 ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"}`}>lucro {fmtBRL(d.profitCents)}</span>}
           {d.saleId && <span className="flex items-center gap-0.5 rounded-full bg-panel2 px-2 py-0.5"><Receipt className="h-3 w-3" />venda lançada</span>}
         </div>
@@ -234,7 +325,7 @@ export function DealsKanban({ deals, customers, accounts }: { deals: DealView[];
         <div className="flex min-w-max gap-3">
           {DEAL_STAGES.map((stage) => {
             const items = shown.filter((d) => d.stage === stage);
-            const total = items.reduce((t, d) => t + (d.totalCents ?? 0), 0);
+            const total = items.reduce((t, d) => t + (d.chargeCents ?? 0), 0);
             const profit = items.reduce((t, d) => t + (d.profitCents ?? 0), 0);
             return (
               <section key={stage} aria-label={DEAL_STAGE_LABELS[stage]} onDragOver={(e) => { e.preventDefault(); setOver(stage); }} onDragLeave={() => setOver((s) => (s === stage ? null : s))} onDrop={(e) => drop(e, stage)}
