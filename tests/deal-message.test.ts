@@ -18,6 +18,15 @@ describe("mensagem de emissão", () => {
     expect(m).toContain("🏦 Nubank");
   });
 
+  it("com taxas: linha de taxas e o pagamento separa milhas, taxas e total", () => {
+    const m = issuedMessage({ buyerName: "Ana", locator: "LA1", passengers: ["Ana Lima"], points: 8673, taxesCents: 3575, chargeCents: 26125, pix });
+    expect(m).toContain("*Taxas de embarque:* R$ 35,75");
+    expect(m).toContain("✈️ Milhas: R$ 225,50");
+    expect(m).toContain("🧾 Taxas: R$ 35,75");
+    expect(m).toContain("💰 *Total: R$ 261,25*");
+    expect(m).not.toContain("💰 Valor:");
+  });
+
   it("sem PIX nem valor, não mostra a parte de pagamento", () => {
     const m = issuedMessage({ buyerName: "", locator: "XYZ9", passengers: ["A B", "C D"], points: null, chargeCents: null, pix: null });
     expect(m).toContain("*Passageiros:* A B, C D");

@@ -15,7 +15,7 @@ export function formatPixKey(p: Pick<PixInfo, "keyType" | "key">) {
   return p.key.trim();
 }
 
-export function issuedMessage(i: { buyerName: string; locator: string | null; passengers: string[]; points: number | null; chargeCents: number | null; pix: PixInfo | null }) {
+export function issuedMessage(i: { buyerName: string; locator: string | null; passengers: string[]; points: number | null; taxesCents?: number | null; chargeCents: number | null; pix: PixInfo | null }) {
   const first = i.buyerName.trim().split(/\s+/)[0] ?? "";
   const lines = [
     `Olá${first ? `, ${first}` : ""}! 😊`,
@@ -25,12 +25,16 @@ export function issuedMessage(i: { buyerName: string; locator: string | null; pa
     ...(i.locator ? [`*Localizador:* ${i.locator}`] : []),
     ...(i.passengers.length ? [`*${i.passengers.length > 1 ? "Passageiros" : "Passageiro"}:* ${i.passengers.join(", ")}`] : []),
     ...(i.points ? [`*Milhas:* ${i.points.toLocaleString("pt-BR")}`] : []),
+    ...(i.taxesCents ? [`*Taxas de embarque:* ${brl(i.taxesCents)}`] : []),
     "",
     "Segue o bilhete em anexo. Confira os dados e, se notar qualquer divergência, me avise.",
   ];
   if (i.chargeCents != null || i.pix) {
     lines.push("", "*Pagamento*");
-    if (i.chargeCents != null) lines.push(`💰 Valor: ${brl(i.chargeCents)}`);
+    if (i.chargeCents != null && i.taxesCents) {
+      // com taxas: mostra milhas + taxas e o total a pagar
+      lines.push(`✈️ Milhas: ${brl(i.chargeCents - i.taxesCents)}`, `🧾 Taxas: ${brl(i.taxesCents)}`, `💰 *Total: ${brl(i.chargeCents)}*`);
+    } else if (i.chargeCents != null) lines.push(`💰 Valor: ${brl(i.chargeCents)}`);
     if (i.pix) {
       lines.push(`🔑 Chave PIX (${PIX_KEY_TYPES[i.pix.keyType]}): ${formatPixKey(i.pix)}`);
       if (i.pix.name.trim()) lines.push(`👤 ${i.pix.name.trim()}`);

@@ -192,7 +192,8 @@ function IssuedMessage({ deal }: { deal: DealView }) {
   const [form, setForm] = useState<PixInfo>({ keyType: "CPF", key: "", name: "", bank: "" });
   const [text, setText] = useState("");
   const build = (p: PixInfo | null) =>
-    issuedMessage({ buyerName: deal.customerName, locator: deal.locator, passengers: deal.passengersData.map((x) => x.name), points: deal.points, chargeCents: deal.chargeCents, pix: p });
+    // balcão/plataforma: o "comprador" é o nome da plataforma, então a saudação fica sem nome
+    issuedMessage({ buyerName: deal.buyerType === "BALCAO" ? "" : deal.customerName, locator: deal.locator, passengers: deal.passengersData.map((x) => x.name), points: deal.points, taxesCents: deal.taxesCents, chargeCents: deal.chargeCents, pix: p });
   useEffect(() => {
     api<{ item: { pix: PixInfo | null } }>("/api/preferences").then((r) => {
       const p = r.ok ? r.data.item.pix : null;
