@@ -5,6 +5,7 @@ import { requirePageUser, selectedHolderId } from "@/server/session";
 import { walletSummary, evolutionByHolder, activationProgress, pendingBreakdown, overviewData } from "@/server/services/wallet";
 import { salesDashboard } from "@/server/services/extras";
 import { beneficiaryUsage } from "@/server/services/accounts";
+import { accountsCapacity } from "@/server/services/capacity";
 import { prisma } from "@/server/db";
 import { Stat, PageHeader } from "@/components/stat";
 import { StatBreakdown, type Breakdown } from "@/components/stat-breakdown";
@@ -57,7 +58,9 @@ const withFree = (text: string, free: number | null | undefined) => (free == nul
 
 /** Os 4 indicadores; o ⇕ de cada um abre o detalhamento por titular e programa (como na referência). */
 async function WalletStats({ userId, s, pending, money }: { userId: string; s: Summary; pending: Pending; money: Money }) {
-  const usage = await beneficiaryUsage(userId);
+  const [usage, cap] = await Promise.all([beneficiaryUsage(userId), accountsCapacity(userId)]);
+  const shown = new Set(s.accounts.map((a) => a.id));
+  const capRows = cap.rows.filter((r) => shown.has(r.id));
   const byHolder = (value: (a: Summary["accounts"][number]) => string | null, groupValue?: (h: Summary["holders"][number]) => string, withCpf = false) =>
     s.holders.map((h) => {
       const rows = s.accounts
@@ -120,6 +123,34 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
         <p className="kicker mb-2">Custo do milheiro por programa</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-6">
           {programs.map((p) => <StatBreakdown key={p.id} label={p.name} value={p.cpm == null ? "-" : money(p.cpm)} hint={withFree(pts(p.balance), p.cpfsFree)} breakdown={p.cost} />)}
+        </div>
+      </section>
+    )}
+    {capRows.length > 0 && (
+      <section className="card mt-3 overflow-hidden sm:mt-4" aria-label="Espaço para receber milhas">
+        <div className="border-b border-line px-5 py-3">
+          <h2 className="font-semibold">Espaço para receber milhas</h2>
+          <p className="text-xs text-muted">
+            Quantas milhas cada conta ainda consegue emitir com os CPFs livres (~{fmtPts(cap.avg.ptsPerCpf)} por emissão{cap.avg.fromHistory ? `, média de ${cap.avg.sample} ${cap.avg.sample === 1 ? "CPF" : "CPFs"} dos últimos 12 meses` : ", padrão até haver vendas"}).
+            Compre e acumule pontos no titular com mais espaço; milhas além disso ficam sem CPF para usar.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="table-base">
+            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th></tr></thead>
+            <tbody>
+              {[...capRows].sort((a, b) => b.space - a.space).map((r) => (
+                <tr key={r.id}>
+                  <td className="font-medium">{r.label}</td>
+                  <td className="text-right tabular-nums">{fmtPts(r.load.balance)}</td>
+                  <td className="hidden text-right tabular-nums text-muted sm:table-cell">{r.load.reserved ? fmtPts(r.load.reserved) : "-"}</td>
+                  <td className="text-right tabular-nums">{r.load.cpfFree}</td>
+                  <td className="hidden text-right tabular-nums md:table-cell">{r.emissionsLeft.toLocaleString("pt-BR")}</td>
+                  <td className={`text-right font-semibold tabular-nums ${r.space < 0 ? "text-bad" : ""}`} title={r.space < 0 ? "Milhas demais para os CPFs livres: risco de saldo encalhado" : undefined}>{r.space < 0 ? `−${fmtPts(-r.space)} ⚠️` : fmtPts(r.space)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
     )}

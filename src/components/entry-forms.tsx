@@ -11,6 +11,7 @@ import { api, newKey, today } from "@/lib/api";
 import { parseBRLToCents, fmtBRL, fmtPts } from "@/lib/format";
 import { MANUAL_CREDIT_TYPES, MANUAL_DEBIT_TYPES, ENTRY_LABELS, type EntryType } from "@/domain/ledger";
 import { planCost, scaleCosts } from "@/domain/installments";
+import { maxTransferForSpace } from "@/domain/capacity";
 import { costTypesFor, DETAILS_BY_TYPE, redemptionValueCpm, type CostType } from "@/domain/costs";
 import { AIRPORTS } from "@/domain/airports";
 import { Modal, Field, Alert } from "./ui";
@@ -543,6 +544,16 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
     } else carried = Math.round((srcCost * points) / srcBalance);
   }
   const totalCost = carried + fee;
+  // Espaço da conta de destino (CPFs livres × milhas por emissão − saldo): o que chega além disso fica sem CPF para usar
+  const arriving = base + bonus;
+  // editando: o que esta transferência já pôs na conta de destino volta a contar como espaço
+  const ownArrival = saved && f.to === saved.toAccountId ? Math.floor(Math.floor((saved.points * saved.parityTo) / saved.parityFrom) * (1 + saved.bonusPercent / 100)) : 0;
+  const destSpace = dst?.space != null ? dst.space + ownArrival : null;
+  const spaceInfo = dst && destSpace != null && arriving > 0
+    ? arriving > destSpace
+      ? { warn: true, text: `Vão chegar ${fmtPts(arriving)} milhas, mas esta conta só tem espaço para ${fmtPts(Math.max(0, destSpace))} (${dst.cpfFree} CPFs livres × ~${fmtPts(dst.ptsPerCpf ?? 0)} por emissão). Sobrariam ~${fmtPts(arriving - Math.max(0, destSpace))} milhas sem CPF para usar${destSpace > 0 ? `: transfira até ${fmtPts(maxTransferForSpace(destSpace, pf, pt, Number(f.bonus) || 0))} pontos` : ""}.` }
+      : { warn: false, text: `Cabe: depois desta transferência ainda há espaço para ~${fmtPts(destSpace - arriving)} milhas (${dst.cpfFree} CPFs livres).` }
+    : null;
 
   async function requestClose() {
     if (await confirmDiscard(dirty)) onClose();
@@ -635,6 +646,7 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
             <div><p className="text-xs text-muted">Bônus</p><p className="font-semibold tabular-nums">{fmtPts(bonus)} pts</p></div>
             <div><p className="text-xs text-muted">Custo levado</p><p className="font-semibold tabular-nums">{fmtBRL(totalCost)}</p></div>
             <div><p className="text-xs text-muted">CPM no destino</p><p className="font-semibold tabular-nums text-accent-light">{fmtBRL(cpm(totalCost, base + bonus))}</p></div>
+            {spaceInfo && <p className={`col-span-full ${spaceInfo.warn ? "text-amber-300" : "text-muted"}`} aria-label="Espaço na conta de destino">{spaceInfo.text}</p>}
             {points > srcBalance && <p className="col-span-full text-red-300">Saldo insuficiente na origem ({fmtPts(srcBalance)} pts{cartPts ? " já contando a compra" : ""}).</p>}
             {adv.delivery && adv.deliveryDate && <p className="col-span-full text-xs text-muted">Os pontos ficam “a receber” no destino até {adv.deliveryDate.split("-").reverse().join("/")}.</p>}
           </div>

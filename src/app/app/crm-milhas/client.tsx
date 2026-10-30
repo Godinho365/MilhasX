@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
-import { fmtBRL, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
@@ -161,6 +161,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
         </Field>
+        {deal && !locked && (deal.points ?? 0) > 0 && <AccountSuggestion dealId={deal.id} chosen={accountId} onPick={setAccountId} />}
         <Field label="Colar pedido do comprador">
           <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} placeholder="Ex.: link do pedido, 8.673K, 1CPF, Taxas: R$35,75" />
         </Field>
@@ -279,6 +280,47 @@ function Emission({ deal: initial }: { deal: DealView }) {
         />
       )}
     </>
+  );
+}
+
+/* ---------------- Sugestão de conta ---------------- */
+
+type Fit = { id: string; label: string; already: number; load: { balance: number; reserved: number; cpfFree: number; ptsPerCpf: number }; fit: { enough: boolean; newCpfs: number; balanceAfter: number; cpfAfter: number; excessAfter: number; cpfShort: boolean } };
+
+/** Qual conta usar: a que dá para emitir sem deixar milhas presas (ver domain/capacity). Usa os pontos e os
+ *  passageiros salvos na negociação. */
+function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen: string; onPick: (id: string) => void }) {
+  const [data, setData] = useState<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } } | null>(null);
+  useEffect(() => {
+    api<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } }>(`/api/miles-deals/${dealId}/fit`).then((r) => r.ok && setData(r.data));
+  }, [dealId]);
+  if (!data || !data.accounts.length) return null;
+  const top = data.accounts.slice(0, 3);
+  const note = (a: Fit) => {
+    if (!a.fit.enough) return { tone: "text-red-300", text: `Saldo insuficiente (faltam ${fmtPts(-a.fit.balanceAfter)} milhas)` };
+    if (a.fit.cpfShort) return { tone: "text-red-300", text: "Sem CPFs livres para os passageiros" };
+    if (a.fit.excessAfter > 0) return { tone: "text-amber-300", text: `Sobram ~${fmtPts(a.fit.excessAfter)} milhas sem CPF para usar` };
+    return { tone: "text-muted", text: `Depois: ${fmtPts(a.fit.balanceAfter)} milhas e ${a.fit.cpfAfter} CPFs livres` };
+  };
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Sugestão de conta">
+      <p className="text-xs text-muted">
+        <b className="text-zinc-200">Sugestão de conta</b> para {fmtPts(data.points)} milhas e {data.cpfsNeeded} {data.cpfsNeeded === 1 ? "CPF" : "CPFs"} (média ~{fmtPts(data.avg.ptsPerCpf)} por emissão): emissão grande vai para a conta com milhas sobrando; pequena, para a com CPFs sobrando.
+      </p>
+      {top.map((a, i) => {
+        const n = note(a);
+        return (
+          <div key={a.id} className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm ${chosen === a.id ? "bg-accent-soft" : "bg-panel2"}`}>
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">{i === 0 && a.fit.enough && !a.fit.cpfShort ? "✅ " : ""}{a.label}</span>
+              <span className="block text-xs text-muted">{fmtPts(a.load.balance - a.load.reserved)} milhas livres · {a.load.cpfFree} CPFs livres{a.already ? ` · 👤 ${a.already === 1 ? "passageiro já é beneficiário aqui" : `${a.already} passageiros já são beneficiários aqui`} (não gasta CPF)` : ""}</span>
+              <span className={`block text-xs ${n.tone}`}>{n.text}</span>
+            </span>
+            {chosen === a.id ? <span className="text-xs text-accent-light">Escolhida</span> : <button type="button" className="btn-ghost h-8 text-xs" onClick={() => onPick(a.id)}>Usar esta</button>}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 

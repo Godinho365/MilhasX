@@ -201,6 +201,20 @@ describe("CRM Milhas", () => {
     expect(await listDeals(userId)).toHaveLength(2);
   });
 
+  it("sugestão de conta: passageiro repetido não gasta CPF e negociação aberta reserva milhas", async () => {
+    const { accountsCapacity, dealAccountFit } = await import("@/server/services/capacity");
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    await prisma.accountBeneficiary.create({ data: { userId, accountId: lat, name: "Ana Souza Lima", document: "12345678909", usedAt: new Date() } });
+    const d = (await newDeal({ accountId: lat, points: 8000, saleCpmCents: 2600, passengers: 1 })).data.item;
+    await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana Souza Lima", cpf: "123.456.789-09", birthDate: "1990-05-20" }] }, { id: d.id });
+    const fit = await dealAccountFit(userId, d.id);
+    const mine = fit.accounts.find((a) => a.id === lat)!;
+    expect(mine).toMatchObject({ already: 1, fit: { newCpfs: 0, enough: true } });
+    // a negociação aberta reserva as milhas dela no espaço da conta (fora da própria sugestão)
+    expect((await accountsCapacity(userId)).rows.find((r) => r.id === lat)!.load.reserved).toBe(8000);
+    expect(mine.load.reserved).toBe(0);
+  });
+
   it("isola por usuário", async () => {
     const d = (await newDeal()).data.item;
     const o = new Client();
