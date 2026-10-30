@@ -11,6 +11,7 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
 import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
+import { LATAM_BOOKMARKLET, latamPayload } from "@/domain/latam-fill";
 
 type Customer = { id: string; name: string; phone: string | null };
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
@@ -179,6 +180,31 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
   );
 }
 
+/* ---------------- Preencher LATAM ---------------- */
+
+/** Instruções e o favorito para arrastar até a barra de favoritos. O href é posto pelo DOM porque o React
+ *  não aceita links "javascript:" (é o que um favorito é). */
+function LatamBookmarklet({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { ref.current?.setAttribute("href", LATAM_BOOKMARKLET); }, []);
+  return (
+    <Modal open onClose={onClose} title="Favorito Preencher LATAM" footer={<button className="btn-primary" onClick={onClose}>Entendi</button>}>
+      <div className="space-y-4 text-sm">
+        <p>Instale uma vez e use sempre que for emitir na LATAM:</p>
+        <ol className="list-decimal space-y-2 pl-5">
+          <li>Mostre a barra de favoritos do navegador (<b>Ctrl + Shift + B</b>).</li>
+          <li>Arraste este botão até a barra de favoritos:
+            <div className="mt-2"><a ref={ref} draggable onClick={(e) => { e.preventDefault(); toast("Arraste o botão para a barra de favoritos", "error"); }} className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 font-semibold text-white">✈ Preencher LATAM</a></div>
+          </li>
+          <li>Aqui no CRM, clique em <b>Copiar para a LATAM</b> na negociação.</li>
+          <li>Na tela <b>Passageiros</b> da LATAM, clique no favorito <b>Preencher LATAM</b>. Se o navegador pedir, permita ler a área de transferência.</li>
+        </ol>
+        <p className="text-xs text-muted">Ele preenche nome, sobrenome, nascimento e CPF de cada passageiro. Nada é enviado: confira o sexo e os demais campos e continue na LATAM.</p>
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------------- Página do comprador ---------------- */
 
 const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
@@ -220,6 +246,8 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
     toast("Link da página do comprador copiado");
   }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
+  const [install, setInstall] = useState(false);
+  const latamLink = deal.orderLink && /latamairlines\.com/.test(deal.orderLink) ? deal.orderLink : null;
   return (
     <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Página do comprador">
       <div className="flex flex-wrap items-center gap-2">
@@ -232,6 +260,12 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
       {deal.passengersData.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-muted">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</p>
+          <div className="flex flex-wrap items-center gap-2" aria-label="Preencher na LATAM">
+            <button type="button" className="btn-primary h-8 text-xs" onClick={() => copy(latamPayload(deal.passengersData), "Passageiros para a LATAM")}><Copy className="h-3.5 w-3.5" />Copiar para a LATAM</button>
+            {latamLink && <a className="btn-ghost h-8 text-xs" href={latamLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir na LATAM</a>}
+            <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setInstall(true)}>Como preencher sozinho?</button>
+          </div>
+          {install && <LatamBookmarklet onClose={() => setInstall(false)} />}
           {deal.passengersData.map((p, i) => (
             <div key={i} className="rounded-lg bg-panel2 px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
