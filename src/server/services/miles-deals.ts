@@ -230,7 +230,7 @@ export async function submitDealPassengers(slug: string, token: string, passenge
   const ipHash = sha(`deal:${ip}`).slice(0, 32);
   if ((await prisma.loginAttempt.count({ where: { email: key, ip: ipHash, createdAt: { gte: new Date(Date.now() - 3600_000) } } })) >= SUBMITS_PER_HOUR) throw new DomainError(429, "Muitos envios. Tente de novo mais tarde.");
   await prisma.loginAttempt.create({ data: { email: key, ip: ipHash, success: true } });
-  const data = passengers.map((p) => ({ name: p.name.trim(), cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined }));
+  const data = passengers.map((p) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined }));
   await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: new Date() } });
   await prisma.notification.create({ data: { userId: d.userId, title: "Passageiros recebidos", body: `${d.customerName} enviou ${data.length === 1 ? "o passageiro" : `${data.length} passageiros`} da negociação #${d.number} (CRM Milhas).` } });
   return { ok: true };

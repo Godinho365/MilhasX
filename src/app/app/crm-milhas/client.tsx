@@ -275,6 +275,7 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
               <p className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted">
                 <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.cpf, "CPF")} title="Copiar CPF">CPF {fmtCpf(p.cpf)}</button>
                 <button type="button" className="hover:text-zinc-100" onClick={() => copy(fmtDay(p.birthDate), "Nascimento")} title="Copiar nascimento">Nasc. {fmtDay(p.birthDate)}</button>
+                {p.gender && <span>{p.gender === "F" ? "Feminino" : "Masculino"}</span>}
                 {p.email && <button type="button" className="hover:text-zinc-100" onClick={() => copy(p.email!, "E-mail")} title="Copiar e-mail">{p.email}</button>}
                 {p.phone && <span>{p.phone}</span>}
               </p>

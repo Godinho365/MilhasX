@@ -50,4 +50,4 @@ export function parseDealPaste(text: string): DealPaste {
   return out;
 }
 
-export type Passenger = { name: string; cpf: string; birthDate: string; email?: string; phone?: string };
+export type Passenger = { name: string; firstName?: string; lastName?: string; cpf: string; birthDate: string; gender?: "M" | "F" | ""; email?: string; phone?: string };

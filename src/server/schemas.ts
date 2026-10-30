@@ -429,10 +429,13 @@ export const dealMoveSchema = z.object({ stage: z.enum(["NEW", "NEGOTIATION", "A
 export const dealPassengersSchema = z.object({
   passengers: z.array(z.object({
     name: z.string().trim().min(5, "Informe o nome completo").max(120),
+    firstName: z.string().trim().min(2, "Informe o nome").max(60).optional(),
+    lastName: z.string().trim().min(2, "Informe o sobrenome").max(60).optional(),
     cpf: z.string().trim().refine((v) => v.replace(/\D/g, "").length === 11, "CPF precisa ter 11 dígitos"),
     birthDate: ymd,
     email: z.string().trim().email("E-mail inválido").max(200).optional().or(z.literal("")),
     phone: z.string().trim().max(30).optional(),
+    gender: z.enum(["M", "F"]).optional().or(z.literal("")),
   })).min(1).max(9),
   website: z.string().max(0).optional(), // honeypot
 });
