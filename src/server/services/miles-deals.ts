@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
+import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
 import { dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 
@@ -24,7 +25,10 @@ export type DealInput = {
   notes?: string | null;
 };
 
-const include = { account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } } } as const;
+const include = {
+  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
+  ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
+} as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
 
 const view = (d: Row) => {
@@ -47,6 +51,8 @@ const view = (d: Row) => {
     taxesCents: d.taxesCents,
     orderLink: d.orderLink,
     locator: d.locator,
+    // só com o bilhete anexado a negociação está emitida
+    ticket: d.ticket ? { name: d.ticket.name, size: d.ticket.size, at: d.ticket.createdAt.toISOString() } : null,
     shareToken: d.shareToken,
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
@@ -162,6 +168,7 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
 export async function moveDeal(userId: string, id: string, stage: MilesDealStage, position?: number) {
   const d = await own(userId, id);
   if (d.saleId && stage !== "PAID") throw new DomainError(409, "Esta negociação já virou venda: para reabrir, exclua a venda em Vendas");
+  if (stage === "ISSUED" && !(await prisma.milesDealTicket.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o bilhete para marcar como emitida");
   const saleId = stage === "PAID" && !d.saleId ? await closeAsSale(userId, d) : d.saleId;
   await prisma.$transaction(async (tx) => {
     const column = await tx.milesDeal.findMany({ where: { userId, stage, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
@@ -194,7 +201,7 @@ export async function dealShareToken(userId: string, id: string) {
 }
 
 async function dealByToken(slug: string, token: string) {
-  const d = await prisma.milesDeal.findUnique({ where: { shareToken: token }, include: { user: { select: { status: true, salesProfile: { select: { slug: true } } } } } });
+  const d = await prisma.milesDeal.findUnique({ where: { shareToken: token }, include: { user: { select: { status: true, salesProfile: { select: { slug: true } } } }, ticket: { select: { name: true } } } });
   if (!d || d.user.status !== "ACTIVE" || d.user.salesProfile?.slug !== slug.toLowerCase()) return null;
   return d;
 }
@@ -214,13 +221,57 @@ export async function publicDeal(slug: string, token: string) {
       chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
       passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
       passengersAt: d.passengersAt?.toISOString() ?? null,
-      locator: d.locator,
+      // emitido = bilhete anexado; antes disso o localizador (que pode vir do link do pedido) não aparece
+      issued: !!d.ticket,
+      locator: d.ticket ? d.locator : null,
+      ticketName: d.ticket?.name ?? null,
     },
   };
 }
 export type PublicDeal = NonNullable<Awaited<ReturnType<typeof publicDeal>>>["deal"];
 
 const cleanPassenger = (p: Passenger) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined });
+
+/* ---------------- Bilhete ---------------- */
+
+export const TICKET_MAX = 10 * 1024 * 1024;
+
+/** Anexa (ou troca) o bilhete. Com ele a negociação passa a "Emitida" se ainda estava antes disso. */
+export async function addDealTicket(userId: string, id: string, name: string, buf: Buffer) {
+  const d = await own(userId, id);
+  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
+  if (buf.length > TICKET_MAX) throw new DomainError(413, "Arquivo maior que 10 MB");
+  const mime = detectAttachment(buf);
+  if (!mime) throw new DomainError(415, "Envie o bilhete em PDF, PNG, JPEG, WEBP ou HEIC");
+  const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "bilhete";
+  const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
+  await prisma.milesDealTicket.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
+  if (["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage)) return moveDeal(userId, d.id, "ISSUED");
+  return getDeal(userId, id);
+}
+
+export async function getDealTicket(userId: string, id: string) {
+  const t = await prisma.milesDealTicket.findFirst({ where: { dealId: id, userId } });
+  if (!t) throw new DomainError(404, "Bilhete não encontrado");
+  return { name: t.name, mime: t.mime, data: Buffer.from(t.data) };
+}
+
+/** Tira o bilhete: uma negociação "Emitida" volta para "Aguardando". */
+export async function deleteDealTicket(userId: string, id: string) {
+  const d = await own(userId, id);
+  const { count } = await prisma.milesDealTicket.deleteMany({ where: { dealId: d.id, userId } });
+  if (!count) throw new DomainError(404, "Bilhete não encontrado");
+  if (d.stage === "ISSUED") return moveDeal(userId, d.id, "AWAITING");
+  return getDeal(userId, id);
+}
+
+/** O comprador baixa o bilhete pela página dele. */
+export async function publicDealTicket(slug: string, token: string) {
+  const d = await dealByToken(slug, token);
+  if (!d?.ticket) return null;
+  const t = await prisma.milesDealTicket.findUniqueOrThrow({ where: { dealId: d.id } });
+  return { name: t.name, mime: t.mime, data: Buffer.from(t.data) };
+}
 
 /** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */
 export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
@@ -234,7 +285,7 @@ export async function setDealPassengers(userId: string, id: string, passengers: 
 export async function submitDealPassengers(slug: string, token: string, passengers: Passenger[], ip: string) {
   const d = await dealByToken(slug, token);
   if (!d) throw new DomainError(404, "Página não encontrada");
-  if (d.locator || d.saleId) throw new DomainError(409, "A emissão já foi feita: fale com quem te enviou o link para mudar os passageiros");
+  if (d.ticket || d.saleId) throw new DomainError(409, "A emissão já foi feita: fale com quem te enviou o link para mudar os passageiros");
   if (d.passengers && passengers.length !== d.passengers) throw new DomainError(400, `Informe ${d.passengers} ${d.passengers === 1 ? "passageiro" : "passageiros"}`);
   const key = `deal:${d.id}`;
   const ipHash = sha(`deal:${ip}`).slice(0, 32);

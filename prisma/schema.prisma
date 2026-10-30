@@ -1148,10 +1148,23 @@ model MilesDeal {
   locator        String? // localizador da emissão (aparece na página do comprador)
   saleId         String?        @unique // venda criada ao chegar em "Pago"
   sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  ticket         MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
   archivedAt     DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@unique([userId, number])
   @@index([userId, stage])
+}
+
+/// Bilhete (passagem) da negociação do CRM Milhas; os bytes ficam fora da tabela principal
+model MilesDealTicket {
+  dealId    String    @id
+  deal      MilesDeal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime  @default(now())
 }

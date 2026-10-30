@@ -182,9 +182,66 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
         </p>
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
         {deal && <BuyerPage deal={deal} />}
-        {deal?.locator && <IssuedMessage deal={deal} />}
+        {deal && <Emission deal={deal} />}
       </form>
     </Modal>
+  );
+}
+
+/* ---------------- Bilhete (emissão) ---------------- */
+
+const fmtSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+
+/** A negociação só fica "Emitida" com o bilhete anexado; com ele aparece a mensagem para o comprador. */
+function Emission({ deal: initial }: { deal: DealView }) {
+  const router = useRouter();
+  const [deal, setDeal] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => setDeal(initial), [initial]);
+  async function upload(f: File) {
+    if (f.size > 10 * 1024 * 1024) return toast("O bilhete passa de 10 MB", "error");
+    setBusy(true);
+    const res = await fetch(`/api/miles-deals/${deal.id}/ticket`, { method: "POST", body: f, headers: { "content-type": f.type || "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
+    const j = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return toast(j.erro ?? "Não foi possível anexar o bilhete", "error");
+    setDeal(j.item);
+    toast(initial.stage !== j.item.stage ? "Bilhete anexado: negociação emitida" : "Bilhete anexado");
+    refreshSafe(router);
+  }
+  async function remove() {
+    if (!(await confirmDialog({ title: "Remover o bilhete?", body: deal.stage === "ISSUED" ? "A negociação volta para Aguardando emissão." : "O arquivo será apagado.", confirmLabel: "Remover", danger: true }))) return;
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/ticket`, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    setDeal(r.data.item);
+    toast("Bilhete removido");
+    refreshSafe(router);
+  }
+  return (
+    <>
+      <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Bilhete">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="mr-auto text-sm font-semibold">Bilhete</h3>
+          <input ref={input} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} aria-label="Arquivo do bilhete" />
+          {deal.ticket ? (
+            <>
+              <a className="btn-ghost h-8 text-xs" href={`/api/miles-deals/${deal.id}/ticket`}><Receipt className="h-3.5 w-3.5" />Baixar</a>
+              <button type="button" className="btn-ghost h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}>Trocar</button>
+              <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label="Remover o bilhete"><Trash2 className="h-3.5 w-3.5" /></button>
+            </>
+          ) : (
+            <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : "Anexar bilhete"}</button>
+          )}
+        </div>
+        {deal.ticket ? (
+          <p className="text-xs text-muted">{deal.ticket.name} · {fmtSize(deal.ticket.size)} · anexado em {new Date(deal.ticket.at).toLocaleString("pt-BR")}. O comprador pode baixar pela página dele.</p>
+        ) : (
+          <p className="text-xs text-amber-300">Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece.</p>
+        )}
+      </section>
+      {deal.ticket && <IssuedMessage deal={deal} />}
+    </>
   );
 }
 
@@ -465,6 +522,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
           {d.passengers ? <span className="rounded-full bg-panel2 px-2 py-0.5">{d.passengers} CPF{d.passengers > 1 ? "s" : ""}</span> : null}
           {d.passengersAt && <span className="flex items-center gap-0.5 rounded-full bg-blue-500/15 px-2 py-0.5 text-blue-300"><UserCheck className="h-3 w-3" />dados recebidos</span>}
           {d.locator && <span className="rounded-full bg-panel2 px-2 py-0.5 font-mono">{d.locator}</span>}
+          {d.ticket && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-accent" title={`Bilhete: ${d.ticket.name}`}>Bilhete</span>}
           {d.profitCents != null && <span className={`rounded-full px-2 py-0.5 font-medium ${d.profitCents >= 0 ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"}`}>lucro {fmtBRL(d.profitCents)}</span>}
           {d.saleId && <span className="flex items-center gap-0.5 rounded-full bg-panel2 px-2 py-0.5"><Receipt className="h-3 w-3" />venda lançada</span>}
         </div>

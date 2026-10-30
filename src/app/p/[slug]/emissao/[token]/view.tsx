@@ -30,7 +30,7 @@ export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: str
   const [website, setWebsite] = useState("");
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
-  const issued = !!deal.locator;
+  const issued = deal.issued; // emitido = bilhete anexado
   const wa = waLink(whatsapp, `Olá! Sobre a emissão #${deal.number}.`);
   const set = (i: number, p: Partial<Pax>) => setPax((l) => l.map((x, j) => (j === i ? { ...x, ...p } : x)));
 
@@ -69,7 +69,10 @@ export function EmissaoView({ slug, token, agency, whatsapp, deal }: { slug: str
         <section className="card p-5 text-center" aria-label="Localizador">
           <CheckCircle2 className="mx-auto h-10 w-10 text-green-400" />
           <p className="mt-2 text-sm text-muted">Localizador</p>
-          <p className="text-2xl font-bold tracking-widest">{deal.locator}</p>
+          {deal.locator && <p className="text-2xl font-bold tracking-widest">{deal.locator}</p>}
+          {deal.ticketName && (
+            <a className="btn-primary mt-4 inline-flex h-11 items-center justify-center px-5" href={`/api/public/miles-deal/${encodeURIComponent(slug)}/${encodeURIComponent(token)}/ticket`}>Baixar bilhete</a>
+          )}
         </section>
       )}
 

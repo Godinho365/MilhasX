@@ -11,6 +11,8 @@ import * as deal from "@/app/api/miles-deals/[id]/route";
 import * as move from "@/app/api/miles-deals/[id]/move/route";
 import * as share from "@/app/api/miles-deals/[id]/share/route";
 import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
+import * as ticket from "@/app/api/miles-deals/[id]/ticket/route";
+import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
 import { publicDeal } from "@/server/services/miles-deals";
@@ -76,7 +78,7 @@ describe("CRM Milhas", () => {
     // Excluindo a venda em Vendas, os pontos voltam e a negociação pode reabrir
     expect((await c.call(sale.DELETE, "DELETE", "/x", undefined, { id: paid.saleId })).status).toBe(200);
     expect(await acc(lat)).toMatchObject({ balance: 20000 });
-    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).data.item).toMatchObject({ stage: "ISSUED", saleId: null });
+    expect((await c.call(move.POST, "POST", "/x", { stage: "AWAITING" }, { id: d.id })).data.item).toMatchObject({ stage: "AWAITING", saleId: null });
   });
 
   it("colar o pedido do comprador: link, milhares com K, CPFs e taxas", () => {
@@ -118,10 +120,27 @@ describe("CRM Milhas", () => {
     expect(one.passengersData).toHaveLength(1);
     expect(await prisma.notification.count({ where: { userId, title: "Passageiros recebidos" } })).toBe(1);
 
-    // Com o localizador salvo, a página mostra a emissão e não aceita mais mudanças
+    // Só o localizador (pode vir do link do pedido) não é emissão: a página não mostra e o comprador ainda corrige
     await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 8673, saleCpmCents: 2600, passengers: 1, taxesCents: 3575, locator: "abc123" }, { id: d.id });
-    expect((await publicDeal("ana", token))!.deal.locator).toBe("ABC123");
+    expect((await publicDeal("ana", token))!.deal).toMatchObject({ issued: false, locator: null });
+    expect((await send([ana])).status).toBe(201);
+    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).status).toBe(409); // sem bilhete
+
+    // Com o bilhete anexado: emitida, a página mostra o localizador, deixa baixar o bilhete e não aceita mais mudanças
+    const up = (body: Buffer) => ticket.POST(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, "x-file-name": "bilhete.pdf" }, body: new Uint8Array(body) }), { params: Promise.resolve({ id: d.id }) });
+    expect((await up(Buffer.from("texto qualquer"))).status).toBe(415);
+    const att = await up(Buffer.from("%PDF-1.4\n"));
+    expect(att.status).toBe(201);
+    expect((await att.json()).item).toMatchObject({ stage: "ISSUED", ticket: { name: "bilhete.pdf" } });
+    expect((await publicDeal("ana", token))!.deal).toMatchObject({ issued: true, locator: "ABC123", ticketName: "bilhete.pdf" });
+    const pubTicket = await pubTicketRoute.GET(new Request("http://localhost:3100/x"), { params: Promise.resolve({ slug: "ana", token }) });
+    expect(pubTicket.status).toBe(200);
+    expect(Buffer.from(await pubTicket.arrayBuffer()).toString()).toBe("%PDF-1.4\n");
     expect((await send([ana])).status).toBe(409);
+    // tirar o bilhete volta para "Aguardando"; anexar de novo emite outra vez
+    const del = await ticket.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
+    expect((await del.json()).item).toMatchObject({ stage: "AWAITING", ticket: null });
+    expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(201);
 
     // Em Pago, a venda cobra milhas + taxas e as taxas são custo repassado (não mudam o lucro)
     const paid = (await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
