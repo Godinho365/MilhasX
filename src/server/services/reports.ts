@@ -352,7 +352,7 @@ export async function profitPotential(f: ReportFilter) {
     p.points += a.balance;
     p.costCents += a.costCents;
     const u = usage[a.id];
-    if (u?.limit != null) p.cpfFree = (p.cpfFree ?? 0) + freeIgnoringHolder(u);
+    if (u?.limit != null) p.cpfFree = (p.cpfFree ?? 0) + freeCpfsOf(u);
     byProgram.set(a.program.id, p);
   }
   const rows = [...byProgram.values()].map((p) => {
@@ -383,8 +383,8 @@ export async function profitPotential(f: ReportFilter) {
   };
 }
 
-/** CPFs livres para os cálculos de venda: a vaga fixa do titular não entra (o painel continua contando ela). */
-const freeIgnoringHolder = (u: { used: number; limit: number | null }) => Math.max(0, (u.limit ?? 0) - Math.max(0, u.used - 1));
+/** CPFs livres para emitir: o limite menos os usados, contando a vaga fixa do titular (25 − 1 = 24 numa conta nova), igual ao painel. */
+const freeCpfsOf = (u: { used: number; limit: number | null }) => Math.max(0, (u.limit ?? 0) - u.used);
 
 /** CPFs que ainda dá para emitir nas contas do filtro (só as que têm limite de beneficiários). */
 async function freeCpfs(f: ReportFilter) {
@@ -397,7 +397,7 @@ async function freeCpfs(f: ReportFilter) {
     const u = usage[a.id];
     if (u?.limit == null) continue;
     limited++;
-    free += freeIgnoringHolder(u);
+    free += freeCpfsOf(u);
   }
   return { cpfsFree: limited ? free : null, cpfAccounts: limited };
 }
