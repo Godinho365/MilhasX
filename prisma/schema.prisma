@@ -1121,29 +1121,35 @@ enum MilesDealStage {
 }
 
 model MilesDeal {
-  id            String         @id @default(cuid())
-  userId        String
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  number        Int // sequencial por usuário
-  buyerType     String         @default("FINAL") // AGENCY | BALCAO | FINAL
-  customerId    String?
-  customer      Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName  String
-  customerPhone String?
-  stage         MilesDealStage @default(NEW)
-  position      Int            @default(0) // ordem dentro da coluna
-  accountId     String? // conta de onde saem as milhas
-  account       Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  points        Int?
-  saleCpmCents  Int? // preço do milheiro na venda
-  profitCents   Int? // lucro informado à mão; vazio = estimado pelo CPM da conta
-  passengers    Int?
-  notes         String?
-  saleId        String?        @unique // venda criada ao chegar em "Pago"
-  sale          Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  archivedAt    DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  number         Int // sequencial por usuário
+  buyerType      String         @default("FINAL") // AGENCY | BALCAO | FINAL
+  customerId     String?
+  customer       Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName   String
+  customerPhone  String?
+  stage          MilesDealStage @default(NEW)
+  position       Int            @default(0) // ordem dentro da coluna
+  accountId      String? // conta de onde saem as milhas
+  account        Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  points         Int?
+  saleCpmCents   Int? // preço do milheiro na venda
+  profitCents    Int? // lucro informado à mão; vazio = estimado pelo CPM da conta
+  passengers     Int?
+  notes          String?
+  taxesCents     Int? // taxas da emissão, pagas por mim e cobradas do comprador
+  orderLink      String? // link do pedido no programa (ex.: passageiros da LATAM)
+  shareToken     String?        @unique // link da página do comprador
+  passengersData Json? // [{ name, cpf, birthDate, email, phone }] preenchido pelo comprador
+  passengersAt   DateTime? // quando o comprador enviou os passageiros
+  locator        String? // localizador da emissão (aparece na página do comprador)
+  saleId         String?        @unique // venda criada ao chegar em "Pago"
+  sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  archivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@unique([userId, number])
   @@index([userId, stage])
