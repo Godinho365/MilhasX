@@ -37,7 +37,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
       {tab === "vendas" ? (
         <>
           {sales.length > 0 && (
-            <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-7">
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 2xl:grid-cols-7">
               <Stat label="Vendas" value={String(sales.length)} />
               <Stat label="Total vendido" value={fmtBRL(total)} />
               <Stat label="Resultado" value={fmtBRL(result)} accent />

@@ -143,3 +143,31 @@ describe("anexos da venda", () => {
     expect((await view(id)).attachments).toBe(1);
   });
 });
+
+describe("editar venda", () => {
+  it("refaz itens, lançamento e beneficiários mantendo a venda e o horário original", async () => {
+    const cl = (await c.call(customers.POST, "POST", "/c", { name: "Cliente Um", kind: "FINAL", docType: "CPF", docNumber: "000.000.000-00" })).data.item.id;
+    const r = await newSale({ items: [flight({ passengers: 2, customerIds: [cl] })] });
+    const id = r.data.item.id as string;
+    const before = await prisma.entry.findFirstOrThrow({ where: { type: "SALE" } });
+    const p = await c.call(sale.PATCH, "PATCH", "/x", { origin: "OWN", accountId: lat, occurredAt: "2026-10-10", items: [flight({ points: 8000, salePriceCents: 26000, passengers: 1 })] }, { id });
+    expect(p.status).toBe(200);
+    const v = await view(id);
+    expect(v).toMatchObject({ id, points: 8000, totalCents: 26000, cpfs: 1, customers: [] });
+    expect(await acc(lat)).toMatchObject({ balance: 12000, costCents: 30000 });
+    const after = await prisma.entry.findMany({ where: { type: "SALE" } });
+    expect(after).toHaveLength(1);
+    expect(after[0]!.points).toBe(-8000);
+    expect(after[0]!.createdAt.getTime()).toBe(before.createdAt.getTime());
+    expect(await prisma.accountBeneficiary.count({ where: { saleId: id } })).toBe(0);
+  });
+
+  it("edição com conta inválida não muda nada", async () => {
+    const r = await newSale({ items: [flight()] });
+    const id = r.data.item.id as string;
+    const bad = await c.call(sale.PATCH, "PATCH", "/x", { origin: "OWN", accountId: "nao-existe", occurredAt: "2026-10-10", items: [flight()] }, { id });
+    expect(bad.status).toBe(404);
+    expect(await view(id)).toMatchObject({ points: 10000 });
+    expect(await acc(lat)).toMatchObject({ balance: 10000 });
+  });
+});

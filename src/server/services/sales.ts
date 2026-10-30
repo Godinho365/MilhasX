@@ -118,102 +118,149 @@ function validate(input: SaleInput) {
   });
 }
 
+type Tx = Prisma.TransactionClient;
+
+/** Confere clientes, cartões e a origem dos pontos; no fornecedor, já desconta o saldo dele. */
+async function resolveOrigin(tx: Tx, userId: string, input: SaleInput) {
+  const customerIds = [...new Set(input.items.flatMap((i) => i.customerIds ?? []))];
+  const cardIds = [...new Set(input.items.flatMap((i) => (i.costs ?? []).map((c) => c.cardId)).filter((x): x is string => !!x))];
+  const totalPoints = input.items.reduce((t, i) => t + (i.issuedWith === "POINTS" ? i.points : 0), 0);
+  if (customerIds.length && (await tx.customer.count({ where: { id: { in: customerIds }, userId } })) !== customerIds.length) throw new DomainError(404, "Cliente não encontrado");
+  if (cardIds.length && (await tx.creditCard.count({ where: { id: { in: cardIds }, userId } })) !== cardIds.length) throw new DomainError(404, "Cartão não encontrado");
+  let accountId: string | null = null;
+  let supplierCpm: number | null = null;
+  if (input.origin === "OWN") {
+    accountId = (await ownAccount(tx, userId, input.accountId!)).id;
+  } else {
+    const sa = await tx.supplierAccount.findFirst({ where: { id: input.supplierAccountId!, userId }, include: { supplier: true, program: true } });
+    if (!sa) throw new DomainError(404, "Conta de fornecedor não encontrada");
+    if (sa.balance < totalPoints) throw new DomainError(422, `Saldo insuficiente no fornecedor (${sa.balance.toLocaleString("pt-BR")} pontos)`);
+    supplierCpm = sa.priceCpmCents;
+    if (totalPoints) await tx.supplierAccount.update({ where: { id: sa.id }, data: { balance: { decrement: totalPoints } } });
+  }
+  return {
+    accountId,
+    supplierCpm,
+    customerId: customerIds[0] ?? null,
+    points: totalPoints,
+    totalCents: input.items.reduce((t, i) => t + i.salePriceCents + sumCosts(i.costs), 0),
+  };
+}
+
+/** Itens da venda: cada item emitido com pontos próprios sai da conta como um lançamento "Venda". */
+async function writeItems(tx: Tx, userId: string, sale: { id: string; groupId: string | null }, input: SaleInput, accountId: string | null, supplierCpm: number | null, createdAt?: Date) {
+  for (const [n, it] of input.items.entries()) {
+    let entryId: string | null = null;
+    if (input.origin === "OWN" && it.issuedWith === "POINTS") {
+      const e = await tx.entry.create({
+        data: {
+          userId,
+          accountId: accountId!,
+          type: "SALE",
+          points: -it.points,
+          occurredAt: input.occurredAt,
+          description: `Venda · ${itemSummary(it)}${it.reservation ? ` · ${it.reservation}` : ""}`,
+          groupId: sale.groupId,
+          createdAt, // na edição, mantém a ordem original no extrato (e o custo que sai da conta)
+        },
+      });
+      entryId = e.id;
+    }
+    await tx.saleItem.create({
+      data: {
+        saleId: sale.id,
+        position: n,
+        kind: it.kind,
+        issuedWith: it.issuedWith,
+        points: it.issuedWith === "POINTS" ? it.points : 0,
+        salePriceCents: it.salePriceCents,
+        cashCostCents: it.issuedWith === "CASH" ? (it.cashCostCents ?? 0) : 0,
+        supplierCpmCents: it.issuedWith === "POINTS" ? supplierCpm : null,
+        costs: (it.costs ?? []) as unknown as Prisma.InputJsonValue,
+        clientType: it.clientType,
+        customers: it.customerIds?.length ? { connect: it.customerIds.map((id) => ({ id })) } : undefined,
+        passengers: it.passengers ?? null,
+        reservation: it.reservation?.trim() || null,
+        origin: it.origin || null,
+        destination: it.destination || null,
+        departureDate: it.departureDate ?? null,
+        returnDate: it.returnDate ?? null,
+        description: it.description?.trim() || null,
+        observation: it.observation?.trim() || null,
+        entryId,
+      },
+    });
+  }
+  // Beneficiários: os clientes dos itens emitidos com pontos próprios contam no limite de CPFs da conta
+  if (input.origin === "OWN") {
+    const ids = [...new Set(input.items.filter((i) => i.issuedWith === "POINTS").flatMap((i) => i.customerIds ?? []))];
+    if (ids.length) {
+      const cs = await tx.customer.findMany({ where: { id: { in: ids }, userId }, select: { name: true, docNumber: true } });
+      await tx.accountBeneficiary.createMany({ data: cs.map((c) => ({ userId, accountId: accountId!, saleId: sale.id, name: c.name, document: c.docNumber?.replace(/\D/g, "") || null, usedAt: input.occurredAt })) });
+    }
+  }
+}
+
 export async function createSale(userId: string, input: SaleInput) {
   validate(input);
   if (input.origin === "SUPPLIER") await assertFeature(userId, "suppliers");
   const groupId = input.idempotencyKey ? `sale:${userId}:${input.idempotencyKey}` : `sale:${randomUUID()}`;
   const existing = await prisma.sale.findUnique({ where: { groupId } });
   if (existing) return { sale: existing, duplicated: true };
-  const customerIds = [...new Set(input.items.flatMap((i) => i.customerIds ?? []))];
-  const cardIds = [...new Set(input.items.flatMap((i) => (i.costs ?? []).map((c) => c.cardId)).filter((x): x is string => !!x))];
-  const totalPoints = input.items.reduce((t, i) => t + (i.issuedWith === "POINTS" ? i.points : 0), 0);
-  const totalCents = input.items.reduce((t, i) => t + i.salePriceCents + sumCosts(i.costs), 0);
-
   const sale = await withLedger(userId, async (tx) => {
-    if (customerIds.length && (await tx.customer.count({ where: { id: { in: customerIds }, userId } })) !== customerIds.length) throw new DomainError(404, "Cliente não encontrado");
-    if (cardIds.length && (await tx.creditCard.count({ where: { id: { in: cardIds }, userId } })) !== cardIds.length) throw new DomainError(404, "Cartão não encontrado");
-    let accountId: string | null = null;
-    let supplierCpm: number | null = null;
-    let programLabel = "";
-    if (input.origin === "OWN") {
-      const acc = await ownAccount(tx, userId, input.accountId!);
-      accountId = acc.id;
-      programLabel = `${acc.program.name} ${acc.holder.name}`;
-    } else {
-      const sa = await tx.supplierAccount.findFirst({ where: { id: input.supplierAccountId!, userId }, include: { supplier: true, program: true } });
-      if (!sa) throw new DomainError(404, "Conta de fornecedor não encontrada");
-      if (sa.balance < totalPoints) throw new DomainError(422, `Saldo insuficiente no fornecedor (${sa.balance.toLocaleString("pt-BR")} pontos)`);
-      supplierCpm = sa.priceCpmCents;
-      programLabel = `${sa.program.name} · ${sa.supplier.name}`;
-      if (totalPoints) await tx.supplierAccount.update({ where: { id: sa.id }, data: { balance: { decrement: totalPoints } } });
-    }
+    const o = await resolveOrigin(tx, userId, input);
     const created = await tx.sale.create({
       data: {
         userId,
         origin: input.origin,
-        accountId,
+        accountId: o.accountId,
         supplierAccountId: input.origin === "SUPPLIER" ? input.supplierAccountId! : null,
-        customerId: customerIds[0] ?? null,
+        customerId: o.customerId,
         groupId,
-        points: totalPoints,
-        totalCents,
+        points: o.points,
+        totalCents: o.totalCents,
         occurredAt: input.occurredAt,
       },
     });
-    for (const [n, it] of input.items.entries()) {
-      let entryId: string | null = null;
-      // Pontos próprios: cada item emitido com pontos sai da conta como um lançamento "Venda"
-      if (input.origin === "OWN" && it.issuedWith === "POINTS") {
-        const e = await tx.entry.create({
-          data: {
-            userId,
-            accountId: accountId!,
-            type: "SALE",
-            points: -it.points,
-            occurredAt: input.occurredAt,
-            description: `Venda · ${itemSummary(it)}${it.reservation ? ` · ${it.reservation}` : ""}`,
-            groupId,
-          },
-        });
-        entryId = e.id;
-      }
-      await tx.saleItem.create({
-        data: {
-          saleId: created.id,
-          position: n,
-          kind: it.kind,
-          issuedWith: it.issuedWith,
-          points: it.issuedWith === "POINTS" ? it.points : 0,
-          salePriceCents: it.salePriceCents,
-          cashCostCents: it.issuedWith === "CASH" ? (it.cashCostCents ?? 0) : 0,
-          supplierCpmCents: it.issuedWith === "POINTS" ? supplierCpm : null,
-          costs: (it.costs ?? []) as unknown as Prisma.InputJsonValue,
-          clientType: it.clientType,
-          customers: it.customerIds?.length ? { connect: it.customerIds.map((id) => ({ id })) } : undefined,
-          passengers: it.passengers ?? null,
-          reservation: it.reservation?.trim() || null,
-          origin: it.origin || null,
-          destination: it.destination || null,
-          departureDate: it.departureDate ?? null,
-          returnDate: it.returnDate ?? null,
-          description: it.description?.trim() || null,
-          observation: it.observation?.trim() || null,
-          entryId,
-        },
-      });
-    }
-    void programLabel;
-    // Beneficiários: os clientes dos itens emitidos com pontos próprios contam no limite de CPFs da conta
-    if (input.origin === "OWN") {
-      const ids = [...new Set(input.items.filter((i) => i.issuedWith === "POINTS").flatMap((i) => i.customerIds ?? []))];
-      if (ids.length) {
-        const cs = await tx.customer.findMany({ where: { id: { in: ids }, userId }, select: { name: true, docNumber: true } });
-        await tx.accountBeneficiary.createMany({ data: cs.map((c) => ({ userId, accountId: accountId!, saleId: created.id, name: c.name, document: c.docNumber?.replace(/\D/g, "") || null, usedAt: input.occurredAt })) });
-      }
-    }
+    await writeItems(tx, userId, created, input, o.accountId, o.supplierCpm);
     return created;
   });
   return { sale, duplicated: false };
+}
+
+/** Edita a venda inteira: desfaz os lançamentos, o saldo do fornecedor e os beneficiários dela e grava de novo.
+ *  A venda (id e anexos) continua a mesma; tudo numa transação só, então ou muda tudo ou nada. */
+export async function updateSale(userId: string, id: string, input: SaleInput) {
+  validate(input);
+  if (input.origin === "SUPPLIER") await assertFeature(userId, "suppliers");
+  return withLedger(userId, async (tx) => {
+    const old = await tx.sale.findFirst({ where: { id, userId } });
+    if (!old) throw new DomainError(404, "Venda não encontrada");
+    const groupId = old.groupId ?? `sale:${randomUUID()}`;
+    const first = old.groupId ? await tx.entry.findFirst({ where: { userId, groupId: old.groupId }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }) : null;
+    if (old.groupId) await tx.entry.deleteMany({ where: { userId, groupId: old.groupId } });
+    if (old.origin === "SUPPLIER" && old.supplierAccountId && old.points) {
+      await tx.supplierAccount.updateMany({ where: { id: old.supplierAccountId, userId }, data: { balance: { increment: old.points } } });
+    }
+    await tx.accountBeneficiary.deleteMany({ where: { saleId: old.id, userId } });
+    await tx.saleItem.deleteMany({ where: { saleId: old.id } });
+    const o = await resolveOrigin(tx, userId, input);
+    const sale = await tx.sale.update({
+      where: { id: old.id },
+      data: {
+        origin: input.origin,
+        accountId: o.accountId,
+        supplierAccountId: input.origin === "SUPPLIER" ? input.supplierAccountId! : null,
+        customerId: o.customerId,
+        groupId,
+        points: o.points,
+        totalCents: o.totalCents,
+        occurredAt: input.occurredAt,
+      },
+    });
+    await writeItems(tx, userId, sale, input, o.accountId, o.supplierCpm, first?.createdAt);
+    return sale;
+  });
 }
 
 const saleInclude = {
@@ -232,6 +279,8 @@ function present(s: SaleRow) {
     id: s.id,
     date: s.occurredAt.toISOString(),
     origin: s.origin,
+    accountId: s.accountId,
+    supplierAccountId: s.supplierAccountId,
     program: own ? (s.account ? `${s.account.program.name} ${s.account.holder.name}` : "Conta excluída") : s.supplierAccount ? `${s.supplierAccount.program.name} · ${s.supplierAccount.supplier.name}` : "Fornecedor excluído",
     color: (own ? s.account?.program.color : s.supplierAccount?.program.color) ?? "#60a5fa",
     programName: (own ? s.account?.program.name : s.supplierAccount?.program.name) ?? "Programa excluído",
@@ -252,6 +301,7 @@ function present(s: SaleRow) {
       costs: (Array.isArray(i.costs) ? i.costs : []) as SaleCost[],
       clientType: i.clientType,
       customers: i.customers.map((c) => c.name),
+      customerIds: i.customers.map((c) => c.id),
       passengers: i.passengers,
       reservation: i.reservation,
       origin: i.origin,

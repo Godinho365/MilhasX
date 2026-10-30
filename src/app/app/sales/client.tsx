@@ -22,6 +22,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }
   const params = useSearchParams();
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<SaleView | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleView | null>(null);
   const [menu, setMenu] = useState<{ s: SaleView; top: number; right: number } | null>(null);
 
   useEffect(() => {
@@ -113,10 +114,12 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp }
       {menu && (
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-44 rounded-xl border border-line bg-panel2 p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setViewing(menu.s); setMenu(null); }}><Eye className="h-4 w-4" />Ver detalhes</button>
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); remove(s); }}><Trash2 className="h-4 w-4" />Excluir</button>
         </div>
       )}
       {creating && <SaleDialog accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => setCreating(false)} />}
+      {editingSale && <SaleDialog key={editingSale.id} editing={editingSale} accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => setEditingSale(null)} />}
       {viewing && <SaleDetails sale={viewing} onClose={() => setViewing(null)} />}
     </>
   );
