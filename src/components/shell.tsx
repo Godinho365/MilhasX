@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
-  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Palette, Plane, ChevronDown,
+  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Palette, Plane, ChevronDown,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -54,7 +54,7 @@ const TITLES: [string, string][] = [
   ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/purchases", "Compras"], ["/app/offers", "Promoções"],
   ["/app/credit-cards", "Cartões de Crédito"], ["/app/simulators", "Simuladores"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
-  ["/app/settings", "Configurações"], ["/app/crm", "CRM"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
+  ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
 ];
 
 // Tag dos guias que explica cada página (botão "Tutorial" do cabeçalho)
@@ -103,6 +103,8 @@ export function Shell(props: {
           ? { label: "Criar nova compra", event: "mm:new-purchase", icon: <ShoppingBag className="h-5 w-5" /> }
         : path === "/app/crm" && search.get("view") !== "dashboard"
           ? { label: "Novo pedido", event: "mm:new-order", icon: <FilePlus2 className="h-5 w-5" /> }
+        : path === "/app/crm-milhas"
+          ? { label: "Nova negociação", event: "mm:new-deal", icon: <Coins className="h-5 w-5" /> }
         : path === "/app/credit-cards"
           ? { label: "Novo cartão", event: "mm:new-card", icon: <CreditCard className="h-5 w-5" /> }
         : path === "/app/sales" && search.get("tab") !== "clientes"
@@ -250,7 +252,8 @@ export function Shell(props: {
           ))}
         </div>
       )}
-      {navLink("/app/crm", "CRM", KanbanSquare)}
+      {navLink("/app/crm", "CRM Passagens", KanbanSquare)}
+      {navLink("/app/crm-milhas", "CRM Milhas", Coins)}
     </div>
   );
 

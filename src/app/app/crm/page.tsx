@@ -19,7 +19,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
   const subtitle = { kanban: "Arraste os cartões entre as colunas para atualizar o andamento de cada pedido.", lista: "Todos os pedidos em formato de lista, ativos e arquivados.", dashboard: "Os principais indicadores da sua operação de pedidos." }[view];
   return (
     <>
-      <PageHeader title="CRM" subtitle={subtitle} />
+      <PageHeader title="CRM Passagens" subtitle={subtitle} />
       <Segmented active={view} items={[
         { key: "dashboard", label: "Dashboard", href: "/app/crm?view=dashboard" },
         { key: "kanban", label: "Kanban", href: "/app/crm" },

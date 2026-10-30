@@ -396,6 +396,21 @@ export const orderSchema = z.object({
 // "website" é um campo-armadilha: pessoas não veem, robôs preenchem
 export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true }).extend({ website: z.string().max(0).optional() });
 export const orderMoveSchema = z.object({ stage: z.enum(["NEW", "QUOTING", "QUOTE_SENT", "NEGOTIATION", "ISSUED", "TRAVELING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() });
+
+// CRM Milhas
+export const dealSchema = z.object({
+  buyerType: z.enum(["AGENCY", "BALCAO", "FINAL"]),
+  customerId: z.string().max(40).nullable().optional(),
+  customerName: z.string().trim().min(1, "Informe o comprador").max(120),
+  customerPhone: optText(30),
+  accountId: z.string().max(40).nullable().optional(),
+  points: z.number().int().min(1).max(100_000_000).nullable().optional(),
+  saleCpmCents: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  profitCents: z.number().int().min(-100_000_000_00).max(100_000_000_00).nullable().optional(),
+  passengers: z.number().int().min(1).max(99).nullable().optional(),
+  notes: optText(2000),
+});
+export const dealMoveSchema = z.object({ stage: z.enum(["NEW", "NEGOTIATION", "AWAITING", "ISSUED", "PAID"]), position: z.number().int().min(0).max(10_000).optional() });
 export const orderArchiveSchema = z.object({ reason: z.string().trim().min(1).max(120) });
 const searchParamsSchema = z.object({ origin: iataCode, destination: iataCode, departDate: ymd, returnDate: ymd.nullable().optional(), adults: z.number().int().min(1).max(9), children: z.number().int().min(0).max(8), infants: z.number().int().min(0).max(8), cabin: z.enum(["ECONOMY", "PREMIUM", "BUSINESS", "FIRST"]) });
 export const flightSearchSchema = z.object({ params: searchParamsSchema, programs: z.array(z.string().max(30)).max(40) });
