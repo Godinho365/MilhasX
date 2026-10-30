@@ -184,8 +184,31 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
 const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
 const fmtDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v);
 
-function BuyerPage({ deal }: { deal: DealView }) {
+function BuyerPage({ deal: initial }: { deal: DealView }) {
+  const router = useRouter();
   const [link, setLink] = useState<string | null>(null);
+  const [deal, setDeal] = useState(initial);
+  const [checking, setChecking] = useState(false);
+  // O comprador envia os passageiros pela página dele: busca de novo ao abrir, ao voltar para a aba
+  // e a cada 15 s enquanto não chegam (a janela foi aberta com os dados de quando a página carregou)
+  async function reload(manual = false) {
+    if (manual) setChecking(true);
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${initial.id}`);
+    if (manual) setChecking(false);
+    if (!r.ok) return manual && toast(r.erro, "error");
+    const arrived = r.data.item.passengersData.length > 0 && deal.passengersData.length === 0;
+    setDeal(r.data.item);
+    if (arrived) { toast("Dados dos passageiros recebidos"); refreshSafe(router); }
+    else if (manual && !r.data.item.passengersData.length) toast("Ainda sem dados dos passageiros");
+  }
+  const waiting = deal.passengersData.length === 0;
+  useEffect(() => {
+    void reload();
+    const onFocus = () => void reload();
+    window.addEventListener("focus", onFocus);
+    const t = waiting ? window.setInterval(() => void reload(), 15_000) : undefined;
+    return () => { window.removeEventListener("focus", onFocus); if (t) window.clearInterval(t); };
+  }, [initial.id, waiting]); // eslint-disable-line react-hooks/exhaustive-deps
   async function share(open: boolean) {
     const r = await api<{ token: string; slug: string | null }>(`/api/miles-deals/${deal.id}/share`, "POST");
     if (!r.ok) return toast(r.erro, "error");
@@ -225,7 +248,10 @@ function BuyerPage({ deal }: { deal: DealView }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-amber-300">Ainda sem dados dos passageiros.</p>
+        <p className="flex items-center gap-2 text-xs text-amber-300">
+          Ainda sem dados dos passageiros.
+          <button type="button" className="text-accent-light hover:underline disabled:opacity-60" onClick={() => void reload(true)} disabled={checking}>{checking ? "Verificando…" : "Verificar agora"}</button>
+        </p>
       )}
     </section>
   );

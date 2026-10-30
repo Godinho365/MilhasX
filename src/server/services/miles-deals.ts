@@ -90,6 +90,13 @@ async function own(userId: string, id: string) {
   return d;
 }
 
+/** Uma negociação atualizada (a janela aberta busca de novo para ver os passageiros que o comprador enviou). */
+export async function getDeal(userId: string, id: string) {
+  const d = await prisma.milesDeal.findFirst({ where: { id, userId }, include });
+  if (!d) throw new DomainError(404, "Negociação não encontrada");
+  return view(d);
+}
+
 export async function listDeals(userId: string) {
   const rows = await prisma.milesDeal.findMany({ where: { userId, archivedAt: null }, include, orderBy: [{ position: "asc" }, { createdAt: "desc" }] });
   return rows.map(view);

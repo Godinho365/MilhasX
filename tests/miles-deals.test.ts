@@ -112,6 +112,9 @@ describe("CRM Milhas", () => {
     const got = (await c.call(deals.GET, "GET", "/x")).data.items[0];
     expect(got.passengersData).toEqual([{ name: "Ana Souza Lima", cpf: "12345678909", birthDate: "1990-05-20", email: "ana@x.test" }]);
     expect(got.passengersAt).toBeTruthy();
+    // a janela aberta busca a negociação de novo e já vê os passageiros
+    const one = (await c.call(deal.GET, "GET", "/x", undefined, { id: d.id })).data.item;
+    expect(one.passengersData).toHaveLength(1);
     expect(await prisma.notification.count({ where: { userId, title: "Passageiros recebidos" } })).toBe(1);
 
     // Com o localizador salvo, a página mostra a emissão e não aceita mais mudanças
