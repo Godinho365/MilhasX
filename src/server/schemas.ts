@@ -200,6 +200,16 @@ export const preferenceSchema = z.object({
   hideVideoTutorials: z.boolean().optional(),
   valuesMode: z.enum(["VISIBLE", "PARTIAL", "HIDDEN"]).optional(),
   notifications: z.record(z.enum(["points", "offers", "entries", "marketing", "system", "billing"]), channel).optional(),
+  // dados do PIX para a mensagem de cobrança do CRM Milhas (null apaga)
+  pix: z
+    .object({
+      keyType: z.enum(["CPF", "CNPJ", "EMAIL", "TELEFONE", "ALEATORIA"]),
+      key: z.string().trim().min(1, "Informe a chave PIX").max(140),
+      name: z.string().trim().max(100).default(""),
+      bank: z.string().trim().max(60).default(""),
+    })
+    .nullable()
+    .optional(),
 });
 export const profileSchema = z.object({ name: z.string().trim().min(2, "Informe seu nome").max(100) });
 export const planRequestSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).default("MENSAL") });

@@ -12,6 +12,7 @@ import { whatsappLink } from "@/domain/orders";
 import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, type BuyerType, type DealStageKey } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
 import { LATAM_BOOKMARKLET, latamPayload } from "@/domain/latam-fill";
+import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
 
 type Customer = { id: string; name: string; phone: string | null };
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
@@ -175,8 +176,74 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
         </p>
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
         {deal && <BuyerPage deal={deal} />}
+        {deal?.locator && <IssuedMessage deal={deal} />}
       </form>
     </Modal>
+  );
+}
+
+/* ---------------- Mensagem de emissão ---------------- */
+
+/** Emitido: mensagem pronta para o comprador (agradecimento, localizador e PIX). O bilhete é anexado no WhatsApp. */
+function IssuedMessage({ deal }: { deal: DealView }) {
+  const [pix, setPix] = useState<PixInfo | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [editPix, setEditPix] = useState(false);
+  const [form, setForm] = useState<PixInfo>({ keyType: "CPF", key: "", name: "", bank: "" });
+  const [text, setText] = useState("");
+  const build = (p: PixInfo | null) =>
+    issuedMessage({ buyerName: deal.customerName, locator: deal.locator, passengers: deal.passengersData.map((x) => x.name), points: deal.points, chargeCents: deal.chargeCents, pix: p });
+  useEffect(() => {
+    api<{ item: { pix: PixInfo | null } }>("/api/preferences").then((r) => {
+      const p = r.ok ? r.data.item.pix : null;
+      setPix(p);
+      if (p) setForm(p);
+      setEditPix(!p);
+      setText(build(p));
+      setLoaded(true);
+    });
+  }, [deal.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function savePix() {
+    if (!form.key.trim()) return toast("Informe a chave PIX", "error");
+    const r = await api<{ item: { pix: PixInfo | null } }>("/api/preferences", "PATCH", { pix: form });
+    if (!r.ok) return toast(r.erro, "error");
+    setPix(r.data.item.pix);
+    setEditPix(false);
+    setText(build(r.data.item.pix));
+    toast("Dados do PIX salvos");
+  }
+  const wa = whatsappLink(deal.customerPhone, text);
+  if (!loaded) return null;
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Mensagem de emissão">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Mensagem de emissão</h3>
+        <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setEditPix((v) => !v)}>{pix ? "Editar dados do PIX" : "Cadastrar PIX"}</button>
+      </div>
+      {editPix && (
+        <div className="grid gap-2 rounded-lg bg-panel2 p-3 sm:grid-cols-2" aria-label="Dados do PIX">
+          <label className="text-xs"><span className="mb-1 block text-muted">Tipo de chave</span>
+            <select className="input h-9" value={form.keyType} onChange={(e) => setForm({ ...form, keyType: e.target.value as PixKeyType })}>
+              {Object.entries(PIX_KEY_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Chave PIX</span><input className="input h-9" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} maxLength={140} /></label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Nome do recebedor</span><input className="input h-9" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} /></label>
+          <label className="text-xs"><span className="mb-1 block text-muted">Banco</span><input className="input h-9" value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} maxLength={60} /></label>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            {pix && <button type="button" className="btn-ghost h-8 text-xs" onClick={() => { setForm(pix); setEditPix(false); }}>Cancelar</button>}
+            <button type="button" className="btn-primary h-8 text-xs" onClick={savePix}>Salvar PIX</button>
+          </div>
+        </div>
+      )}
+      <textarea className="input min-h-[220px] font-mono text-xs leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} aria-label="Texto da mensagem" />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-primary h-8 text-xs" onClick={() => navigator.clipboard.writeText(text).then(() => toast("Mensagem copiada"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar mensagem</button>
+        {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Abrir no WhatsApp</a>}
+        <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(build(pix))}>Refazer texto</button>
+      </div>
+      <p className="text-xs text-muted">Anexe o bilhete (PDF ou print) na conversa do WhatsApp antes de enviar.</p>
+    </section>
   );
 }
 

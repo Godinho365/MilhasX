@@ -498,6 +498,7 @@ model UserPreference {
   hideVideoTutorials Boolean   @default(false)
   valuesMode         String    @default("VISIBLE")
   notifications      Json      @default("{}")
+  pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
 }
 
 model AuditLog {
