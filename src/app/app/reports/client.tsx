@@ -6,11 +6,11 @@ import { FileDown, FilterX } from "lucide-react";
 
 type Opt = { id: string; name: string };
 
-/** Barra dos relatórios: período (3M, 6M, 12M, ano, Tudo, Personalizado), programa, Exportar e Limpar. */
+/** Barra dos relatórios: período (Dia, Semana, Mês, 3M, 6M, 12M, ano, Tudo, Personalizado), programa, Exportar e Limpar. */
 export function ReportToolbar({ tab, sp, programs, exportHref, hidePeriod = false }: { tab: string; sp: Record<string, string>; programs: Opt[]; exportHref: string; hidePeriod?: boolean }) {
   const nav = useNav();
   const year = new Date().getFullYear();
-  const periods: [string, string][] = [["3m", "3M"], ["6m", "6M"], ["12m", "12M"], ["ytd", String(year)], ["all", "Tudo"], ["custom", "Personalizado"]];
+  const periods: [string, string][] = [["dia", "Dia"], ["semana", "Semana"], ["mes", "Mês"], ["3m", "3M"], ["6m", "6M"], ["12m", "12M"], ["ytd", String(year)], ["all", "Tudo"], ["custom", "Personalizado"]];
   const active = sp.periodo ?? "3m";
   const [custom, setCustom] = useState({ de: sp.de ?? "", ate: sp.ate ?? "" });
   const href = (patch: Record<string, string | null>) => {

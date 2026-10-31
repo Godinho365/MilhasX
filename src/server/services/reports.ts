@@ -10,15 +10,21 @@ import { brWindows, revenueWindows } from "@/domain/brasilia";
 export const REPORT_TABS = ["overview", "purchases", "credit-cards", "savings", "evolution", "sales", "assets"] as const;
 export type ReportTab = (typeof REPORT_TABS)[number];
 
-export type PeriodKey = "3m" | "6m" | "12m" | "ytd" | "all" | "custom";
+export type PeriodKey = "dia" | "semana" | "mes" | "3m" | "6m" | "12m" | "ytd" | "all" | "custom";
 export type Period = { key: PeriodKey; from?: Date; to?: Date };
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Período da URL: 3M/6M/12M contam meses inteiros para trás; "ytd" é o ano corrente; "custom" usa de/até. */
+/** Período da URL: dia/semana/mês são os correntes no horário de Brasília (semana a partir de segunda);
+ *  3M/6M/12M contam meses inteiros para trás; "ytd" é o ano corrente; "custom" usa de/até. */
 export function resolvePeriod(sp: { periodo?: string; de?: string; ate?: string }, now = new Date()): Period {
-  const key = (["3m", "6m", "12m", "ytd", "all", "custom"] as const).find((k) => k === sp.periodo) ?? "3m";
+  const key = (["dia", "semana", "mes", "3m", "6m", "12m", "ytd", "all", "custom"] as const).find((k) => k === sp.periodo) ?? "3m";
   if (key === "all") return { key };
+  if (key === "dia" || key === "semana" || key === "mes") {
+    const w = brWindows(now);
+    const start = key === "dia" ? w.day : key === "semana" ? w.week : w.month;
+    return { key, from: new Date(`${start}T00:00:00Z`), to: new Date(`${w.day}T23:59:59.999Z`) };
+  }
   if (key === "ytd") return { key, from: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)) };
   if (key === "custom") {
     const from = sp.de && isoDay.test(sp.de) ? new Date(`${sp.de}T00:00:00Z`) : undefined;
