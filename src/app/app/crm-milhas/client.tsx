@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck } from "lucide-react";
+import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck, ImageUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtPts, parseBRLToCents, fmtDateTime, fmtDay as fmtDayBR } from "@/lib/format";
@@ -11,12 +11,15 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
 import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
+import { parseLatamScreen } from "@/domain/latam-screen";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
 import { priceOptions, roeOf } from "@/domain/pricing";
 import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
 type Customer = { id: string; name: string; phone: string | null };
+// "2026-11-30" → "30/11/2026" sem passar por fuso (a data da tela não tem horário)
+const ymdBR = (v: string) => v.split("-").reverse().join("/");
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
 
 const STAGE_COLOR: Record<DealStageKey, string> = { NEW: "#60a5fa", NEGOTIATION: "#f59e0b", AWAITING: "#a78bfa", ISSUED: "#22c55e", PAID: "#94a3b8" };
@@ -61,16 +64,50 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
     const id = v.match(/[?&]orderId=([A-Za-z0-9]+)/)?.[1];
     if (id && !locator.trim()) setLocator(id.toUpperCase());
   }
-  // Colar o que o comprador mandou: link do pedido, "8.673K", "1CPF", "Taxas: R$35,75"
+  // Colar o que o comprador mandou: link do pedido, "8.673K", "1CPF", "Taxas: R$35,75" — ou o texto/print
+  // da tela da LATAM (trecho, datas, passageiros e preço por passageiro), que vira o link da busca.
+  // O que o comprador escreveu explicitamente vale mais que o lido da tela.
   function onPaste(text: string) {
     setPaste(text);
     const p = parseDealPaste(text);
-    if (p.orderLink) changeOrderLink(p.orderLink);
-    if (p.points && !locked) setPoints(pts(p.points));
-    if (p.passengers) setPassengers(String(p.passengers));
-    if (p.taxesCents != null && !locked) setTaxes(fmtBRL(p.taxesCents));
+    const t = parseLatamScreen(text);
+    const link = p.orderLink ?? t?.link;
+    if (link) changeOrderLink(link);
+    const pts0 = p.points ?? t?.points;
+    if (pts0 && !locked) setPoints(pts(pts0));
+    const pax = p.passengers ?? (t?.passengersShown ? t.params.adults : undefined);
+    if (pax) setPassengers(String(pax));
+    const tax = p.taxesCents ?? t?.taxesCents;
+    if (tax != null && !locked) setTaxes(fmtBRL(tax));
   }
   const pasted = paste.trim() ? parseDealPaste(paste) : null;
+  const screen = paste.trim() ? parseLatamScreen(paste) : null;
+
+  // Print: texto pela leitura da imagem (OCR) no próprio navegador, sem enviar a imagem a ninguém
+  const [ocr, setOcr] = useState<number | null>(null); // progresso 0–100 enquanto lê
+  const fileRef = useRef<HTMLInputElement>(null);
+  async function readPrint(file: File) {
+    if (!file.type.startsWith("image/")) return setErro("Envie uma imagem (print da tela)");
+    setErro("");
+    setOcr(0);
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("por", 1, { logger: (m: { status: string; progress: number }) => m.status === "recognizing text" && setOcr(Math.round(m.progress * 100)) });
+      const { data } = await worker.recognize(file);
+      await worker.terminate();
+      onPaste([paste.trim(), data.text.trim()].filter(Boolean).join("\n"));
+    } catch {
+      setErro("Não consegui ler o print. Tente de novo ou cole o texto.");
+    } finally {
+      setOcr(null);
+    }
+  }
+  function pasteImage(e: React.ClipboardEvent) {
+    const img = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
+    if (!img) return;
+    e.preventDefault();
+    readPrint(img);
+  }
 
   function pickCustomer(id: string) {
     setCustomerId(id);
@@ -164,13 +201,27 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
           </select>
         </Field>
         <Field label="Colar pedido do comprador">
-          <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} placeholder="Ex.: link do pedido, 8.673K, 1CPF, Taxas: R$35,75" />
+          <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} onPaste={pasteImage} disabled={ocr != null} placeholder="Link, texto ou print (Ctrl+V) da tela da LATAM. Ex.: 8.673K, 1CPF, Taxas: R$35,75" />
         </Field>
-        {pasted && (
+        <div className="-mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-ghost h-8 text-xs" onClick={() => fileRef.current?.click()} disabled={ocr != null}><ImageUp className="h-3.5 w-3.5" />{ocr != null ? `Lendo o print… ${ocr}%` : "Enviar print"}</button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) readPrint(f); }} />
+          {ocr == null && <span className="text-[11px] text-muted">O print é lido aqui no navegador; confira os campos abaixo antes de salvar.</span>}
+        </div>
+        {screen && (screen.params.origin || screen.points) ? (
+          <div className="-mt-1 rounded-lg bg-panel2 px-3 py-2 text-xs text-muted">
+            <p className="text-zinc-200">
+              Lido da tela: {[screen.params.origin && `${screen.params.origin} → ${screen.params.destination ?? "?"}`, screen.params.departDate && `${ymdBR(screen.params.departDate)}${screen.params.returnDate ? ` a ${ymdBR(screen.params.returnDate)}` : " (só ida)"}`, screen.passengersShown && `${screen.params.adults} ${screen.params.adults === 1 ? "passageiro" : "passageiros"}`, screen.pointsPerPax && `${pts(screen.pointsPerPax)} milhas${screen.taxesPerPaxCents != null ? ` + ${fmtBRL(screen.taxesPerPaxCents)}` : ""} por passageiro`].filter(Boolean).join(" · ")}
+            </p>
+            {screen.yearGuessed && <p className="text-amber-300">O print não mostra o dia da semana: o ano foi deduzido pela próxima data. Confira.</p>}
+            {!screen.passengersShown && screen.points && <p className="text-amber-300">O print não mostra quantos passageiros: contei 1. Ajuste em Passageiros (CPFs) e nos pontos.</p>}
+            {screen.link && !pasted?.orderLink && <p>Link da busca montado: reproduz a pesquisa (não trava a tarifa) e, em milhas, pede login no LATAM Pass.</p>}
+          </div>
+        ) : pasted ? (
           <p className="-mt-2 text-xs text-muted">
             {[pasted.orderLink && "link do pedido", pasted.points && `${pts(pasted.points)} pontos`, pasted.passengers && `${pasted.passengers} CPF${pasted.passengers > 1 ? "s" : ""}`, pasted.taxesCents != null && `taxas ${fmtBRL(pasted.taxesCents)}`].filter(Boolean).join(" · ") || "Nada reconhecido no texto."}
           </p>
-        )}
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-4">
           <Field label="Pontos"><input className="input" inputMode="numeric" value={points} onChange={(e) => setPoints(e.target.value)} disabled={locked} placeholder="0" /></Field>
           <Field label="Milheiro venda (R$)"><input className="input" inputMode="decimal" value={cpm} onChange={(e) => setCpm(e.target.value)} disabled={locked} placeholder="R$ 0,00" /></Field>

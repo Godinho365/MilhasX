@@ -99,11 +99,14 @@ function scan(flat: string, cash: boolean): PastedOffer[] {
   const out: PastedOffer[] = [];
   if (!cash) {
     const re = new RegExp(String.raw`(${NUM})\s*(?:milhas|pontos|pts|miles|points)\b`, "gi");
-    for (const m of flat.matchAll(re)) {
+    const all = [...flat.matchAll(re)];
+    for (const [i, m] of all.entries()) {
       const miles = toInt(m[1]!);
       if (miles < 1000) continue;
-      // Taxas: o primeiro R$ logo depois (mesmo cartão de voo)
-      const after = flat.slice(m.index! + m[0].length, m.index! + m[0].length + 80);
+      // Taxas: o primeiro R$ logo depois (mesmo cartão de voo), antes das milhas seguintes — sem isso uma
+      // taxa ilegível (OCR: "BRL 9784") pegaria a da opção de baixo
+      const end = Math.min(m.index! + m[0].length + 80, all[i + 1]?.index ?? Infinity);
+      const after = flat.slice(m.index! + m[0].length, end);
       const t = after.match(new RegExp(BRL, "i"));
       out.push({ miles, taxesCents: t ? toCents(t[1]!) : null, cashCents: null });
     }
@@ -139,6 +142,9 @@ export function parseOffers(text: string, cash = false): PastedOffer[] {
     .sort((a, b) => (a.miles ?? 0) - (b.miles ?? 0) || (a.cashCents ?? 0) - (b.cashCents ?? 0) || (a.taxesCents ?? 0) - (b.taxesCents ?? 0))
     .slice(0, 12);
 }
+
+/** Opções na ordem em que aparecem no texto (sem ordenar nem tirar repetidas). */
+export const offersInOrder = (text: string, cash = false) => scan(text.replace(/\s+/g, " "), cash);
 
 // Smiles, depois de escolher os voos: o total da seleção vem logo antes de "1 pessoa adulta"
 const SMILES_TOTAL = new RegExp(String.raw`(${NUM})\s*milhas\s*\+\s*${BRL}\s*\d+\s*pessoas?\s*adultas?`, "i");
