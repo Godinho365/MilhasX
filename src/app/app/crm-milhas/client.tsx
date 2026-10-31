@@ -333,7 +333,8 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
 
 /* ---------------- Sugestão de conta ---------------- */
 
-type Fit = { id: string; label: string; already: number; load: { balance: number; reserved: number; cpfFree: number; ptsPerCpf: number }; fit: { enough: boolean; newCpfs: number; balanceAfter: number; cpfAfter: number; excessAfter: number; cpfShort: boolean } };
+type Leftover = { points: number; costCents: number | null } | null;
+type Fit = { id: string; label: string; already: number; leftover: Leftover; leftoverAfter: Leftover; load: { balance: number; reserved: number; cpfFree: number; ptsPerCpf: number }; fit: { enough: boolean; newCpfs: number; balanceAfter: number; cpfAfter: number; excessAfter: number; cpfShort: boolean } };
 
 /** Qual conta usar: a que dá para emitir sem deixar milhas presas (ver domain/capacity). Usa os pontos e os
  *  passageiros salvos na negociação. */
@@ -354,7 +355,8 @@ function AccountSuggestion({ dealId, points, cpfs, accountId, orderLink, chosen,
     if (!a.fit.enough) return { tone: "text-red-300", text: `Saldo insuficiente (faltam ${fmtPts(-a.fit.balanceAfter)} milhas)` };
     if (a.fit.cpfShort) return { tone: "text-red-300", text: "Sem CPFs livres para os passageiros" };
     if (a.fit.excessAfter > 0) return { tone: "text-amber-300", text: `Sobram ~${fmtPts(a.fit.excessAfter)} milhas sem CPF para usar` };
-    return { tone: "text-muted", text: `Depois: ${fmtPts(a.fit.balanceAfter)} milhas e ${a.fit.cpfAfter} CPFs livres` };
+    const sobra = a.leftoverAfter ? ` · sobra ${a.leftoverAfter.costCents != null ? fmtBRL(a.leftoverAfter.costCents) : `${fmtPts(a.leftoverAfter.points)} milhas`} (não paga outra emissão)` : "";
+    return { tone: a.leftoverAfter ? "text-amber-300" : "text-muted", text: `Depois: ${fmtPts(a.fit.balanceAfter)} milhas e ${a.fit.cpfAfter} CPFs livres${sobra}` };
   };
   return (
     <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Sugestão de conta">
@@ -368,7 +370,7 @@ function AccountSuggestion({ dealId, points, cpfs, accountId, orderLink, chosen,
           <div key={a.id} className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-sm ${chosen === a.id ? "bg-accent-soft" : "bg-panel2"}`}>
             <span className="min-w-0 flex-1">
               <span className="font-medium">{i === 0 && a.fit.enough && !a.fit.cpfShort ? "✅ " : ""}{a.label}</span>
-              <span className="block text-xs text-muted">{fmtPts(a.load.balance - a.load.reserved)} milhas livres · {a.load.cpfFree} CPFs livres{a.already ? ` · 👤 ${a.already === 1 ? "passageiro já é beneficiário aqui" : `${a.already} passageiros já são beneficiários aqui`} (não gasta CPF)` : ""}</span>
+              <span className="block text-xs text-muted">{fmtPts(a.load.balance - a.load.reserved)} milhas livres · {a.load.cpfFree} CPFs livres{a.leftover ? <span className="text-amber-300"> · sobra hoje {a.leftover.costCents != null ? fmtBRL(a.leftover.costCents) : `${fmtPts(a.leftover.points)} milhas`}</span> : null}{a.already ? ` · 👤 ${a.already === 1 ? "passageiro já é beneficiário aqui" : `${a.already} passageiros já são beneficiários aqui`} (não gasta CPF)` : ""}</span>
               <span className={`block text-xs ${n.tone}`}>{n.text}</span>
             </span>
             {chosen === a.id ? <span className="text-xs text-accent-light">Escolhida</span> : <button type="button" className="btn-ghost h-8 text-xs" onClick={() => onPick(a.id)}>{a.fit.enough && !a.fit.cpfShort ? "Usar esta" : "Usar mesmo assim"}</button>}

@@ -139,7 +139,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
         <div className="overflow-x-auto">
           {/* uma linha por célula: sem quebra; em tela estreita o quadro rola para o lado */}
           <table className="table-base whitespace-nowrap">
-            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell" title="Milhas reservadas em negociações abertas do CRM Milhas">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell" title="Quantas emissões o saldo atual paga, pela média de milhas por emissão">Emissões</th><th className="text-right" title="Milhas que a conta ainda consegue emitir com os CPFs livres, além do saldo">Espaço</th><th className="text-right" title="Potencial de faturamento: usando todos os CPFs livres pelo seu preço médio de venda">Fat. potencial</th><th className="text-right" title="Potencial de lucro: usando todos os CPFs livres, com o custo atual da conta">Lucro potencial</th><th className="text-right" title="Faturamento real: total das vendas já lançadas desta conta nos últimos 12 meses (com taxas repassadas)">Fat. real</th><th className="text-right" title="Lucro real: resultado das vendas já lançadas desta conta nos últimos 12 meses">Lucro real</th></tr></thead>
+            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell" title="Milhas reservadas em negociações abertas do CRM Milhas">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell" title="Quantas emissões o saldo atual paga, pela média de milhas por emissão">Emissões</th><th className="hidden text-right md:table-cell" title="Saldo que não paga nem uma emissão média: custo dessas milhas pelo custo médio da conta">Sobras</th><th className="text-right" title="Milhas que a conta ainda consegue emitir com os CPFs livres, além do saldo">Espaço</th><th className="text-right" title="Potencial de faturamento: usando todos os CPFs livres pelo seu preço médio de venda">Fat. potencial</th><th className="text-right" title="Potencial de lucro: usando todos os CPFs livres, com o custo atual da conta">Lucro potencial</th><th className="text-right" title="Faturamento real: total das vendas já lançadas desta conta nos últimos 12 meses (com taxas repassadas)">Fat. real</th><th className="text-right" title="Lucro real: resultado das vendas já lançadas desta conta nos últimos 12 meses">Lucro real</th></tr></thead>
             <tbody>
               {[...capRows].sort((a, b) => b.space - a.space).map((r) => (
                 <tr key={r.id}>
@@ -148,6 +148,9 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
                   <td className="hidden text-right tabular-nums text-muted sm:table-cell">{r.load.reserved ? fmtPts(r.load.reserved) : "-"}</td>
                   <td className="text-right tabular-nums">{r.load.cpfFree}</td>
                   <td className="hidden text-right tabular-nums md:table-cell">{r.emissionsLeft.toLocaleString("pt-BR")}</td>
+                  <td className="hidden text-right tabular-nums md:table-cell" title={r.leftover ? `${fmtPts(r.leftover.points)} milhas não pagam uma emissão média (~${fmtPts(cap.avg.ptsPerCpf)})` : undefined}>
+                    {r.leftover ? <span className="text-amber-300">{r.leftover.costCents != null ? money(r.leftover.costCents) : `${fmtPts(r.leftover.points)} pts`}</span> : "-"}
+                  </td>
                   <td className={`text-right font-semibold tabular-nums ${r.space < 0 ? "text-bad" : ""}`} title={r.space < 0 ? "Milhas demais para os CPFs livres: risco de saldo encalhado" : undefined}>{r.space < 0 ? `−${fmtPts(-r.space)} ⚠️` : fmtPts(r.space)}</td>
                   <td className="text-right tabular-nums">{r.revenueCents == null ? "-" : money(r.revenueCents)}</td>
                   <td className={`text-right font-semibold tabular-nums ${(r.profitCents ?? 0) < 0 ? "text-bad" : "text-ok"}`}>{r.profitCents == null ? "-" : money(r.profitCents)}</td>
@@ -164,6 +167,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
                   <td className="hidden text-right tabular-nums sm:table-cell">{capRows.some((r) => r.load.reserved) ? fmtPts(capRows.reduce((t, r) => t + r.load.reserved, 0)) : "-"}</td>
                   <td className="text-right tabular-nums">{capRows.reduce((t, r) => t + r.load.cpfFree, 0)}</td>
                   <td className="hidden text-right tabular-nums md:table-cell">{(Math.round(capRows.reduce((t, r) => t + r.emissionsLeft, 0) * 10) / 10).toLocaleString("pt-BR")}</td>
+                  <td className="hidden text-right tabular-nums text-amber-300 md:table-cell">{capRows.some((r) => r.leftover?.costCents != null) ? money(capRows.reduce((t, r) => t + (r.leftover?.costCents ?? 0), 0)) : "-"}</td>
                   <td className="text-right tabular-nums">{fmtPts(capRows.reduce((t, r) => t + r.space, 0))}</td>
                   <td className="text-right tabular-nums">{money(capRows.reduce((t, r) => t + (r.revenueCents ?? 0), 0))}</td>
                   <td className="text-right tabular-nums text-ok">{money(capRows.reduce((t, r) => t + (r.profitCents ?? 0), 0))}</td>
