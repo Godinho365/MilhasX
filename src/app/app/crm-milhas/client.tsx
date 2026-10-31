@@ -163,7 +163,6 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
         </Field>
-        {deal && !locked && (deal.points ?? 0) > 0 && <AccountSuggestion dealId={deal.id} chosen={accountId} onPick={setAccountId} />}
         <Field label="Colar pedido do comprador">
           <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} placeholder="Ex.: link do pedido, 8.673K, 1CPF, Taxas: R$35,75" />
         </Field>
@@ -193,6 +192,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
           {profit != null && <> · {manualProfit != null ? "Lucro" : "Lucro estimado"}: <span className={`font-semibold tabular-nums ${profit >= 0 ? "text-green-300" : "text-red-300"}`}>{fmtBRL(profit)}</span>{manualProfit == null && acc?.cpmCents ? <span className="text-xs"> (CPM da conta {fmtBRL(acc.cpmCents)})</span> : null}</>}
           {acc && nPoints && nPoints > acc.balance ? <span className="block text-xs text-amber-300">A conta tem só {pts(acc.balance)} pontos.</span> : null}
         </p>
+        {!locked && nPoints ? <AccountSuggestion dealId={deal?.id ?? null} points={nPoints} cpfs={Number(passengers) || 1} accountId={accountId} orderLink={orderLink} chosen={accountId} onPick={setAccountId} /> : null}
         {!locked && acc?.cpmCents && nPoints ? (
           <PriceHelper costCpmCents={acc.cpmCents} avgSaleCpmCents={avgSaleCpmCents} points={nPoints} cpfs={Number(passengers) || 1} currentCpmCents={cpmCents} onPick={(c) => setCpm(fmtBRL(c))} />
         ) : null}
@@ -337,13 +337,19 @@ type Fit = { id: string; label: string; already: number; load: { balance: number
 
 /** Qual conta usar: a que dá para emitir sem deixar milhas presas (ver domain/capacity). Usa os pontos e os
  *  passageiros salvos na negociação. */
-function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen: string; onPick: (id: string) => void }) {
+function AccountSuggestion({ dealId, points, cpfs, accountId, orderLink, chosen, onPick }: { dealId: string | null; points: number; cpfs: number; accountId: string; orderLink: string; chosen: string; onPick: (id: string) => void }) {
   const [data, setData] = useState<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } } | null>(null);
+  // acompanha o que está digitado (pontos, CPFs, conta e link do pedido), com uma pequena espera entre teclas
   useEffect(() => {
-    api<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } }>(`/api/miles-deals/${dealId}/fit`).then((r) => r.ok && setData(r.data));
-  }, [dealId]);
+    const t = window.setTimeout(() => {
+      const q = new URLSearchParams({ points: String(points), cpfs: String(cpfs), ...(dealId ? { dealId } : {}), ...(accountId ? { accountId } : {}), ...(orderLink.trim() ? { orderLink: orderLink.trim() } : {}) });
+      api<{ accounts: Fit[]; points: number; cpfsNeeded: number; avg: { ptsPerCpf: number } }>(`/api/miles-deals/fit?${q}`).then((r) => r.ok && setData(r.data));
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [dealId, points, cpfs, accountId, orderLink]);
   if (!data || !data.accounts.length) return null;
   const top = data.accounts.slice(0, 3);
+  const anyFits = data.accounts.some((a) => a.fit.enough && !a.fit.cpfShort);
   const note = (a: Fit) => {
     if (!a.fit.enough) return { tone: "text-red-300", text: `Saldo insuficiente (faltam ${fmtPts(-a.fit.balanceAfter)} milhas)` };
     if (a.fit.cpfShort) return { tone: "text-red-300", text: "Sem CPFs livres para os passageiros" };
@@ -353,6 +359,7 @@ function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen:
   return (
     <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Sugestão de conta">
       <p className="text-xs text-muted">
+        {!anyFits && <span className="mb-1 block text-amber-300">⚠️ Nenhuma conta tem saldo e CPFs livres para esta emissão sozinha: divida os passageiros entre contas ou reveja os pontos.</span>}
         <b className="text-zinc-200">Sugestão de conta</b> para {fmtPts(data.points)} milhas e {data.cpfsNeeded} {data.cpfsNeeded === 1 ? "CPF" : "CPFs"} (média ~{fmtPts(data.avg.ptsPerCpf)} por emissão): emissão grande vai para a conta com milhas sobrando; pequena, para a com CPFs sobrando.
       </p>
       {top.map((a, i) => {
@@ -364,7 +371,7 @@ function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen:
               <span className="block text-xs text-muted">{fmtPts(a.load.balance - a.load.reserved)} milhas livres · {a.load.cpfFree} CPFs livres{a.already ? ` · 👤 ${a.already === 1 ? "passageiro já é beneficiário aqui" : `${a.already} passageiros já são beneficiários aqui`} (não gasta CPF)` : ""}</span>
               <span className={`block text-xs ${n.tone}`}>{n.text}</span>
             </span>
-            {chosen === a.id ? <span className="text-xs text-accent-light">Escolhida</span> : <button type="button" className="btn-ghost h-8 text-xs" onClick={() => onPick(a.id)}>Usar esta</button>}
+            {chosen === a.id ? <span className="text-xs text-accent-light">Escolhida</span> : <button type="button" className="btn-ghost h-8 text-xs" onClick={() => onPick(a.id)}>{a.fit.enough && !a.fit.cpfShort ? "Usar esta" : "Usar mesmo assim"}</button>}
           </div>
         );
       })}
