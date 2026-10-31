@@ -17,6 +17,21 @@ export function accountSpace(a: AccountLoad) {
   };
 }
 
+/** Sobras: saldo livre que não paga nem uma emissão média (emissões < 1); o custo é o dessas milhas
+ *  pelo custo médio da conta. Sem saldo livre não há sobra. */
+export function accountLeftover(a: AccountLoad, emissionsLeft: number, costCpmCents: number | null) {
+  const available = a.balance - a.reserved;
+  if (available <= 0 || emissionsLeft >= 1) return null;
+  return { points: available, costCents: costCpmCents == null ? null : Math.round((available * costCpmCents) / 1000) };
+}
+
+/** Sobra depois de uma emissão: o que fica na conta e não paga outra emissão média, com o custo dessas
+ *  milhas pelo custo médio da conta. */
+export function leftoverAfter(balanceAfter: number, ptsPerCpf: number, costCpmCents: number | null) {
+  if (balanceAfter <= 0 || balanceAfter >= ptsPerCpf) return null;
+  return { points: balanceAfter, costCents: costCpmCents == null ? null : Math.round((balanceAfter * costCpmCents) / 1000) };
+}
+
 /** Quanto a conta ainda fatura e lucra se usar todos os CPFs livres (capacidade) pelo preço médio de venda;
  *  o custo é o médio atual da conta (as milhas que ainda vão entrar podem custar diferente). */
 export function capacityPotential(capacity: number, saleCpmCents: number | null, costCpmCents: number | null) {
