@@ -23,6 +23,7 @@ export type HolderDetails = {
   address?: string | null;
   addressParts?: AddressParts | null;
   accessEmail?: string | null;
+  phone?: string | null;
   attributes?: { key: string; value: string }[];
   notes?: string | null;
   active?: boolean;
@@ -42,6 +43,7 @@ export async function saveHolder(userId: string, id: string | null, input: Holde
     address: input.addressParts !== undefined ? (input.addressParts ? formatAddress(input.addressParts) : null) : input.address === undefined ? undefined : input.address?.trim() || null,
     addressParts: input.addressParts === undefined ? undefined : input.addressParts ?? Prisma.DbNull,
     accessEmail: input.accessEmail === undefined ? undefined : input.accessEmail || null,
+    phone: input.phone === undefined ? undefined : input.phone?.trim() || null,
     attributes: input.attributes === undefined ? undefined : input.attributes.filter((a) => a.key),
     notes: input.notes === undefined ? undefined : input.notes?.trim() || null,
     active: input.active,

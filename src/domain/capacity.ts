@@ -17,6 +17,14 @@ export function accountSpace(a: AccountLoad) {
   };
 }
 
+/** Quanto a conta ainda fatura e lucra se usar todos os CPFs livres (capacidade) pelo preço médio de venda;
+ *  o custo é o médio atual da conta (as milhas que ainda vão entrar podem custar diferente). */
+export function capacityPotential(capacity: number, saleCpmCents: number | null, costCpmCents: number | null) {
+  if (saleCpmCents == null || capacity <= 0) return { revenueCents: null, profitCents: null };
+  const revenueCents = Math.round((capacity * saleCpmCents) / 1000);
+  return { revenueCents, profitCents: costCpmCents == null ? null : revenueCents - Math.round((capacity * costCpmCents) / 1000) };
+}
+
 /** Até quantos pontos de origem transferir para caber no espaço (paridade e bônus aplicados). */
 export function maxTransferForSpace(space: number, parityFrom: number, parityTo: number, bonusPct: number) {
   const perPoint = (parityTo / parityFrom) * (1 + bonusPct / 100);

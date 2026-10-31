@@ -5,6 +5,7 @@ import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
 import { DEAL_STAGES, dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
+import { unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Pago" a negociação vira uma
 // venda em Vendas (baixa dos pontos da conta escolhida); depois disso não volta de etapa nem muda os
@@ -27,7 +28,7 @@ export type DealInput = {
 };
 
 const include = {
-  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
+  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true, phone: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
   receipt: { select: { name: true, size: true, createdAt: true } },
   sale: { select: { occurredAt: true } }, // data da venda (dashboard)
@@ -54,6 +55,10 @@ const view = (d: Row) => {
     taxesCents: d.taxesCents,
     orderLink: d.orderLink,
     locator: d.locator,
+    // verificação antes da emissão (validação facial do titular)
+    faceCheck: { url: d.faceCheckUrl, status: (d.faceCheckStatus as FaceCheckStatus | null) ?? null, at: d.faceCheckAt?.toISOString() ?? null },
+    holderName: d.account?.holder.name ?? null,
+    holderPhone: d.account?.holder.phone ?? null,
     // só com o bilhete anexado a negociação está emitida
     ticket: d.ticket ? { name: d.ticket.name, size: d.ticket.size, at: d.ticket.createdAt.toISOString() } : null,
     // só com o comprovante de pagamento a negociação vai para "Pago" (e vira venda)
@@ -331,6 +336,26 @@ export type PublicDeal = NonNullable<Awaited<ReturnType<typeof publicDeal>>>["de
 
 const cleanPassenger = (p: Passenger) => ({ name: p.name.trim(), firstName: p.firstName?.trim() || undefined, lastName: p.lastName?.trim() || undefined, cpf: p.cpf.replace(/\D/g, ""), birthDate: p.birthDate, gender: p.gender || undefined, email: p.email?.trim() || undefined, phone: p.phone?.trim() || undefined });
 
+/* ---------------- Verificação (validação facial) ---------------- */
+
+/** Guarda o link da validação (já no formato novo) e o andamento. O bilhete só entra depois de concluída ou
+ *  marcada como não pedida. */
+export async function setFaceCheck(userId: string, id: string, input: { link?: string | null; status: FaceCheckStatus | null }) {
+  const d = await own(userId, id);
+  let url = d.faceCheckUrl;
+  if (input.link !== undefined) {
+    if (input.link === null || !input.link.trim()) url = null;
+    else {
+      const parsed = unicoProcessLink(input.link);
+      if (!parsed) throw new DomainError(400, "Link inválido: cole o link do cadastro.unico.app que a LATAM enviou (com o id)");
+      url = parsed.url;
+    }
+  }
+  const status = input.status ?? (url ? "PENDING" : null);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { faceCheckUrl: url, faceCheckStatus: status, faceCheckAt: status && status !== "PENDING" ? new Date() : null } });
+  return getDeal(userId, id);
+}
+
 /* ---------------- Bilhete ---------------- */
 
 export const TICKET_MAX = 10 * 1024 * 1024;
@@ -338,6 +363,9 @@ export const TICKET_MAX = 10 * 1024 * 1024;
 /** Anexa (ou troca) o bilhete. Com ele a negociação passa a "Emitida" se ainda estava antes disso. */
 export async function addDealTicket(userId: string, id: string, name: string, buf: Buffer) {
   const d = await own(userId, id);
+  if (d.faceCheckStatus !== "DONE" && d.faceCheckStatus !== "NOT_NEEDED") {
+    throw new DomainError(409, "Antes do bilhete, faça a verificação: conclua a validação facial do titular ou marque que não foi pedida");
+  }
   if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
   if (buf.length > TICKET_MAX) throw new DomainError(413, "Arquivo maior que 10 MB");
   const mime = detectAttachment(buf);

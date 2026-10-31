@@ -233,6 +233,7 @@ model Holder {
   address      String?
   addressParts Json? // { cep, logradouro, numero, complemento, bairro, cidade, uf }
   accessEmail  String? // e-mail autorizado a ver a página do titular
+  phone        String? // telefone/WhatsApp do titular (ex.: enviar o link da validação facial)
   attributes   Json? // [{ key, value }] (informações extras)
   notes        String?
   createdAt    DateTime  @default(now())
@@ -1147,6 +1148,9 @@ model MilesDeal {
   passengersData Json? // [{ name, cpf, birthDate, email, phone }] preenchido pelo comprador
   passengersAt   DateTime? // quando o comprador enviou os passageiros
   locator        String? // localizador da emissão (aparece na página do comprador)
+  faceCheckUrl    String? // verificação antes da emissão: link da validação facial (formato novo)
+  faceCheckStatus String? // PENDING | DONE | NOT_NEEDED; o bilhete só entra com DONE ou NOT_NEEDED
+  faceCheckAt     DateTime?
   saleId         String?        @unique // venda criada ao chegar em "Pago"
   sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
   ticket         MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"

@@ -1,6 +1,6 @@
 // Espaço por conta e sugestão de conta para emitir (milhas × CPFs livres).
 import { describe, it, expect } from "vitest";
-import { accountSpace, emissionFit, maxTransferForSpace, rankForEmission } from "@/domain/capacity";
+import { accountSpace, capacityPotential, emissionFit, maxTransferForSpace, rankForEmission } from "@/domain/capacity";
 
 const m = 32_000;
 
@@ -8,6 +8,12 @@ describe("espaço por conta", () => {
   it("capacidade, espaço e emissões que o saldo paga (milhas reservadas descontadas)", () => {
     expect(accountSpace({ balance: 81_137, reserved: 0, cpfFree: 21, ptsPerCpf: m })).toEqual({ capacity: 672_000, space: 590_863, emissionsLeft: 2.5 });
     expect(accountSpace({ balance: 300_000, reserved: 20_000, cpfFree: 6, ptsPerCpf: m }).space).toBe(192_000 - 280_000); // encalhe
+  });
+
+  it("potencial: capacidade × preço médio de venda; lucro pelo custo atual da conta", () => {
+    expect(capacityPotential(807_208, 2532, 2287)).toEqual({ revenueCents: 2_043_851, profitCents: 197_766 });
+    expect(capacityPotential(500_000, null, 2000)).toEqual({ revenueCents: null, profitCents: null }); // sem vendas ainda
+    expect(capacityPotential(500_000, 2500, null)).toEqual({ revenueCents: 1_250_000, profitCents: null }); // conta sem custo
   });
 
   it("até quanto transferir: 1:1 com 30% de bônus", () => {

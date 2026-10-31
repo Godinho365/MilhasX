@@ -13,6 +13,8 @@ import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCe
 import type { DealView } from "@/server/services/miles-deals";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
+import { priceOptions, roeOf } from "@/domain/pricing";
+import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
 type Customer = { id: string; name: string; phone: string | null };
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
@@ -24,7 +26,7 @@ const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((
 
 /* ---------------- Nova / editar negociação ---------------- */
 
-function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void }) {
+function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSaleCpmCents = null }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [buyerType, setBuyerType] = useState<BuyerType>(deal?.buyerType ?? "FINAL");
   const [customerId, setCustomerId] = useState(deal?.customerId ?? "");
@@ -191,6 +193,9 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
           {profit != null && <> · {manualProfit != null ? "Lucro" : "Lucro estimado"}: <span className={`font-semibold tabular-nums ${profit >= 0 ? "text-green-300" : "text-red-300"}`}>{fmtBRL(profit)}</span>{manualProfit == null && acc?.cpmCents ? <span className="text-xs"> (CPM da conta {fmtBRL(acc.cpmCents)})</span> : null}</>}
           {acc && nPoints && nPoints > acc.balance ? <span className="block text-xs text-amber-300">A conta tem só {pts(acc.balance)} pontos.</span> : null}
         </p>
+        {!locked && acc?.cpmCents && nPoints ? (
+          <PriceHelper costCpmCents={acc.cpmCents} avgSaleCpmCents={avgSaleCpmCents} points={nPoints} cpfs={Number(passengers) || 1} currentCpmCents={cpmCents} onPick={(c) => setCpm(fmtBRL(c))} />
+        ) : null}
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
         {deal && <BuyerPage deal={deal} />}
         {deal && <Emission deal={deal} />}
@@ -205,8 +210,8 @@ const fmtSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(
 type DealFile = { name: string; size: number; at: string };
 
 /** Anexo da negociação (bilhete ou comprovante): anexar, baixar, trocar e remover. */
-function FileBox({ title, what, url, file, hint, doneHint, removable = true, onChanged }: {
-  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean;
+function FileBox({ title, what, url, file, hint, doneHint, removable = true, blocked, onChanged }: {
+  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean; blocked?: string;
   onChanged: (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -238,10 +243,12 @@ function FileBox({ title, what, url, file, hint, doneHint, removable = true, onC
             {removable && <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label={`Remover o ${what}`}><Trash2 className="h-3.5 w-3.5" /></button>}
           </>
         ) : (
-          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
+          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy || !!blocked}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
         )}
       </div>
-      {file ? (
+      {!file && blocked ? (
+        <p className="text-xs text-muted">🔒 {blocked}</p>
+      ) : file ? (
         <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {new Date(file.at).toLocaleString("pt-BR")}. {doneHint}</p>
       ) : (
         <p className="text-xs text-amber-300">{hint}</p>
@@ -262,10 +269,13 @@ function Emission({ deal: initial }: { deal: DealView }) {
     else toast(action === "remove" ? msgs.removed : moved ? msgs.moved : msgs.up);
     refreshSafe(router);
   };
+  const verified = deal.faceCheck.status === "DONE" || deal.faceCheck.status === "NOT_NEEDED";
   return (
     <>
+      <FaceCheck deal={deal} onChanged={(d) => { setDeal(d); refreshSafe(router); }} />
       <FileBox
         title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket}
+        blocked={verified ? undefined : "Faça a verificação acima (validação facial do titular) antes de anexar o bilhete."}
         hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece."
         doneHint="O comprador pode baixar pela página dele."
         onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: negociação emitida", removed: "Bilhete removido" })}
@@ -280,6 +290,44 @@ function Emission({ deal: initial }: { deal: DealView }) {
         />
       )}
     </>
+  );
+}
+
+/* ---------------- Milheiro sugerido ---------------- */
+
+/** Preço do milheiro: o mínimo sem prejuízo (custo da conta), a sua média de venda e metas de ROE; clicar preenche. */
+function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCents, onPick }: { costCpmCents: number; avgSaleCpmCents: number | null; points: number; cpfs: number; currentCpmCents: number | null; onPick: (cpmCents: number) => void }) {
+  const options = priceOptions({ costCpmCents, avgSaleCpmCents, points, cpfs });
+  const roe = currentCpmCents ? roeOf(currentCpmCents, costCpmCents) : null;
+  const pct = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Milheiro sugerido">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Milheiro sugerido</h3>
+        {roe != null && (
+          <span className={`text-xs ${roe < 0 ? "text-red-300" : "text-muted"}`}>
+            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · lucro {fmtBRL(Math.round(((currentCpmCents! - costCpmCents) * points) / 1000))}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted">Custo da conta {fmtBRL(costCpmCents)} o milheiro. ROE = lucro ÷ custo dos pontos. Clique para usar o preço.</p>
+      <div className="grid gap-2 sm:grid-cols-5">
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onPick(o.cpmCents)}
+            aria-pressed={currentCpmCents === o.cpmCents}
+            className={`rounded-lg border px-2.5 py-2 text-left text-xs transition-colors ${currentCpmCents === o.cpmCents ? "border-accent-light bg-accent-soft" : "border-line hover:border-zinc-500"}`}
+          >
+            <span className="block text-muted">{o.label}</span>
+            <span className="block text-sm font-semibold tabular-nums">{fmtBRL(o.cpmCents)}</span>
+            {!o.key.startsWith("roe") && <span className="block tabular-nums text-muted">ROE {pct(o.roePct)}</span>}
+            <span className={`block tabular-nums ${o.profitCents > 0 ? "text-green-300" : "text-muted"}`}>{fmtBRL(o.profitCents)}{o.profitPerCpfCents != null && cpfs > 1 ? ` · ${fmtBRL(o.profitPerCpfCents)}/CPF` : ""}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -327,7 +375,7 @@ function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen:
 /* ---------------- Lista ---------------- */
 
 /** Negociações ativas e arquivadas em tabela; clicar abre a negociação. */
-export function DealsList({ active, archived, customers, accounts }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+export function DealsList({ active, archived, customers, accounts, avgSaleCpmCents = null }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const all = [...active, ...archived];
   const deal = all.find((d) => d.id === open) ?? null;
@@ -360,8 +408,75 @@ export function DealsList({ active, archived, customers, accounts }: { active: D
     <div className="space-y-4">
       <section className="card overflow-hidden" aria-label="Negociações ativas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações ativas <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhuma negociação ativa.")}</section>
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
-      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} />}
+      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/* ---------------- Verificação (validação facial) ---------------- */
+
+/** Antes de emitir: a LATAM pede validação facial do titular. O link recebido vira o formato novo, que vai
+ *  para o titular; marcar como concluída (ou não pedida) libera o bilhete. */
+function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealView) => void }) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fc = deal.faceCheck;
+  const preview = link.trim() ? unicoProcessLink(link) : null;
+  async function save(body: { link?: string | null; status: FaceCheckStatus | null }, msg: string) {
+    setBusy(true);
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/face-check`, "POST", body);
+    setBusy(false);
+    if (!r.ok) return toast(r.erro, "error");
+    setLink("");
+    toast(msg);
+    onChanged(r.data.item);
+  }
+  const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
+  // com o telefone do titular cadastrado, o WhatsApp abre direto na conversa dele; sem, você escolhe o contato
+  const wa = fc.url ? (whatsappLink(deal.holderPhone, faceCheckMessage(deal.holderName, fc.url)) ?? `https://wa.me/?text=${encodeURIComponent(faceCheckMessage(deal.holderName, fc.url))}`) : null;
+  const tone = fc.status === "DONE" ? "text-ok" : fc.status === "NOT_NEEDED" ? "text-muted" : "text-amber-300";
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Verificação">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Verificação · validação facial{deal.holderName ? ` de ${deal.holderName}` : ""}</h3>
+        {fc.status && <span className={`text-xs font-medium ${tone}`}>{fc.status === "DONE" ? "✅ " : ""}{FACE_CHECK_LABELS[fc.status]}</span>}
+      </div>
+      {fc.status === "DONE" || fc.status === "NOT_NEEDED" ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span className="flex-1">{fc.status === "DONE" ? "Titular validado. Volte à página da emissão, atualize (F5) e siga até o pagamento." : "A LATAM não pediu validação nesta emissão."}</span>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => save({ status: fc.url ? "PENDING" : null }, "Verificação reaberta")} disabled={busy}>Reabrir</button>
+        </div>
+      ) : (
+        <>
+          {!fc.url ? (
+            <div className="space-y-2">
+              <label className="block text-xs">
+                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app)</span>
+                <input className="input h-9 text-sm" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://cadastro.unico.app/flow/intro?collect-data=true&id=…" aria-label="Link da validação facial" />
+              </label>
+              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser do cadastro.unico.app e ter o id.</p>)}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Gerar link novo</button>
+                <button type="button" className="btn-ghost h-8 text-xs" disabled={busy} onClick={() => save({ status: "NOT_NEEDED" }, "Marcado: validação não pedida")}>A LATAM não pediu</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px]">{fc.url}</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copy(fc.url!, "Link")}><Copy className="h-3.5 w-3.5" />Copiar link</button>
+                <a className="btn-ghost h-8 text-xs" href={fc.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir</a>
+                {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer" title={deal.holderPhone ? `WhatsApp de ${deal.holderName}: ${deal.holderPhone}` : "Cadastre o telefone do titular para abrir direto na conversa dele"}><MessageCircle className="h-3.5 w-3.5" />Enviar ao titular</a>}
+                <button type="button" className="text-xs text-muted hover:text-zinc-100" disabled={busy} onClick={() => save({ link: null, status: null }, "Link apagado")}>Trocar link</button>
+              </div>
+              <button type="button" className="btn-primary h-8 w-full text-xs" disabled={busy} onClick={() => save({ status: "DONE" }, "Validação concluída: pode anexar o bilhete")}>Titular concluiu a validação</button>
+              {!deal.holderPhone && <p className="text-xs text-muted">Sem telefone do titular: o WhatsApp abre para você escolher o contato. Cadastre em Programas › Titulares.</p>}
+              <p className="text-xs text-muted">Depois que o titular concluir: volte à página da emissão na LATAM, atualize (F5) e continue até o pagamento.</p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -670,7 +785,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
   );
 }
 
-export function DealsKanban({ deals, customers, accounts }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [list, setList] = useState(deals);
   const [over, setOver] = useState<DealStageKey | null>(null);
@@ -749,8 +864,8 @@ export function DealsKanban({ deals, customers, accounts }: { deals: DealView[];
           })}
         </div>
       </div>
-      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setCreating(false)} />}
-      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
+      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setCreating(false)} />}
+      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
     </>
   );
 }

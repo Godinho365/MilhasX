@@ -34,6 +34,7 @@ export default async function ProgramsPage({ searchParams }: { searchParams: Pro
           address: h.address,
           addressParts: (h.addressParts as Record<string, string> | null) ?? null,
           accessEmail: h.accessEmail,
+          phone: h.phone,
           attributes: (h.attributes as { key: string; value: string }[] | null) ?? [],
           notes: h.notes,
         }))}

@@ -49,6 +49,7 @@ export const holderDetailsSchema = holderSchema.extend({
     .optional()
     .nullable(),
   accessEmail: z.string().trim().toLowerCase().email("E-mail inválido").max(120).optional().nullable().or(z.literal("").transform(() => null)),
+  phone: z.string().trim().max(30).refine((v) => !v || v.replace(/\D/g, "").length >= 10, "Telefone com DDD").optional().nullable().or(z.literal("").transform(() => null)),
   attributes: z.array(z.object({ key: z.string().trim().min(1, "Informe o nome do atributo").max(40), value: z.string().trim().max(200) })).max(20).optional(),
   notes: z.string().trim().max(2000).optional().nullable(),
   active: z.boolean().optional(),
