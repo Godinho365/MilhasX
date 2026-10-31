@@ -13,6 +13,7 @@ import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCe
 import type { DealView } from "@/server/services/miles-deals";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
+import { priceOptions, roeOf } from "@/domain/pricing";
 import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
 type Customer = { id: string; name: string; phone: string | null };
@@ -25,7 +26,7 @@ const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((
 
 /* ---------------- Nova / editar negociação ---------------- */
 
-function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void }) {
+function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSaleCpmCents = null }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [buyerType, setBuyerType] = useState<BuyerType>(deal?.buyerType ?? "FINAL");
   const [customerId, setCustomerId] = useState(deal?.customerId ?? "");
@@ -192,6 +193,9 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove }: { d
           {profit != null && <> · {manualProfit != null ? "Lucro" : "Lucro estimado"}: <span className={`font-semibold tabular-nums ${profit >= 0 ? "text-green-300" : "text-red-300"}`}>{fmtBRL(profit)}</span>{manualProfit == null && acc?.cpmCents ? <span className="text-xs"> (CPM da conta {fmtBRL(acc.cpmCents)})</span> : null}</>}
           {acc && nPoints && nPoints > acc.balance ? <span className="block text-xs text-amber-300">A conta tem só {pts(acc.balance)} pontos.</span> : null}
         </p>
+        {!locked && acc?.cpmCents && nPoints ? (
+          <PriceHelper costCpmCents={acc.cpmCents} avgSaleCpmCents={avgSaleCpmCents} points={nPoints} cpfs={Number(passengers) || 1} currentCpmCents={cpmCents} onPick={(c) => setCpm(fmtBRL(c))} />
+        ) : null}
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
         {deal && <BuyerPage deal={deal} />}
         {deal && <Emission deal={deal} />}
@@ -289,6 +293,44 @@ function Emission({ deal: initial }: { deal: DealView }) {
   );
 }
 
+/* ---------------- Milheiro sugerido ---------------- */
+
+/** Preço do milheiro: o mínimo sem prejuízo (custo da conta), a sua média de venda e metas de ROE; clicar preenche. */
+function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCents, onPick }: { costCpmCents: number; avgSaleCpmCents: number | null; points: number; cpfs: number; currentCpmCents: number | null; onPick: (cpmCents: number) => void }) {
+  const options = priceOptions({ costCpmCents, avgSaleCpmCents, points, cpfs });
+  const roe = currentCpmCents ? roeOf(currentCpmCents, costCpmCents) : null;
+  const pct = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
+  return (
+    <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Milheiro sugerido">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Milheiro sugerido</h3>
+        {roe != null && (
+          <span className={`text-xs ${roe < 0 ? "text-red-300" : "text-muted"}`}>
+            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · lucro {fmtBRL(Math.round(((currentCpmCents! - costCpmCents) * points) / 1000))}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted">Custo da conta {fmtBRL(costCpmCents)} o milheiro. ROE = lucro ÷ custo dos pontos. Clique para usar o preço.</p>
+      <div className="grid gap-2 sm:grid-cols-5">
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onPick(o.cpmCents)}
+            aria-pressed={currentCpmCents === o.cpmCents}
+            className={`rounded-lg border px-2.5 py-2 text-left text-xs transition-colors ${currentCpmCents === o.cpmCents ? "border-accent-light bg-accent-soft" : "border-line hover:border-zinc-500"}`}
+          >
+            <span className="block text-muted">{o.label}</span>
+            <span className="block text-sm font-semibold tabular-nums">{fmtBRL(o.cpmCents)}</span>
+            {!o.key.startsWith("roe") && <span className="block tabular-nums text-muted">ROE {pct(o.roePct)}</span>}
+            <span className={`block tabular-nums ${o.profitCents > 0 ? "text-green-300" : "text-muted"}`}>{fmtBRL(o.profitCents)}{o.profitPerCpfCents != null && cpfs > 1 ? ` · ${fmtBRL(o.profitPerCpfCents)}/CPF` : ""}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /* ---------------- Sugestão de conta ---------------- */
 
 type Fit = { id: string; label: string; already: number; load: { balance: number; reserved: number; cpfFree: number; ptsPerCpf: number }; fit: { enough: boolean; newCpfs: number; balanceAfter: number; cpfAfter: number; excessAfter: number; cpfShort: boolean } };
@@ -333,7 +375,7 @@ function AccountSuggestion({ dealId, chosen, onPick }: { dealId: string; chosen:
 /* ---------------- Lista ---------------- */
 
 /** Negociações ativas e arquivadas em tabela; clicar abre a negociação. */
-export function DealsList({ active, archived, customers, accounts }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+export function DealsList({ active, archived, customers, accounts, avgSaleCpmCents = null }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const all = [...active, ...archived];
   const deal = all.find((d) => d.id === open) ?? null;
@@ -366,7 +408,7 @@ export function DealsList({ active, archived, customers, accounts }: { active: D
     <div className="space-y-4">
       <section className="card overflow-hidden" aria-label="Negociações ativas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações ativas <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhuma negociação ativa.")}</section>
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
-      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} />}
+      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -743,7 +785,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
   );
 }
 
-export function DealsKanban({ deals, customers, accounts }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[] }) {
+export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [list, setList] = useState(deals);
   const [over, setOver] = useState<DealStageKey | null>(null);
@@ -822,8 +864,8 @@ export function DealsKanban({ deals, customers, accounts }: { deals: DealView[];
           })}
         </div>
       </div>
-      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setCreating(false)} />}
-      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
+      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setCreating(false)} />}
+      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
     </>
   );
 }
