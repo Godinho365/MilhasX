@@ -1,7 +1,7 @@
 // Espaço das contas (milhas × CPFs livres) e sugestão de conta para emitir uma negociação do CRM Milhas.
 import { prisma, DomainError } from "../db";
 import { beneficiaryUsage } from "./accounts";
-import { saleCpfs } from "./sales";
+import { listSales, saleCpfs } from "./sales";
 import { DEFAULT_PTS_PER_CPF, accountSpace, capacityPotential, emissionFit, rankForEmission } from "@/domain/capacity";
 
 const OPEN_STAGES = ["NEW", "NEGOTIATION", "AWAITING", "ISSUED"] as const;
@@ -28,12 +28,16 @@ export async function emissionAverage(userId: string, now = new Date()) {
 
 /** Contas com limite de CPFs: saldo, reservado em negociações abertas, CPFs livres, capacidade e espaço. */
 export async function accountsCapacity(userId: string, opts: { exceptDealId?: string } = {}) {
-  const [usage, avg, accounts, deals] = await Promise.all([
+  const [usage, avg, accounts, deals, sales] = await Promise.all([
     beneficiaryUsage(userId),
     emissionAverage(userId),
     prisma.account.findMany({ where: { userId, archived: false }, select: { id: true, balance: true, costCents: true, nickname: true, holderId: true, program: { select: { name: true, code: true } }, holder: { select: { name: true } } } }),
     prisma.milesDeal.findMany({ where: { userId, archivedAt: null, saleId: null, stage: { in: [...OPEN_STAGES] }, accountId: { not: null }, NOT: opts.exceptDealId ? { id: opts.exceptDealId } : undefined }, select: { accountId: true, points: true } }),
+    listSales(userId, { from: new Date(Date.now() - 365 * 86_400_000) }),
   ]);
+  // lucro real: o resultado das vendas já lançadas de cada conta nos últimos 12 meses
+  const realBy = new Map<string, number>();
+  for (const s of sales) if (s.accountId) realBy.set(s.accountId, (realBy.get(s.accountId) ?? 0) + s.resultCents);
   const reservedBy = new Map<string, number>();
   for (const d of deals) reservedBy.set(d.accountId!, (reservedBy.get(d.accountId!) ?? 0) + (d.points ?? 0));
   const rows = accounts
@@ -43,7 +47,7 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
       const load = { balance: a.balance, reserved: reservedBy.get(a.id) ?? 0, cpfFree: Math.max(0, (u.limit ?? 0) - u.used), ptsPerCpf: avg.ptsPerCpf };
       const space = accountSpace(load);
       const costCpmCents = a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null;
-      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents) };
+      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0 };
     })
     .sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
   return { avg, rows };

@@ -138,7 +138,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
         </div>
         <div className="overflow-x-auto">
           <table className="table-base">
-            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th><th className="text-right">Potencial de faturamento</th><th className="text-right">Potencial de lucro</th></tr></thead>
+            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th><th className="text-right">Potencial de faturamento</th><th className="text-right">Potencial de lucro</th><th className="text-right" title="Resultado das vendas já lançadas desta conta nos últimos 12 meses">Lucro real (12 meses)</th></tr></thead>
             <tbody>
               {[...capRows].sort((a, b) => b.space - a.space).map((r) => (
                 <tr key={r.id}>
@@ -150,6 +150,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
                   <td className={`text-right font-semibold tabular-nums ${r.space < 0 ? "text-bad" : ""}`} title={r.space < 0 ? "Milhas demais para os CPFs livres: risco de saldo encalhado" : undefined}>{r.space < 0 ? `−${fmtPts(-r.space)} ⚠️` : fmtPts(r.space)}</td>
                   <td className="text-right tabular-nums">{r.revenueCents == null ? "-" : money(r.revenueCents)}</td>
                   <td className={`text-right font-semibold tabular-nums ${(r.profitCents ?? 0) < 0 ? "text-bad" : "text-ok"}`}>{r.profitCents == null ? "-" : money(r.profitCents)}</td>
+                  <td className={`text-right font-semibold tabular-nums ${r.realProfitCents < 0 ? "text-bad" : r.realProfitCents > 0 ? "text-ok" : "text-muted"}`}>{r.realProfitCents ? money(r.realProfitCents) : "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -164,6 +165,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
                   <td className="text-right tabular-nums">{fmtPts(capRows.reduce((t, r) => t + r.space, 0))}</td>
                   <td className="text-right tabular-nums">{money(capRows.reduce((t, r) => t + (r.revenueCents ?? 0), 0))}</td>
                   <td className="text-right tabular-nums text-ok">{money(capRows.reduce((t, r) => t + (r.profitCents ?? 0), 0))}</td>
+                  <td className="text-right tabular-nums text-ok">{money(capRows.reduce((t, r) => t + r.realProfitCents, 0))}</td>
                 </tr>
               </tfoot>
             )}
