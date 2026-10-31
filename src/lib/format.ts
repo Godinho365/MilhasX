@@ -5,6 +5,10 @@ export const fmtBRL = (cents: number | null | undefined) => (cents == null ? "-"
 export const fmtPts = (n: number) => int.format(n);
 export const fmtSignedPts = (n: number) => (n > 0 ? "+" : "") + int.format(n);
 export const fmtDate = (d: Date | string) => new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
+/** Data e hora de um instante (criado em, enviado em…) no horário de Brasília. */
+export const fmtDateTime = (d: Date | string) => new Date(d).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+/** Dia de um instante no horário de Brasília. */
+export const fmtDay = (d: Date | string, o: Intl.DateTimeFormatOptions = {}) => new Date(d).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", ...o });
 
 /** "1.234,56" ou "1234.56" → centavos. Retorna null se inválido. */
 export function parseBRLToCents(v: string): number | null {

@@ -1,5 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
+import { fmtDay } from "@/lib/format";
 import { refreshSafe } from "@/lib/nav";
 import { useState } from "react";
 import { api } from "@/lib/api";
@@ -177,7 +178,7 @@ export function ProfileTab({ name, email, avatarVersion, deletionRequestedAt }: 
       <Section title="Excluir conta" danger>
         {deletionRequestedAt ? (
           <div className="space-y-3">
-            <p className="text-sm">Exclusão solicitada em {new Date(deletionRequestedAt).toLocaleDateString("pt-BR")}. A administração vai concluir o pedido e apagar os seus dados.</p>
+            <p className="text-sm">Exclusão solicitada em {fmtDay(deletionRequestedAt)}. A administração vai concluir o pedido e apagar os seus dados.</p>
             <button className="btn-ghost" onClick={cancelDeletion}>Cancelar pedido</button>
           </div>
         ) : (

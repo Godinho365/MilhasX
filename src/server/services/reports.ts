@@ -5,6 +5,7 @@ import { ENTRY_LABELS } from "@/domain/ledger";
 import { listSales as listSalesView } from "./sales";
 import { beneficiaryUsage } from "./accounts";
 import { programPotential } from "@/domain/potential";
+import { brWindows, revenueWindows } from "@/domain/brasilia";
 
 export const REPORT_TABS = ["overview", "purchases", "credit-cards", "savings", "evolution", "sales", "assets"] as const;
 export type ReportTab = (typeof REPORT_TABS)[number];
@@ -444,6 +445,14 @@ export async function salesReport(f: ReportFilter) {
     profit: [...profitBy.values()].filter((x) => x.value).sort((a, b) => b.value - a.value),
     beneficiaries: [...beneficiaries.values()].sort((a, b) => b.value - a.value).slice(0, 10),
   };
+}
+
+/** Receita de hoje, desta semana e deste mês no horário de Brasília (não depende do período escolhido). */
+export async function salesNow(f: Omit<ReportFilter, "period">, now = new Date()) {
+  const w = brWindows(now);
+  const from = new Date(`${w.week < w.month ? w.week : w.month}T00:00:00Z`);
+  const sales = await listSalesView(f.userId, { from, programId: f.programId, holderId: f.holderId });
+  return revenueWindows(sales, now);
 }
 
 /* ---------------- Bens e Direitos ---------------- */

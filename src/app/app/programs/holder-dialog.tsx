@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
 import { Mail, IdCard, MapPin, ListPlus, Paperclip, ShieldAlert, X, Eraser, FileText, Upload, Download } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, today } from "@/lib/api";
 import { Modal, Field, Alert } from "@/components/ui";
 import { Collapsible } from "@/components/form-parts";
 import { toast } from "@/components/feedback";
@@ -156,7 +156,7 @@ export function HolderDialog({ holder, onClose }: { holder: HolderFull | null; o
         {erro && <Alert>{erro}</Alert>}
         <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
           <Field label="Nome do titular" required><input className="input" name="name" required maxLength={80} placeholder="Ex: João da Silva" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-          <Field label="Data de nascimento"><input className="input" type="date" value={f.birthDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, birthDate: e.target.value })} /></Field>
+          <Field label="Data de nascimento"><input className="input" type="date" value={f.birthDate} max={today()} onChange={(e) => setF({ ...f, birthDate: e.target.value })} /></Field>
           <Field label="Telefone (WhatsApp)" hint="Para enviar ao titular o link da validação facial da LATAM"><input className="input" type="tel" inputMode="tel" placeholder="(11) 90000-0000" maxLength={30} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} aria-label="Telefone do titular" /></Field>
         </div>
 

@@ -4,7 +4,7 @@ import { refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
 import { CreditCard, Trash2, ReceiptText, Pencil, Trophy, MoreHorizontal, ChevronsUpDown, ChevronRight, Wallet } from "lucide-react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, today } from "@/lib/api";
 import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { ProgramLogo } from "@/components/program-logo";
@@ -59,7 +59,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     if (!r.ok) return setErro(r.erro);
     // Pontos que o cartão já tem acumulados: viram "Saldo inicial" na conta que recebe os pontos
     const bal = Number(String(f.get("balance") || "0").replace(/\D/g, "")) || 0;
-    const balDate = String(f.get("balanceDate") || new Date().toISOString().slice(0, 10));
+    const balDate = String(f.get("balanceDate") || today());
     if (bal !== (editing?.balancePoints ?? 0) || (bal > 0 && balDate !== editing?.balanceDate)) {
       const b = await api(`/api/cards/${r.data.item.id}/balance`, "PUT", { points: bal, date: balDate });
       if (!b.ok) return setErro(b.erro);
@@ -267,7 +267,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
             {erro && <Alert>{erro}</Alert>}
             <p className="text-sm text-muted">{registering.card.name} · fatura de {fmtDate(registering.dueDate)} · {fmtBRL(registering.amountCents)}. Informe quantos pontos caíram na conta {registering.card.program} · {registering.card.holder}.</p>
             <Field label="Pontos recebidos" required hint={registering.expectedPoints > 0 ? `Estimado: ${fmtPts(registering.expectedPoints)} pts` : undefined}><input className="input tabular-nums" name="points" inputMode="numeric" required defaultValue={registering.expectedPoints > 0 ? fmtPts(registering.expectedPoints) : ""} placeholder="0" /></Field>
-            <Field label="Data do crédito" required><input className="input" type="date" name="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+            <Field label="Data do crédito" required><input className="input" type="date" name="date" required defaultValue={today()} /></Field>
             {registering.feeCents > 0 && <p className="text-xs text-muted">A parcela da anuidade desta fatura ({fmtBRL(registering.feeCents)}) entra como custo destes pontos.</p>}
           </form>
         )}
@@ -313,7 +313,7 @@ function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accou
       <Field label="Dia do fechamento" required><input className="input" name="closing" type="number" min={1} max={31} required defaultValue={card?.closingDay} /></Field>
       <Field label="Dia do vencimento" required><input className="input" name="due" type="number" min={1} max={31} required defaultValue={card?.dueDay} /></Field>
       <Field label="Pontos já acumulados no cartão" hint="Entram no saldo da conta que recebe os pontos (lançamento “Saldo inicial”)"><input className="input" name="balance" inputMode="numeric" placeholder="0" defaultValue={card?.balancePoints ? fmtPts(card.balancePoints) : ""} /></Field>
-      <Field label="Data do saldo"><input className="input" type="date" name="balanceDate" defaultValue={card?.balanceDate ?? new Date().toISOString().slice(0, 10)} /></Field>
+      <Field label="Data do saldo"><input className="input" type="date" name="balanceDate" defaultValue={card?.balanceDate ?? today()} /></Field>
       <Field label="Anuidade (R$ por ano)" hint="Cobrada em 12 parcelas; cada parcela vira custo dos pontos da fatura"><input className="input" name="fee" inputMode="decimal" placeholder="0,00" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
       <Field label="Isenta gastando (R$ por mês)" hint="Vazio: sem isenção. Ex.: 8.000,00"><input className="input" name="waiver" inputMode="decimal" placeholder="8.000,00" value={waiver} onChange={(e) => setWaiver(e.target.value)} /></Field>
       <section className="rounded-xl border border-line bg-panel2 p-4 sm:col-span-2" aria-label="Simulação do mês">

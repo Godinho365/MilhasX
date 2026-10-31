@@ -1,6 +1,8 @@
 import { requirePageUser, selectedHolderId } from "@/server/session";
 import { listCustomers } from "@/server/services/market";
 import { listSales, getSale } from "@/server/services/sales";
+import { salesNow } from "@/server/services/reports";
+import { RevenueNow } from "@/components/revenue-now";
 import { listAccounts } from "@/server/services/wallet";
 import { listSupplierAccounts } from "@/server/services/extras";
 import { saleQuerySchema } from "@/server/schemas";
@@ -16,12 +18,13 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const tab = sp.tab === "clientes" ? "clientes" : "vendas";
   const holderId = await selectedHolderId(user.id);
   const parsed = saleQuerySchema.safeParse(Object.fromEntries(Object.entries(sp).filter(([k, v]) => v && k !== "tab")));
-  const [sales, customers, accounts, suppliers, cards] = await Promise.all([
+  const [sales, customers, accounts, suppliers, cards, now] = await Promise.all([
     listSales(user.id, { ...(parsed.success ? parsed.data : {}), holderId }),
     listCustomers(user.id),
     listAccounts(user.id, holderId),
     listSupplierAccounts(user.id),
     prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    salesNow({ userId: user.id, holderId }),
   ]);
   const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, groupId: sp.edit }, select: { id: true } }) : null;
   const editSale = toEdit ? await getSale(user.id, toEdit.id) : null;
@@ -38,6 +41,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
       <Segmented center active={tab} items={[{ key: "vendas", label: "Vendas", href: "/app/sales" }, { key: "clientes", label: "Clientes", href: "/app/sales?tab=clientes" }]} />
       {tab === "vendas" ? (
         <>
+          <div className="mb-4"><RevenueNow r={now} /></div>
           {sales.length > 0 && (
             <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 2xl:grid-cols-7">
               <Stat label="Vendas" value={String(sales.length)} />

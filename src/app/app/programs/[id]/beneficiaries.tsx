@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { History, Link2, Pencil, Trash2, UserCheck } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, today } from "@/lib/api";
 import { fmtDate } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
@@ -63,7 +63,7 @@ export function BeneficiaryLimit({ accountId }: { accountId: string }) {
 function HistoryDialog({ accountId, s, onClose, onChange }: { accountId: string; s: State; onClose: () => void; onChange: () => void }) {
   const [name, setName] = useState("");
   const [doc, setDoc] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(today());
   const [erro, setErro] = useState("");
   async function add(e: React.FormEvent) {
     e.preventDefault();

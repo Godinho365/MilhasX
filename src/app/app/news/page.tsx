@@ -21,7 +21,7 @@ export default async function NewsPage() {
               <span className={`absolute -left-[31px] top-5 h-3 w-3 rounded-full border-2 border-bg ${n.publishedAt > lastRead ? "bg-accent-light" : "bg-zinc-700"}`} aria-hidden />
               <article className="card card-pad">
                 <div className="mb-1 flex items-center gap-2 text-xs text-muted">
-                  <time dateTime={n.publishedAt.toISOString()}>{n.publishedAt.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })}</time>
+                  <time dateTime={n.publishedAt.toISOString()}>{n.publishedAt.toLocaleDateString("pt-BR", { timeZone: "UTC", day: "2-digit", month: "long", year: "numeric" })}</time>
                   {n.publishedAt > lastRead && <span className="rounded-full bg-accent-soft px-2 py-0.5 font-semibold text-accent-light">novo</span>}
                 </div>
                 <h2 className="text-lg font-semibold">{n.title}</h2>

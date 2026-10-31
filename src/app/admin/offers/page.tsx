@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { fmtDay } from "@/lib/format";
 import { listPrograms } from "@/server/services/admin";
 import { PageHeader } from "@/components/stat";
 import { OfferForm, ImportPanel } from "./client";
@@ -26,7 +27,7 @@ export default async function AdminOffers() {
                   <td className="text-right">{o.pointsPerReal ? `${o.upTo ? "até " : ""}${(o.pointsPerReal / 100).toLocaleString("pt-BR")}${o.perDollar ? " /US$" : ""}` : "-"}</td>
                   <td className="text-right">{o.cashbackBps ? `${(o.cashbackBps / 100).toLocaleString("pt-BR")}%` : "-"}</td>
                   <td className="text-muted">{o.source === "csv" ? "Planilha" : o.source ? (SOURCES[o.source as keyof typeof SOURCES]?.label ?? PAGE_SOURCES[o.source as keyof typeof PAGE_SOURCES]?.label ?? FILE_SOURCES[o.source as keyof typeof FILE_SOURCES]?.label ?? (o.source === "meliuz" ? "Méliuz" : o.source)) : "Manual"}</td>
-                  <td className="text-muted">{o.updatedAt.toLocaleDateString("pt-BR")}</td>
+                  <td className="text-muted">{fmtDay(o.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>

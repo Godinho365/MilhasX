@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtDateTime } from "@/lib/format";
 import { listAudit } from "@/server/services/admin";
 import { PageHeader } from "@/components/stat";
 import { Pagination } from "@/components/pagination";
@@ -15,7 +16,7 @@ export default async function AdminAudit({ searchParams }: { searchParams: Promi
           <thead><tr><th>Data</th><th>Ator</th><th>Ação</th><th>Alvo</th></tr></thead>
           <tbody>
             {data.items.map((l) => (
-              <tr key={l.id}><td className="whitespace-nowrap text-muted">{l.createdAt.toLocaleString("pt-BR")}</td><td>{l.actor?.email ?? "sistema"}</td><td><code className="text-xs">{l.action}</code></td><td className="text-muted">{l.targetType} {l.targetId?.slice(0, 10)}</td></tr>
+              <tr key={l.id}><td className="whitespace-nowrap text-muted">{fmtDateTime(l.createdAt)}</td><td>{l.actor?.email ?? "sistema"}</td><td><code className="text-xs">{l.action}</code></td><td className="text-muted">{l.targetType} {l.targetId?.slice(0, 10)}</td></tr>
             ))}
           </tbody>
         </table>

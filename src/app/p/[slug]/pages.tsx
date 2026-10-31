@@ -5,7 +5,7 @@ import {
   Luggage, MessageCircle, Plane, RefreshCw, Search, ShieldCheck, ShoppingBag, User, Users,
 } from "lucide-react";
 import { Alert } from "@/components/ui";
-import { fmtBRL } from "@/lib/format";
+import { fmtBRL, fmtDay } from "@/lib/format";
 import { CABIN_LABELS, type Cabin } from "@/domain/flight-search";
 import { airlineSite, cityOf, proposalCode, type Leg } from "@/domain/proposal";
 import type { PageDesign } from "@/domain/page-design";
@@ -140,7 +140,7 @@ export function CotacaoView({ agency, whatsapp, design, order }: { agency: strin
         </div>
         <p className="mt-6 text-sm text-[#fff]/70">Olá, {firstName}</p>
         <h1 className="text-3xl font-bold leading-tight">Sua viagem para <span className="text-[rgb(var(--lime,141_230_112))]">{dest}</span></h1>
-        {design.text && <p className="mt-2 text-sm text-[#fff]/70">{design.text}{p.sentAt ? ` Emitida em ${new Date(p.sentAt).toLocaleDateString("pt-BR")}.` : ""}</p>}
+        {design.text && <p className="mt-2 text-sm text-[#fff]/70">{design.text}{p.sentAt ? ` Emitida em ${fmtDay(p.sentAt)}.` : ""}</p>}
         {first && (
           <div className="mt-6 flex items-center gap-3">
             <div><p className="text-3xl font-bold">{first.origin}</p><p className="text-xs text-[#fff]/60">{cityOf(first.origin)}</p></div>
@@ -313,7 +313,7 @@ export function ContratoView({ slug, token, agency, design, order, text, preview
     <div className="space-y-4">
       <section className="card p-5" aria-label="Resumo do termo">
         <h1 className="text-xl font-bold">{design.title}</h1>
-        <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${signed || done ? "bg-accent-soft text-accent" : "bg-amber-500/15 text-amber-400"}`}>{signed ? `Assinado em ${new Date(signed.at).toLocaleDateString("pt-BR")}` : done ? "Assinado" : "Aguardando assinatura"}</span>
+        <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${signed || done ? "bg-accent-soft text-accent" : "bg-amber-500/15 text-amber-400"}`}>{signed ? `Assinado em ${fmtDay(signed.at)}` : done ? "Assinado" : "Aguardando assinatura"}</span>
         <dl className="mt-4 space-y-2 text-sm">
           {[["Agência", agency], ["Cliente", order.customerName], ["Trecho(s)", legs.map((l) => `${l.origin} → ${l.destination}${l.date ? ` (${fullDate(l.date)})` : ""}`).join(" · ")], ["Valor", p.pixCents != null ? fmtBRL(p.pixCents) : "—"], ["Forma de pagamento", p.pixCents != null ? "Pix" : p.payment]].map(([k, v]) => (
             <div key={k} className="flex justify-between gap-4"><dt className="text-muted">{k}</dt><dd className="text-right font-semibold">{v}</dd></div>

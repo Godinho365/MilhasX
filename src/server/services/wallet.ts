@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { assertWithinLimit } from "./plan-limits";
 import { cpmCents, marketValueCents } from "@/domain/ledger";
+import { brDay } from "@/domain/brasilia";
 
 export async function listHolders(userId: string) {
   return prisma.holder.findMany({ where: { userId }, orderBy: { name: "asc" } });
@@ -277,7 +278,7 @@ export async function evolutionByHolder(userId: string, opts: { holderId?: strin
   }
   const running = new Map<string, { points: number; cost: number }>([...holders.keys()].map((k) => [k, { points: 0, cost: 0 }]));
   const fromKey = opts.from?.toISOString().slice(0, 10);
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = brDay();
   const points: Record<string, number | string>[] = [];
   const costs: Record<string, number | string>[] = [];
   const snapshot = (date: string) => {

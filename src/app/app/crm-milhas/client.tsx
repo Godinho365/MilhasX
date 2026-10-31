@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
-import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, fmtPts, parseBRLToCents, fmtDateTime, fmtDay as fmtDayBR } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
@@ -249,7 +249,7 @@ function FileBox({ title, what, url, file, hint, doneHint, removable = true, blo
       {!file && blocked ? (
         <p className="text-xs text-muted">🔒 {blocked}</p>
       ) : file ? (
-        <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {new Date(file.at).toLocaleString("pt-BR")}. {doneHint}</p>
+        <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {fmtDateTime(file.at)}. {doneHint}</p>
       ) : (
         <p className="text-xs text-amber-300">{hint}</p>
       )}
@@ -387,7 +387,7 @@ export function DealsList({ active, archived, customers, accounts, avgSaleCpmCen
   const all = [...active, ...archived];
   const deal = all.find((d) => d.id === open) ?? null;
   const balcoes = [...new Set([...all.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName), "HotMilhas", "MaxMilhas"])];
-  const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
+  const fmtDay = (iso: string) => fmtDayBR(iso);
   const table = (rows: DealView[], empty: string) =>
     rows.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{empty}</p> : (
       <div className="overflow-x-auto">
@@ -716,7 +716,7 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
       ) : deal.passengersData.length > 0 ? (
         <div className="space-y-2">
           <p className="flex items-center gap-2 text-xs text-muted">
-            <span className="flex-1">Recebidos em {new Date(deal.passengersAt!).toLocaleString("pt-BR")}</span>
+            <span className="flex-1">Recebidos em {fmtDateTime(deal.passengersAt!)}</span>
             <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Editar passageiros</button>
           </p>
           <div className="flex flex-wrap items-center gap-2" aria-label="Preencher na LATAM">

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { fmtDay } from "@/lib/format";
 import { holderView, HOLDER_COOKIE } from "@/server/services/holder-access";
 import { appName, publicBrand } from "@/server/session";
 import { ownerBranding } from "@/server/services/client-pages";
@@ -33,7 +34,7 @@ export default async function HolderPage({ searchParams }: { searchParams: Promi
         data={view}
         footer={
           <div className="mt-6 flex items-center justify-between gap-3 text-xs text-muted">
-            <span>Acesso válido até {new Date(view.sessionExpiresAt).toLocaleDateString("pt-BR")}. Somente leitura.</span>
+            <span>Acesso válido até {fmtDay(view.sessionExpiresAt)}. Somente leitura.</span>
             <form action="/api/holder-access/logout" method="post"><button className="btn-ghost h-8 bg-panel text-xs">Sair</button></form>
           </div>
         }

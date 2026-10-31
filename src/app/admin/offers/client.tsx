@@ -1,5 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
+import { fmtDateTime } from "@/lib/format";
 import { refreshSafe } from "@/lib/nav";
 import { useState } from "react";
 import { api } from "@/lib/api";
@@ -22,7 +23,7 @@ const STATE: Record<SourceState["state"], { label: string; cls: string }> = {
   FAILED: { label: "Falha de processamento", cls: "bg-red-500/15 text-red-300" },
   NEVER: { label: "Nunca importada", cls: "bg-panel2 text-muted" },
 };
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
+const when = (iso: string | null) => (iso ? fmtDateTime(iso) : "—");
 const HOW: Record<string, React.ReactNode> = {
   page: <>O site bloqueia leitura automática. Abra a página de parceiros no seu navegador, salve com Ctrl+S (“Página da Web, somente HTML”) e envie o arquivo .html.</>,
   file: <>Sem API ou feed público e com bloqueio de robôs. Envie uma planilha CSV com as colunas <code>loja;cashback;link;ate</code> (link e ate opcionais), por exemplo copiada da página de cashback do portal.</>,
