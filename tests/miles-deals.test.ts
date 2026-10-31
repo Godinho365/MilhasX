@@ -14,6 +14,7 @@ import * as paxRoute from "@/app/api/miles-deals/[id]/passengers/route";
 import * as ticket from "@/app/api/miles-deals/[id]/ticket/route";
 import * as receipt from "@/app/api/miles-deals/[id]/receipt/route";
 import * as archiveRoute from "@/app/api/miles-deals/[id]/archive/route";
+import * as faceRoute from "@/app/api/miles-deals/[id]/face-check/route";
 import { listDeals, milesDealsDashboard } from "@/server/services/miles-deals";
 import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
@@ -146,6 +147,14 @@ describe("CRM Milhas", () => {
 
     // Com o bilhete anexado: emitida, a página mostra o localizador, deixa baixar o bilhete e não aceita mais mudanças
     const up = (body: Buffer) => ticket.POST(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, "x-file-name": "bilhete.pdf" }, body: new Uint8Array(body) }), { params: Promise.resolve({ id: d.id }) });
+    // verificação antes da emissão: sem ela o bilhete não entra
+    expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(409);
+    const ID = "61020a77-74a6-4600-ae39-77e74b1828aa";
+    expect((await c.call(faceRoute.POST, "POST", "/x", { link: "https://outro.site/flow/intro?id=" + ID, status: "PENDING" }, { id: d.id })).status).toBe(400);
+    const fc = (await c.call(faceRoute.POST, "POST", "/x", { link: `https://cadastro.unico.app/flow/intro?collect-data=true&id=${ID}`, status: "PENDING" }, { id: d.id })).data.item.faceCheck;
+    expect(fc).toMatchObject({ url: `https://cadastro.unico.app/process/${ID}?collect-data=true`, status: "PENDING" });
+    expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(409); // ainda aguardando o titular
+    expect((await c.call(faceRoute.POST, "POST", "/x", { status: "DONE" }, { id: d.id })).data.item.faceCheck).toMatchObject({ status: "DONE", url: `https://cadastro.unico.app/process/${ID}?collect-data=true` });
     expect((await up(Buffer.from("texto qualquer"))).status).toBe(415);
     const att = await up(Buffer.from("%PDF-1.4\n"));
     expect(att.status).toBe(201);

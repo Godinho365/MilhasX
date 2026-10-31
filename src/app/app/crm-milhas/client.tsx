@@ -13,6 +13,7 @@ import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCe
 import type { DealView } from "@/server/services/miles-deals";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
+import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
 type Customer = { id: string; name: string; phone: string | null };
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
@@ -205,8 +206,8 @@ const fmtSize = (b: number) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(
 type DealFile = { name: string; size: number; at: string };
 
 /** Anexo da negociação (bilhete ou comprovante): anexar, baixar, trocar e remover. */
-function FileBox({ title, what, url, file, hint, doneHint, removable = true, onChanged }: {
-  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean;
+function FileBox({ title, what, url, file, hint, doneHint, removable = true, blocked, onChanged }: {
+  title: string; what: string; url: string; file: DealFile | null; hint: string; doneHint: string; removable?: boolean; blocked?: string;
   onChanged: (r: { item: DealView; aviso?: string | null }, action: "upload" | "remove") => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -238,10 +239,12 @@ function FileBox({ title, what, url, file, hint, doneHint, removable = true, onC
             {removable && <button type="button" className="btn-ghost h-8 w-8 px-0 text-red-300" onClick={remove} aria-label={`Remover o ${what}`}><Trash2 className="h-3.5 w-3.5" /></button>}
           </>
         ) : (
-          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
+          <button type="button" className="btn-primary h-8 text-xs" onClick={() => input.current?.click()} disabled={busy || !!blocked}><Plus className="h-3.5 w-3.5" />{busy ? "Enviando…" : `Anexar ${what}`}</button>
         )}
       </div>
-      {file ? (
+      {!file && blocked ? (
+        <p className="text-xs text-muted">🔒 {blocked}</p>
+      ) : file ? (
         <p className="text-xs text-muted">{file.name} · {fmtSize(file.size)} · anexado em {new Date(file.at).toLocaleString("pt-BR")}. {doneHint}</p>
       ) : (
         <p className="text-xs text-amber-300">{hint}</p>
@@ -262,10 +265,13 @@ function Emission({ deal: initial }: { deal: DealView }) {
     else toast(action === "remove" ? msgs.removed : moved ? msgs.moved : msgs.up);
     refreshSafe(router);
   };
+  const verified = deal.faceCheck.status === "DONE" || deal.faceCheck.status === "NOT_NEEDED";
   return (
     <>
+      <FaceCheck deal={deal} onChanged={(d) => { setDeal(d); refreshSafe(router); }} />
       <FileBox
         title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket}
+        blocked={verified ? undefined : "Faça a verificação acima (validação facial do titular) antes de anexar o bilhete."}
         hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece."
         doneHint="O comprador pode baixar pela página dele."
         onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: negociação emitida", removed: "Bilhete removido" })}
@@ -362,6 +368,71 @@ export function DealsList({ active, archived, customers, accounts }: { active: D
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
       {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/* ---------------- Verificação (validação facial) ---------------- */
+
+/** Antes de emitir: a LATAM pede validação facial do titular. O link recebido vira o formato novo, que vai
+ *  para o titular; marcar como concluída (ou não pedida) libera o bilhete. */
+function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealView) => void }) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fc = deal.faceCheck;
+  const preview = link.trim() ? unicoProcessLink(link) : null;
+  async function save(body: { link?: string | null; status: FaceCheckStatus | null }, msg: string) {
+    setBusy(true);
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/face-check`, "POST", body);
+    setBusy(false);
+    if (!r.ok) return toast(r.erro, "error");
+    setLink("");
+    toast(msg);
+    onChanged(r.data.item);
+  }
+  const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
+  const wa = fc.url ? `https://wa.me/?text=${encodeURIComponent(faceCheckMessage(deal.holderName, fc.url))}` : null;
+  const tone = fc.status === "DONE" ? "text-ok" : fc.status === "NOT_NEEDED" ? "text-muted" : "text-amber-300";
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Verificação">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Verificação · validação facial{deal.holderName ? ` de ${deal.holderName}` : ""}</h3>
+        {fc.status && <span className={`text-xs font-medium ${tone}`}>{fc.status === "DONE" ? "✅ " : ""}{FACE_CHECK_LABELS[fc.status]}</span>}
+      </div>
+      {fc.status === "DONE" || fc.status === "NOT_NEEDED" ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span className="flex-1">{fc.status === "DONE" ? "Titular validado. Volte à página da emissão, atualize (F5) e siga até o pagamento." : "A LATAM não pediu validação nesta emissão."}</span>
+          <button type="button" className="text-accent-light hover:underline" onClick={() => save({ status: fc.url ? "PENDING" : null }, "Verificação reaberta")} disabled={busy}>Reabrir</button>
+        </div>
+      ) : (
+        <>
+          {!fc.url ? (
+            <div className="space-y-2">
+              <label className="block text-xs">
+                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app)</span>
+                <input className="input h-9 text-sm" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://cadastro.unico.app/flow/intro?collect-data=true&id=…" aria-label="Link da validação facial" />
+              </label>
+              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser do cadastro.unico.app e ter o id.</p>)}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Gerar link novo</button>
+                <button type="button" className="btn-ghost h-8 text-xs" disabled={busy} onClick={() => save({ status: "NOT_NEEDED" }, "Marcado: validação não pedida")}>A LATAM não pediu</button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px]">{fc.url}</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copy(fc.url!, "Link")}><Copy className="h-3.5 w-3.5" />Copiar link</button>
+                <a className="btn-ghost h-8 text-xs" href={fc.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir</a>
+                {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Enviar ao titular</a>}
+                <button type="button" className="text-xs text-muted hover:text-zinc-100" disabled={busy} onClick={() => save({ link: null, status: null }, "Link apagado")}>Trocar link</button>
+              </div>
+              <button type="button" className="btn-primary h-8 w-full text-xs" disabled={busy} onClick={() => save({ status: "DONE" }, "Validação concluída: pode anexar o bilhete")}>Titular concluiu a validação</button>
+              <p className="text-xs text-muted">Depois que o titular concluir: volte à página da emissão na LATAM, atualize (F5) e continue até o pagamento.</p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
