@@ -37,7 +37,11 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
   ]);
   // lucro real: o resultado das vendas já lançadas de cada conta nos últimos 12 meses
   const realBy = new Map<string, number>();
-  for (const s of sales) if (s.accountId) realBy.set(s.accountId, (realBy.get(s.accountId) ?? 0) + s.resultCents);
+  const soldBy = new Map<string, number>(); // faturamento real (total cobrado, com taxas repassadas)
+  for (const s of sales) if (s.accountId) {
+    realBy.set(s.accountId, (realBy.get(s.accountId) ?? 0) + s.resultCents);
+    soldBy.set(s.accountId, (soldBy.get(s.accountId) ?? 0) + s.totalCents);
+  }
   const reservedBy = new Map<string, number>();
   for (const d of deals) reservedBy.set(d.accountId!, (reservedBy.get(d.accountId!) ?? 0) + (d.points ?? 0));
   const rows = accounts
@@ -47,7 +51,7 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
       const load = { balance: a.balance, reserved: reservedBy.get(a.id) ?? 0, cpfFree: Math.max(0, (u.limit ?? 0) - u.used), ptsPerCpf: avg.ptsPerCpf };
       const space = accountSpace(load);
       const costCpmCents = a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null;
-      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0 };
+      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0, realRevenueCents: soldBy.get(a.id) ?? 0 };
     })
     .sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
   return { avg, rows };
