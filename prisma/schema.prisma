@@ -233,6 +233,7 @@ model Holder {
   address      String?
   addressParts Json? // { cep, logradouro, numero, complemento, bairro, cidade, uf }
   accessEmail  String? // e-mail autorizado a ver a página do titular
+  phone        String? // telefone/WhatsApp do titular (ex.: enviar o link da validação facial)
   attributes   Json? // [{ key, value }] (informações extras)
   notes        String?
   createdAt    DateTime  @default(now())

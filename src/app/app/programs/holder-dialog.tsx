@@ -18,6 +18,7 @@ export type HolderFull = {
   active: boolean;
   birthDate: string | null;
   accessEmail: string | null;
+  phone?: string | null;
   documents: { type: string; number: string }[];
   address: string | null;
   addressParts: AddressParts | null;
@@ -60,6 +61,7 @@ export function HolderDialog({ holder, onClose }: { holder: HolderFull | null; o
     name: holder?.name ?? "",
     birthDate: holder?.birthDate?.slice(0, 10) ?? "",
     accessEmail: holder?.accessEmail ?? "",
+    phone: holder?.phone ?? "",
     notes: holder?.notes ?? "",
   });
   const [docs, setDocs] = useState(() => withDraft(holder?.documents ?? [], emptyDoc, (d) => !d.number.trim()));
@@ -114,6 +116,7 @@ export function HolderDialog({ holder, onClose }: { holder: HolderFull | null; o
       name: f.name,
       birthDate: f.birthDate || null,
       accessEmail: f.accessEmail || null,
+      phone: f.phone || null,
       documents: docs.filter((d) => d.number.trim()),
       addressParts: Object.keys(parts).length ? parts : null,
       attributes: attrs.filter((a) => a.key.trim()),
@@ -154,6 +157,7 @@ export function HolderDialog({ holder, onClose }: { holder: HolderFull | null; o
         <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
           <Field label="Nome do titular" required><input className="input" name="name" required maxLength={80} placeholder="Ex: João da Silva" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
           <Field label="Data de nascimento"><input className="input" type="date" value={f.birthDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ ...f, birthDate: e.target.value })} /></Field>
+          <Field label="Telefone (WhatsApp)" hint="Para enviar ao titular o link da validação facial da LATAM"><input className="input" type="tel" inputMode="tel" placeholder="(11) 90000-0000" maxLength={30} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} aria-label="Telefone do titular" /></Field>
         </div>
 
         <Collapsible icon={<Mail className="h-4 w-4" />} title="Acesso à página do titular" subtitle="Configure o e-mail autorizado" open={open.access} onToggle={() => setOpen({ ...open, access: !open.access })}>

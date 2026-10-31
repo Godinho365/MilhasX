@@ -390,7 +390,8 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
     onChanged(r.data.item);
   }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
-  const wa = fc.url ? `https://wa.me/?text=${encodeURIComponent(faceCheckMessage(deal.holderName, fc.url))}` : null;
+  // com o telefone do titular cadastrado, o WhatsApp abre direto na conversa dele; sem, você escolhe o contato
+  const wa = fc.url ? (whatsappLink(deal.holderPhone, faceCheckMessage(deal.holderName, fc.url)) ?? `https://wa.me/?text=${encodeURIComponent(faceCheckMessage(deal.holderName, fc.url))}`) : null;
   const tone = fc.status === "DONE" ? "text-ok" : fc.status === "NOT_NEEDED" ? "text-muted" : "text-amber-300";
   return (
     <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Verificação">
@@ -423,10 +424,11 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copy(fc.url!, "Link")}><Copy className="h-3.5 w-3.5" />Copiar link</button>
                 <a className="btn-ghost h-8 text-xs" href={fc.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir</a>
-                {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Enviar ao titular</a>}
+                {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer" title={deal.holderPhone ? `WhatsApp de ${deal.holderName}: ${deal.holderPhone}` : "Cadastre o telefone do titular para abrir direto na conversa dele"}><MessageCircle className="h-3.5 w-3.5" />Enviar ao titular</a>}
                 <button type="button" className="text-xs text-muted hover:text-zinc-100" disabled={busy} onClick={() => save({ link: null, status: null }, "Link apagado")}>Trocar link</button>
               </div>
               <button type="button" className="btn-primary h-8 w-full text-xs" disabled={busy} onClick={() => save({ status: "DONE" }, "Validação concluída: pode anexar o bilhete")}>Titular concluiu a validação</button>
+              {!deal.holderPhone && <p className="text-xs text-muted">Sem telefone do titular: o WhatsApp abre para você escolher o contato. Cadastre em Programas › Titulares.</p>}
               <p className="text-xs text-muted">Depois que o titular concluir: volte à página da emissão na LATAM, atualize (F5) e continue até o pagamento.</p>
             </div>
           )}

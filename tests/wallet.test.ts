@@ -360,3 +360,15 @@ describe("bônus de transferência com clube", () => {
     expect((await clubActiveAccounts(userId, new Date("2026-12-30T12:00:00Z"))).has(lat)).toBe(true);
   });
 });
+
+describe("telefone do titular", () => {
+  it("salva, limpa e recusa sem DDD", async () => {
+    const h = await prisma.holder.findFirstOrThrow({ where: { name: "Ana" } });
+    const save = (phone: string | null) => c.call(holderRoute.PATCH, "PATCH", "/x", { name: "Ana", phone }, { id: h.id });
+    expect((await save("(21) 99493-4776")).status).toBe(200);
+    expect((await prisma.holder.findUniqueOrThrow({ where: { id: h.id } })).phone).toBe("(21) 99493-4776");
+    expect((await save("9999-1234")).status).toBe(400);
+    expect((await save("")).status).toBe(200);
+    expect((await prisma.holder.findUniqueOrThrow({ where: { id: h.id } })).phone).toBeNull();
+  });
+});

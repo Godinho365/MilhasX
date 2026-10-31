@@ -28,7 +28,7 @@ export type DealInput = {
 };
 
 const include = {
-  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true } } } },
+  account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true, phone: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
   receipt: { select: { name: true, size: true, createdAt: true } },
   sale: { select: { occurredAt: true } }, // data da venda (dashboard)
@@ -58,6 +58,7 @@ const view = (d: Row) => {
     // verificação antes da emissão (validação facial do titular)
     faceCheck: { url: d.faceCheckUrl, status: (d.faceCheckStatus as FaceCheckStatus | null) ?? null, at: d.faceCheckAt?.toISOString() ?? null },
     holderName: d.account?.holder.name ?? null,
+    holderPhone: d.account?.holder.phone ?? null,
     // só com o bilhete anexado a negociação está emitida
     ticket: d.ticket ? { name: d.ticket.name, size: d.ticket.size, at: d.ticket.createdAt.toISOString() } : null,
     // só com o comprovante de pagamento a negociação vai para "Pago" (e vira venda)
