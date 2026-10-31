@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Star, Search, Coins, Wallet, Bell, BellRing, Trash2, Store as StoreIcon, Filter, Zap, ExternalLink, X, ArrowLeftRight } from "lucide-react";
 import { ProgramLogo } from "@/components/program-logo";
-import { parseBRLToCents } from "@/lib/format";
+import { parseBRLToCents, fmtDateTime, fmtDay } from "@/lib/format";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { Switch } from "@/components/form-parts";
 import { api } from "@/lib/api";
@@ -194,8 +194,8 @@ function StoreDrawer({ store, onClose, onFav, busy }: { store: Store; onClose: (
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">{o.program}</p>
                       <p className="text-xs text-muted">
-                        {o.promotion && <span className="mr-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-300">Promoção{o.promoEndsAt ? ` até ${new Date(o.promoEndsAt).toLocaleDateString("pt-BR")}` : ""}</span>}
-                        {o.observedAt && `Lido em ${new Date(o.observedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`}
+                        {o.promotion && <span className="mr-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 font-medium text-amber-300">Promoção{o.promoEndsAt ? ` até ${fmtDay(o.promoEndsAt)}` : ""}</span>}
+                        {o.observedAt && `Lido em ${fmtDateTime(o.observedAt)}`}
                       </p>
                     </div>
                     <div className="text-right text-sm">
@@ -217,7 +217,7 @@ function StoreDrawer({ store, onClose, onFav, busy }: { store: Store; onClose: (
                     <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500/15 text-green-300"><Wallet className="h-4 w-4" /></span>
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">{o.portal}</p>
-                      {o.observedAt && <p className="text-xs text-muted">Lido em {new Date(o.observedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>}
+                      {o.observedAt && <p className="text-xs text-muted">Lido em {fmtDateTime(o.observedAt)}</p>}
                     </div>
                     <p className="text-sm font-semibold">{pct(o)}</p>
                     {o.link && <a href={o.link} target="_blank" rel="noopener noreferrer nofollow" className="btn-subtle h-8 px-2 text-xs" aria-label={`Abrir ${store.name} na ${o.portal}`}><ExternalLink className="h-3.5 w-3.5" /></a>}

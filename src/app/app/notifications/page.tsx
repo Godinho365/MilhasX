@@ -1,4 +1,5 @@
 import { Bell } from "lucide-react";
+import { fmtDateTime } from "@/lib/format";
 import { requirePageUser } from "@/server/session";
 import { listNotifications } from "@/server/services/market";
 import { PageHeader } from "@/components/stat";
@@ -19,7 +20,7 @@ export default async function NotificationsPage() {
               <div className="min-w-0">
                 <p className="font-semibold">{n.title}</p>
                 <p className="text-sm text-zinc-300">{n.body}</p>
-                <p className="mt-1 text-xs text-muted">{n.createdAt.toLocaleString("pt-BR")}</p>
+                <p className="mt-1 text-xs text-muted">{fmtDateTime(n.createdAt)}</p>
               </div>
             </li>
           ))}

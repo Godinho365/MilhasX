@@ -1,5 +1,7 @@
 "use client";
 
+import { brDay } from "@/domain/brasilia";
+
 export type ApiResult<T = any> = { ok: true; status: number; data: T } | { ok: false; status: number; erro: string };
 
 export async function api<T = any>(path: string, method = "GET", body?: unknown): Promise<ApiResult<T>> {
@@ -19,4 +21,5 @@ export async function api<T = any>(path: string, method = "GET", body?: unknown)
 }
 
 export const newKey = () => crypto.randomUUID();
-export const today = () => new Date().toISOString().slice(0, 10);
+/** Hoje no horário de Brasília (AAAA-MM-DD), para os campos de data. */
+export const today = () => brDay();

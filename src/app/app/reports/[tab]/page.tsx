@@ -6,12 +6,13 @@ import { requirePageUser, selectedHolderId, holderScopeLabel } from "@/server/se
 import { listPrograms } from "@/server/services/admin";
 import {
   REPORT_TABS, type ReportTab, type ReportFilter, resolvePeriod,
-  overviewReport, purchasesReport, cardsReport, savingsReport, evolutionReport, salesReport, assetsReport, profitPotential,
+  overviewReport, purchasesReport, cardsReport, savingsReport, evolutionReport, salesReport, salesNow, assetsReport, profitPotential,
 } from "@/server/services/reports";
 import { PageHeader, Stat } from "@/components/stat";
 import { Donut, MonthlyMoney, MonthlySales, HBar, CreditsDebits, SeriesLines, StackedMonthly, ExpectedVsReceived } from "@/components/charts";
 import { fmtBRL, fmtPts, fmtDate } from "@/lib/format";
 import { ReportToolbar } from "../client";
+import { RevenueNow } from "@/components/revenue-now";
 
 // Abas marcadas como recurso dos planos pagos, como na referência (sem bloqueio: não há cobrança nesta instalação)
 const PRO_TABS = new Set<ReportTab>(["evolution", "sales", "assets"]);
@@ -239,10 +240,11 @@ async function Evolution({ f }: { f: ReportFilter }) {
 }
 
 async function Sales({ f }: { f: ReportFilter }) {
-  const r = await salesReport(f);
+  const [r, now] = await Promise.all([salesReport(f), salesNow(f)]);
   const none = "Sem dados para exibir";
   return (
     <div className="space-y-4">
+      <RevenueNow r={now} />
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Stat label="Receita" value={fmtBRL(r.totals.revenueCents)} hint="no período" />
         <Stat label="Lucro" value={fmtBRL(r.totals.profitCents)} hint="no período" accent />

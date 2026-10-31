@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Copy, Gift, ExternalLink, Palette } from "lucide-react";
 import { Switch } from "@/components/form-parts";
 import { api } from "@/lib/api";
-import { fmtBRL } from "@/lib/format";
+import { fmtBRL, fmtDay } from "@/lib/format";
 import { Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { PLANS, REFERRAL_TRIAL_DAYS, TRIAL_DAYS, type PlanCode, type PlanInterval } from "@/domain/plans";
@@ -71,7 +71,7 @@ export function BillingTab({ state, checkout }: { state: Billing; checkout: keyo
       {state.request && (
         <Section title="Pedido em andamento">
           <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 text-sm">Você pediu o plano <b>{PLANS[state.request.plan].name}</b> ({state.request.interval === "ANUAL" ? "anual" : "mensal"}) em {new Date(state.request.at).toLocaleDateString("pt-BR")}. A administração ativa o plano e avisa por notificação.</p>
+            <p className="min-w-0 flex-1 text-sm">Você pediu o plano <b>{PLANS[state.request.plan].name}</b> ({state.request.interval === "ANUAL" ? "anual" : "mensal"}) em {fmtDay(state.request.at)}. A administração ativa o plano e avisa por notificação.</p>
             <button className="btn-ghost" onClick={cancelRequest}>Cancelar pedido</button>
           </div>
         </Section>
@@ -131,7 +131,7 @@ export function ReferralsTab({ state }: { state: { code: string; referred: { nam
         ) : (
           <ul className="divide-y divide-line text-sm" aria-label="Pessoas indicadas">
             {state.referred.map((r, i) => (
-              <li key={i} className="flex justify-between py-2"><span>{r.name}</span><span className="text-muted">{new Date(r.createdAt).toLocaleDateString("pt-BR")}</span></li>
+              <li key={i} className="flex justify-between py-2"><span>{r.name}</span><span className="text-muted">{fmtDay(r.createdAt)}</span></li>
             ))}
           </ul>
         )}

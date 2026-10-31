@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Copy, ExternalLink, FileSignature, FileText, Plus, Ticket, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { fmtBRL, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, parseBRLToCents, fmtDay } from "@/lib/format";
 import { Field } from "@/components/ui";
 import { toast } from "@/components/feedback";
 import { EMPTY_PROPOSAL, type Leg, type Proposal, type Reservation } from "@/domain/proposal";
@@ -62,7 +62,7 @@ export function ClientPages({ id, segments }: { id: string; segments: Segment[] 
         {open === "reserva" && <ReservationEditor id={id} info={info} onSaved={() => { setOpen(null); load(); }} />}
         <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2">
           <FileSignature className="h-4 w-4 text-muted" />
-          <span className="min-w-0 flex-1"><span className="font-medium">Termo de compra e venda</span> <span className={`text-xs ${info.signed ? "text-green-400" : "text-muted"}`}>{info.signed ? `assinado por ${info.signed.name} em ${new Date(info.signed.at).toLocaleDateString("pt-BR")}` : "aguardando assinatura"}</span></span>
+          <span className="min-w-0 flex-1"><span className="font-medium">Termo de compra e venda</span> <span className={`text-xs ${info.signed ? "text-green-400" : "text-muted"}`}>{info.signed ? `assinado por ${info.signed.name} em ${fmtDay(info.signed.at)}` : "aguardando assinatura"}</span></span>
           {info.slug && info.token && <a href={`/p/${info.slug}/contrato/${info.token}`} target="_blank" rel="noopener" className="btn-ghost h-8 text-xs">Ver<ExternalLink className="h-3.5 w-3.5" /></a>}
           <button type="button" className="btn-ghost h-8 text-xs" onClick={() => copyLink("contrato")}><Copy className="h-3.5 w-3.5" />Copiar link do termo</button>
         </li>
