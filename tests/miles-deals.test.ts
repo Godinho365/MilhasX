@@ -222,6 +222,11 @@ describe("CRM Milhas", () => {
     // a negociação aberta reserva as milhas dela no espaço da conta (fora da própria sugestão)
     expect((await accountsCapacity(userId)).rows.find((r) => r.id === lat)!.load.reserved).toBe(8000);
     expect(mine.load.reserved).toBe(0);
+    // negociação nova, pelo que está digitado: 30 CPFs não cabem numa conta com limite de 25
+    const typed = await dealAccountFit(userId, null, { points: 1000, cpfs: 30 });
+    expect(typed).toMatchObject({ points: 1000, cpfsNeeded: 30 });
+    expect(typed.accounts.find((a) => a.id === lat)!.fit.cpfShort).toBe(true);
+    expect((await dealAccountFit(userId, null, { points: 1000, cpfs: 2 })).accounts.find((a) => a.id === lat)!.fit).toMatchObject({ cpfShort: false, enough: true, newCpfs: 2 });
   });
 
   it("isola por usuário", async () => {

@@ -57,20 +57,25 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
   return { avg, rows };
 }
 
+export type FitInput = { points?: number | null; cpfs?: number | null; accountId?: string | null; orderLink?: string | null };
+
 /** Para a negociação: em cada conta, quantos CPFs novos a emissão ocupa (passageiro que já é beneficiário
- *  na janela não conta), como fica o saldo e se sobra milha sem CPF. Em ordem de sugestão. */
-export async function dealAccountFit(userId: string, dealId: string) {
-  const d = await prisma.milesDeal.findFirst({ where: { id: dealId, userId } });
-  if (!d) throw new DomainError(404, "Negociação não encontrada");
-  const points = d.points ?? 0;
-  const pax = (Array.isArray(d.passengersData) ? d.passengersData : []) as { name: string; cpf?: string }[];
+ *  na janela não conta), como fica o saldo e se sobra milha sem CPF. Em ordem de sugestão.
+ *  Usa o que está digitado no formulário (override) e, da negociação salva, os passageiros e a reserva. */
+export async function dealAccountFit(userId: string, dealId: string | null, override: FitInput = {}) {
+  const d = dealId ? await prisma.milesDeal.findFirst({ where: { id: dealId, userId } }) : null;
+  if (dealId && !d) throw new DomainError(404, "Negociação não encontrada");
+  const points = override.points ?? d?.points ?? 0;
+  const pax = (Array.isArray(d?.passengersData) ? d!.passengersData : []) as { name: string; cpf?: string }[];
   const named = pax.map((p) => (p.cpf ?? "").replace(/\D/g, "")).filter(Boolean);
-  const cpfsNeeded = Math.max(d.passengers ?? 0, pax.length, 1);
-  const all = await accountsCapacity(userId, { exceptDealId: d.id });
+  const cpfsNeeded = Math.max(override.cpfs ?? d?.passengers ?? 0, pax.length, 1);
+  const all = await accountsCapacity(userId, { exceptDealId: d?.id });
   const avg = all.avg;
   // só contas do programa da emissão: o da conta já escolhida ou o do link do pedido
-  const chosen = d.accountId ? all.rows.find((r) => r.id === d.accountId)?.programCode : null;
-  const host = d.orderLink?.match(/latamairlines|smiles|voeazul|tudoazul/i)?.[0].toLowerCase();
+  const accountId = override.accountId !== undefined ? override.accountId : d?.accountId;
+  const orderLink = override.orderLink !== undefined ? override.orderLink : d?.orderLink;
+  const chosen = accountId ? all.rows.find((r) => r.id === accountId)?.programCode : null;
+  const host = orderLink?.match(/latamairlines|smiles|voeazul|tudoazul/i)?.[0].toLowerCase();
   const code = chosen ?? (host === "latamairlines" ? "LATAM" : host === "smiles" ? "SMILES" : host ? "AZUL" : null);
   const rows = code ? all.rows.filter((r) => r.programCode === code) : all.rows;
   const since = new Date(Date.now() - 365 * 86_400_000);
