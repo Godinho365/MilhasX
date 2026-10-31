@@ -133,12 +133,13 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
           <p className="text-xs text-muted">
             Quantas milhas cada conta ainda consegue emitir com os CPFs livres (~{fmtPts(cap.avg.ptsPerCpf)} por emissão{cap.avg.fromHistory ? `, média de ${cap.avg.sample} ${cap.avg.sample === 1 ? "CPF" : "CPFs"} dos últimos 12 meses` : ", padrão até haver vendas"}).
             Compre e acumule pontos no titular com mais espaço; milhas além disso ficam sem CPF para usar.
-            {cap.avg.saleCpmCents ? ` Potencial: se usar todos os CPFs livres, vendendo a ~${money(cap.avg.saleCpmCents)} o milheiro (sua média) e com o custo atual de cada conta.` : " Potencial: aparece depois das primeiras vendas."}
+            {cap.avg.saleCpmCents ? ` Potencial: se usar todos os CPFs livres, vendendo a ~${money(cap.avg.saleCpmCents)} o milheiro (sua média) e com o custo atual de cada conta. Real: vendas já lançadas nos últimos 12 meses.` : " Potencial: aparece depois das primeiras vendas."}
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="table-base">
-            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell">Emissões que o saldo paga</th><th className="text-right">Espaço</th><th className="text-right">Potencial de faturamento</th><th className="text-right">Potencial de lucro</th><th className="text-right" title="Total das vendas já lançadas desta conta nos últimos 12 meses (com taxas repassadas)">Faturamento real (12 meses)</th><th className="text-right" title="Resultado das vendas já lançadas desta conta nos últimos 12 meses">Lucro real (12 meses)</th></tr></thead>
+          {/* uma linha por célula: sem quebra; em tela estreita o quadro rola para o lado */}
+          <table className="table-base whitespace-nowrap">
+            <thead><tr><th>Conta</th><th className="text-right">Saldo</th><th className="hidden text-right sm:table-cell" title="Milhas reservadas em negociações abertas do CRM Milhas">Reservado</th><th className="text-right">CPFs livres</th><th className="hidden text-right md:table-cell" title="Quantas emissões o saldo atual paga, pela média de milhas por emissão">Emissões</th><th className="text-right" title="Milhas que a conta ainda consegue emitir com os CPFs livres, além do saldo">Espaço</th><th className="text-right" title="Potencial de faturamento: usando todos os CPFs livres pelo seu preço médio de venda">Fat. potencial</th><th className="text-right" title="Potencial de lucro: usando todos os CPFs livres, com o custo atual da conta">Lucro potencial</th><th className="text-right" title="Faturamento real: total das vendas já lançadas desta conta nos últimos 12 meses (com taxas repassadas)">Fat. real</th><th className="text-right" title="Lucro real: resultado das vendas já lançadas desta conta nos últimos 12 meses">Lucro real</th></tr></thead>
             <tbody>
               {[...capRows].sort((a, b) => b.space - a.space).map((r) => (
                 <tr key={r.id}>
