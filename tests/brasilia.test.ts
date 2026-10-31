@@ -23,3 +23,13 @@ describe("horário de Brasília", () => {
     expect(r.month).toEqual({ revenueCents: 7000, profitCents: 700, count: 3 });
   });
 });
+
+describe("períodos Dia, Semana e Mês dos relatórios", async () => {
+  const { resolvePeriod } = await import("@/server/services/reports");
+  const night = new Date("2026-10-31T01:30:00Z"); // sexta 30/10 às 22h30 em Brasília
+  it("usam o dia de Brasília", () => {
+    expect(resolvePeriod({ periodo: "dia" }, night)).toEqual({ key: "dia", from: new Date("2026-10-30T00:00:00Z"), to: new Date("2026-10-30T23:59:59.999Z") });
+    expect(resolvePeriod({ periodo: "semana" }, night).from).toEqual(new Date("2026-10-26T00:00:00Z"));
+    expect(resolvePeriod({ periodo: "mes" }, night).from).toEqual(new Date("2026-10-01T00:00:00Z"));
+  });
+});
