@@ -2,7 +2,7 @@
 import { prisma, DomainError } from "../db";
 import { beneficiaryUsage } from "./accounts";
 import { listSales, saleCpfs } from "./sales";
-import { DEFAULT_PTS_PER_CPF, accountSpace, capacityPotential, emissionFit, rankForEmission } from "@/domain/capacity";
+import { DEFAULT_PTS_PER_CPF, accountLeftover, accountSpace, leftoverAfter, capacityPotential, emissionFit, rankForEmission } from "@/domain/capacity";
 
 const OPEN_STAGES = ["NEW", "NEGOTIATION", "AWAITING", "ISSUED"] as const;
 
@@ -51,7 +51,7 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
       const load = { balance: a.balance, reserved: reservedBy.get(a.id) ?? 0, cpfFree: Math.max(0, (u.limit ?? 0) - u.used), ptsPerCpf: avg.ptsPerCpf };
       const space = accountSpace(load);
       const costCpmCents = a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null;
-      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0, realRevenueCents: soldBy.get(a.id) ?? 0 };
+      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, leftover: accountLeftover(load, space.emissionsLeft, costCpmCents), ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0, realRevenueCents: soldBy.get(a.id) ?? 0 };
     })
     .sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
   return { avg, rows };
@@ -83,7 +83,7 @@ export async function dealAccountFit(userId: string, dealId: string | null, over
   const list = rows.map((r) => {
     const already = named.filter((cpf) => known.some((k) => k.accountId === r.id && k.document === cpf));
     const fit = emissionFit(r.load, points, cpfsNeeded - already.length);
-    return { ...r, already: already.length, fit };
+    return { ...r, already: already.length, fit, leftoverAfter: fit.enough ? leftoverAfter(fit.balanceAfter, r.load.ptsPerCpf, r.costCpmCents) : null };
   });
   return { avg, points, cpfsNeeded, accounts: rankForEmission(list, points, cpfsNeeded) };
 }

@@ -1,6 +1,6 @@
 // Espaço por conta e sugestão de conta para emitir (milhas × CPFs livres).
 import { describe, it, expect } from "vitest";
-import { accountSpace, capacityPotential, emissionFit, maxTransferForSpace, rankForEmission } from "@/domain/capacity";
+import { accountLeftover, accountSpace, leftoverAfter, capacityPotential, emissionFit, maxTransferForSpace, rankForEmission } from "@/domain/capacity";
 
 const m = 32_000;
 
@@ -8,6 +8,22 @@ describe("espaço por conta", () => {
   it("capacidade, espaço e emissões que o saldo paga (milhas reservadas descontadas)", () => {
     expect(accountSpace({ balance: 81_137, reserved: 0, cpfFree: 21, ptsPerCpf: m })).toEqual({ capacity: 672_000, space: 590_863, emissionsLeft: 2.5 });
     expect(accountSpace({ balance: 300_000, reserved: 20_000, cpfFree: 6, ptsPerCpf: m }).space).toBe(192_000 - 280_000); // encalhe
+  });
+
+  it("sobras: saldo livre que não paga uma emissão, com o custo pelo CPM da conta", () => {
+    const eliane = { balance: 4_811, reserved: 0, cpfFree: 23, ptsPerCpf: 35_096 };
+    expect(accountLeftover(eliane, accountSpace(eliane).emissionsLeft, 2_200)).toEqual({ points: 4_811, costCents: 10_584 }); // 0,1 emissão
+    expect(accountLeftover(eliane, 0.1, null)).toEqual({ points: 4_811, costCents: null }); // conta sem custo
+    expect(accountLeftover({ ...eliane, balance: 52_568 }, 1.5, 2_200)).toBeNull(); // paga ao menos uma emissão
+    expect(accountLeftover({ ...eliane, balance: 0 }, 0, 2_200)).toBeNull(); // sem saldo, sem sobra
+    expect(accountLeftover({ ...eliane, reserved: 4_811 }, 0, 2_200)).toBeNull(); // tudo reservado
+  });
+
+  it("sobra depois da emissão: o que fica e não paga outra emissão média", () => {
+    expect(leftoverAfter(12_568, 35_096, 2_750)).toEqual({ points: 12_568, costCents: 34_562 }); // Ruy depois de 40.000
+    expect(leftoverAfter(41_137, 35_096, 2_750)).toBeNull(); // ainda paga outra emissão
+    expect(leftoverAfter(0, 35_096, 2_750)).toBeNull();
+    expect(leftoverAfter(-20_534, 35_096, 2_750)).toBeNull(); // saldo insuficiente
   });
 
   it("potencial: capacidade × preço médio de venda; lucro pelo custo atual da conta", () => {
