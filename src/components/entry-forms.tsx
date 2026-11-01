@@ -549,6 +549,14 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
   // editando: o que esta transferência já pôs na conta de destino volta a contar como espaço
   const ownArrival = saved && f.to === saved.toAccountId ? Math.floor(Math.floor((saved.points * saved.parityTo) / saved.parityFrom) * (1 + saved.bonusPercent / 100)) : 0;
   const destSpace = dst?.space != null ? dst.space + ownArrival : null;
+  // Limite mensal do bônus (ex.: 30 mil no Clube LATAM Pass); editando, o bônus desta transferência volta ao limite
+  const ownBonus = saved && f.to === saved.toAccountId ? Math.floor((Math.floor((saved.points * saved.parityTo) / saved.parityFrom) * saved.bonusPercent) / 100) : 0;
+  const bonusLeft = dst?.bonusLeft != null ? dst.bonusLeft + ownBonus : null;
+  const bonusCapInfo = bonusLeft != null && bonus > 0
+    ? bonus > bonusLeft
+      ? { warn: true, text: `O limite de bônus do mês nesta conta só tem ${fmtPts(bonusLeft)} milhas: o bônus real deve ser ${fmtPts(bonusLeft)}, não ${fmtPts(bonus)}.` }
+      : { warn: false, text: `Limite de bônus do mês: depois desta transferência sobram ${fmtPts(bonusLeft - bonus)} milhas de bônus.` }
+    : null;
   const spaceInfo = dst && destSpace != null && arriving > 0
     ? arriving > destSpace
       ? { warn: true, text: `Vão chegar ${fmtPts(arriving)} milhas, mas esta conta só tem espaço para ${fmtPts(Math.max(0, destSpace))} (${dst.cpfFree} CPFs livres × ~${fmtPts(dst.ptsPerCpf ?? 0)} por emissão). Sobrariam ~${fmtPts(arriving - Math.max(0, destSpace))} milhas sem CPF para usar${destSpace > 0 ? `: transfira até ${fmtPts(maxTransferForSpace(destSpace, pf, pt, Number(f.bonus) || 0))} pontos` : ""}.` }
@@ -647,6 +655,7 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
             <div><p className="text-xs text-muted">Custo levado</p><p className="font-semibold tabular-nums">{fmtBRL(totalCost)}</p></div>
             <div><p className="text-xs text-muted">CPM no destino</p><p className="font-semibold tabular-nums text-accent-light">{fmtBRL(cpm(totalCost, base + bonus))}</p></div>
             {spaceInfo && <p className={`col-span-full ${spaceInfo.warn ? "text-amber-300" : "text-muted"}`} aria-label="Espaço na conta de destino">{spaceInfo.text}</p>}
+            {bonusCapInfo && <p className={`col-span-full ${bonusCapInfo.warn ? "text-amber-300" : "text-muted"}`} aria-label="Limite de bônus do mês">{bonusCapInfo.text}</p>}
             {points > srcBalance && <p className="col-span-full text-red-300">Saldo insuficiente na origem ({fmtPts(srcBalance)} pts{cartPts ? " já contando a compra" : ""}).</p>}
             {adv.delivery && adv.deliveryDate && <p className="col-span-full text-xs text-muted">Os pontos ficam “a receber” no destino até {adv.deliveryDate.split("-").reverse().join("/")}.</p>}
           </div>

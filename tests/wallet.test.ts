@@ -372,3 +372,35 @@ describe("telefone do titular", () => {
     expect((await prisma.holder.findUniqueOrThrow({ where: { id: h.id } })).phone).toBeNull();
   });
 });
+
+describe("limite mensal do bônus de transferência", () => {
+  it("soma o bônus do mês, mostra quanto cabe e avisa uma vez por mês", async () => {
+    const { bonusUsage, notifyMonthlyBonus } = await import("@/server/services/transfer-bonus");
+    const { updateAccount } = await import("@/server/services/wallet");
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    await updateAccount(userId, lat, { transferBonusPct: 30, transferBonusCap: 30_000 });
+    await prisma.recurrence.create({ data: { userId, accountId: lat, type: "CLUB", description: "Clube", points: 1000, nextDate: new Date("2026-12-10") } });
+    // bônus de 10.500 em dezembro e 9.000 em novembro (não conta)
+    const bonus = (points: number, day: string) => prisma.entry.create({ data: { userId, accountId: lat, type: "TRANSFER_BONUS", points, occurredAt: new Date(`${day}T00:00:00Z`), description: "Bônus de transferência (30%)" } });
+    await bonus(10_500, "2026-12-03");
+    await bonus(9_000, "2026-11-28");
+    const dec = new Date("2026-12-15T15:00:00Z");
+    const [row] = await bonusUsage(userId, dec, lat);
+    expect(row).toMatchObject({ cap: 30_000, used: 10_500, left: 19_500, pctUsed: 35, transferable: 65_000, clubActive: true });
+
+    const first = new Date("2026-12-01T13:00:00Z");
+    expect(await notifyMonthlyBonus(userId, first)).toBe(true);
+    expect(await notifyMonthlyBonus(userId, dec)).toBe(false); // já avisou em dezembro
+    const n = await prisma.notification.findFirstOrThrow({ where: { userId, key: "transfer-bonus:2026-12" } });
+    expect(n.title).toBe("Bônus de transferência renovado");
+    expect(n.body).toContain("transfira até");
+  });
+
+  it("bônus limitado ao que sobra do mês", async () => {
+    const { bonusCapStatus, cappedBonus } = await import("@/domain/transfer-bonus");
+    expect(bonusCapStatus(30_000, 32_000, 35)).toMatchObject({ left: 0, pctUsed: 100, transferable: 0 });
+    expect(bonusCapStatus(30_000, 0, 35).transferable).toBe(85_715);
+    expect(cappedBonus(30_000, 19_500)).toBe(19_500);
+    expect(cappedBonus(6_000, null)).toBe(6_000);
+  });
+});

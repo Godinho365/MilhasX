@@ -57,6 +57,7 @@ export const holderDetailsSchema = holderSchema.extend({
 export const accountSchema = z.object({ holderId: id, programId: id });
 export const accountPatchSchema = z.object({
   transferBonusPct: z.number().int().min(0).max(300).optional().nullable(), // bônus em transferências com o clube ativo
+  transferBonusCap: z.number().int().min(0).max(10_000_000).optional().nullable(), // limite de milhas de bônus por mês
   nickname: z.string().trim().max(60).optional().nullable(),
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
