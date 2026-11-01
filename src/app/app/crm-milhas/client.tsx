@@ -350,6 +350,7 @@ function Emission({ deal: initial }: { deal: DealView }) {
 function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCents, onPick }: { costCpmCents: number; avgSaleCpmCents: number | null; points: number; cpfs: number; currentCpmCents: number | null; onPick: (cpmCents: number) => void }) {
   const options = priceOptions({ costCpmCents, avgSaleCpmCents, points, cpfs });
   const roe = currentCpmCents ? roeOf(currentCpmCents, costCpmCents) : null;
+  const profit = currentCpmCents ? Math.round(((currentCpmCents - costCpmCents) * points) / 1000) : 0;
   const pct = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
   return (
     <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Milheiro sugerido">
@@ -357,7 +358,7 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
         <h3 className="mr-auto text-sm font-semibold">Milheiro sugerido</h3>
         {roe != null && (
           <span className={`text-xs ${roe < 0 ? "text-red-300" : "text-muted"}`}>
-            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · lucro {fmtBRL(Math.round(((currentCpmCents! - costCpmCents) * points) / 1000))}
+            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · lucro {fmtBRL(profit)}{cpfs > 1 && <> · <b className={profit < 0 ? "text-red-300" : "text-zinc-100"}>{fmtBRL(Math.round(profit / cpfs))}</b>/CPF</>}
           </span>
         )}
       </div>
