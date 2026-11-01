@@ -266,6 +266,7 @@ model Account {
   beneficiaryLimit  Int? // limite de beneficiários (CPFs distintos) do programa; vazio = sugestão do programa
   beneficiaryWindow String   @default("ROLLING_12M") // ROLLING_12M (últimos 12 meses) | CALENDAR_YEAR (ano civil)
   transferBonusPct  Int? // bônus que esta conta recebe em transferências enquanto o clube está ativo (ex.: 30)
+  transferBonusCap  Int? // limite de milhas de bônus por mês (ex.: 30000 no Clube LATAM Pass); vazio = sem limite
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -484,7 +485,9 @@ model Notification {
   body      String
   readAt    DateTime?
   createdAt DateTime  @default(now())
+  key       String? // aviso que só pode sair uma vez (ex.: bônus do mês); único por usuário
 
+  @@unique([userId, key])
   @@index([userId, createdAt])
 }
 

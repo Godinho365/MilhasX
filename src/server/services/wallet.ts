@@ -86,7 +86,7 @@ export async function deleteAccount(userId: string, id: string) {
 }
 
 /** Organização da conta: nome, fixar na barra lateral, arquivar, tags e CPFs disponíveis. */
-export async function updateAccount(userId: string, id: string, input: { nickname?: string | null; pinned?: boolean; archived?: boolean; tags?: string[]; cpfAvailable?: number | null; transferBonusPct?: number | null }) {
+export async function updateAccount(userId: string, id: string, input: { nickname?: string | null; pinned?: boolean; archived?: boolean; tags?: string[]; cpfAvailable?: number | null; transferBonusPct?: number | null; transferBonusCap?: number | null }) {
   const acc = await prisma.account.findFirst({ where: { id, userId } });
   if (!acc) throw new DomainError(404, "Conta não encontrada");
   return prisma.account.update({
@@ -100,6 +100,7 @@ export async function updateAccount(userId: string, id: string, input: { nicknam
       tags: input.tags === undefined ? undefined : [...new Set(input.tags.map((t) => t.trim()).filter(Boolean))],
       cpfAvailable: input.cpfAvailable,
       transferBonusPct: input.transferBonusPct,
+      transferBonusCap: input.transferBonusCap,
     },
   });
 }
@@ -157,6 +158,7 @@ export async function walletSummary(userId: string, holderId?: string) {
     tags: a.tags,
     cpfAvailable: a.cpfAvailable,
     transferBonusPct: a.transferBonusPct,
+    transferBonusCap: a.transferBonusCap,
     // "Atualizado": último lançamento registrado na conta
     updatedAt: (lastBy.get(a.id) ?? a.createdAt).toISOString(),
   }));

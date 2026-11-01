@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ProgramLogo } from "@/components/program-logo";
 import { notFound } from "next/navigation";
-import { Wallet, Target, Package, DollarSign, FileText, ShoppingBag } from "lucide-react";
+import { Wallet, Target, Package, DollarSign, FileText, ShoppingBag, Gift } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { accountDetail, credentialsEnabled } from "@/server/services/accounts";
 import { DomainError, prisma } from "@/server/db";
@@ -10,6 +10,8 @@ import { ENTRY_LABELS } from "@/domain/ledger";
 import { ProgramDot } from "@/components/stat";
 import { Recurrences, PendingPurchases, Credentials } from "./client";
 import { BeneficiaryLimit } from "./beneficiaries";
+import { bonusUsage } from "@/server/services/transfer-bonus";
+import { brWindows } from "@/domain/brasilia";
 
 const dm = (d: Date) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "");
 
@@ -51,6 +53,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   const pref = await prisma.userPreference.findUnique({ where: { userId: user.id }, select: { showValues: true } });
   const money = (c: number | null) => (pref?.showValues === false ? "R$ •••" : fmtBRL(c));
   const { account: a, stats } = d;
+  const [bonus] = await bonusUsage(user.id, new Date(), a.id);
 
   return (
     <>
@@ -64,6 +67,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
       {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
       {(a.program.kind === "MILES" || a.beneficiaryLimit != null) && <div className="mb-4"><BeneficiaryLimit accountId={a.id} /></div>}
+      {bonus && <div className="mb-4"><BonusCapCard b={bonus} /></div>}
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <IconStat label="Saldo atual" value={fmtPts(stats.balance)} icon={<Wallet className="h-5 w-5" />} />
@@ -125,5 +129,33 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       />
       <Credentials accountId={a.id} saved={d.credential ? d.credential.updatedAt.toISOString() : null} enabled={credentialsEnabled()} />
     </>
+  );
+}
+
+/** Limite mensal do bônus de transferência: quanto já entrou de bônus no mês e quanto ainda cabe. */
+function BonusCapCard({ b }: { b: Awaited<ReturnType<typeof bonusUsage>>[number] }) {
+  const [y, m] = brWindows().month.split("-").map(Number);
+  const renew = new Date(Date.UTC(y!, m!, 1)).toLocaleDateString("pt-BR", { timeZone: "UTC" });
+  const full = b.left === 0;
+  return (
+    <section className="card card-pad" aria-label="Bônus de transferência do mês">
+      <div className="flex flex-wrap items-center gap-2">
+        <Gift className="h-4 w-4 text-muted" />
+        <h2 className="text-sm font-semibold">Bônus de transferência do mês</h2>
+        {!b.clubActive && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-300">clube inativo: sem bônus</span>}
+        <span className="ml-auto text-xs text-muted">Renova em {renew}</span>
+      </div>
+      <p className="mt-2 text-2xl font-semibold tabular-nums">
+        {fmtPts(b.used)} <span className="text-base font-normal text-muted">/ {fmtPts(b.cap)} milhas de bônus usadas</span>
+      </p>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-panel2" role="progressbar" aria-valuemin={0} aria-valuemax={b.cap} aria-valuenow={b.used}>
+        <div className={`h-full rounded-full ${full ? "bg-amber-400" : "bg-accent"}`} style={{ width: `${b.pctUsed}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        {full
+          ? "Limite do mês atingido: novas transferências entram sem bônus até a renovação."
+          : `Ainda cabem ${fmtPts(b.left)} milhas de bônus${b.transferable ? `: transfira até ${fmtPts(b.transferable)} pontos com ${b.bonusPct}% de bônus` : ""}.`}
+      </p>
+    </section>
   );
 }
