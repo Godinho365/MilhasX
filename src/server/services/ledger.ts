@@ -352,6 +352,8 @@ export async function updateEntry(
     if (e.groupId && onlyStatus && patch.status === "CONFIRMED") {
       // Transferência com entrega futura: confirma todas as pernas pendentes do grupo
       await tx.entry.updateMany({ where: { userId, groupId: e.groupId, status: "PENDING" }, data: { status: "CONFIRMED" } });
+      // reembolso de venda confirmado pelo extrato: o estorno das milhas foi recebido
+      if (e.type === "SALE_REFUND") await tx.sale.updateMany({ where: { userId, groupId: e.groupId, refundMilesReceivedAt: null }, data: { refundMilesReceivedAt: new Date() } });
       return tx.entry.findUniqueOrThrow({ where: { id: e.id } });
     }
     if (e.groupId) throw new DomainError(400, "Transferências e vendas não podem ser editadas; exclua e registre de novo");

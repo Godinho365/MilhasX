@@ -362,6 +362,8 @@ model Sale {
   occurredAt        DateTime
   refundedAt        DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
   refundFeeCents    Int              @default(0) // taxa de administração cobrada do cliente no reembolso
+  refundMilesReceivedAt DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
+  refundTaxReceivedAt   DateTime? // estorno da taxa de embarque e dos repasses pela companhia
   createdAt         DateTime         @default(now())
 
   items         SaleItem[]
