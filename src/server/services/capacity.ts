@@ -10,7 +10,7 @@ const OPEN_STAGES = ["NEW", "NEGOTIATION", "AWAITING", "ISSUED"] as const;
 export async function emissionAverage(userId: string, now = new Date()) {
   const since = new Date(now.getTime() - 365 * 86_400_000);
   const items = await prisma.saleItem.findMany({
-    where: { issuedWith: "POINTS", sale: { userId, occurredAt: { gte: since } } },
+    where: { issuedWith: "POINTS", sale: { userId, refundedAt: null, occurredAt: { gte: since } } },
     select: { kind: true, issuedWith: true, points: true, salePriceCents: true, passengers: true, customers: { select: { id: true } } },
   });
   const cpfs = items.reduce((t, i) => t + saleCpfs([i]), 0);

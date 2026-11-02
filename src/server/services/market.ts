@@ -257,15 +257,16 @@ export async function reportOverview(userId: string, opts: { from?: Date; progra
   ]);
   const byProgram = new Map<string, number>();
   for (const c of credits) byProgram.set(c.account.program.name, (byProgram.get(c.account.program.name) ?? 0) + c.points);
-  const sales = await prisma.sale.aggregate({
-    where: { userId, occurredAt: opts.from ? { gte: opts.from } : undefined },
-    _sum: { totalCents: true, points: true },
-  });
+  // venda reembolsada: no faturamento fica só a taxa de administração
+  const [sales, refunded] = await Promise.all([
+    prisma.sale.aggregate({ where: { userId, refundedAt: null, occurredAt: opts.from ? { gte: opts.from } : undefined }, _sum: { totalCents: true, points: true } }),
+    prisma.sale.aggregate({ where: { userId, refundedAt: { not: null }, occurredAt: opts.from ? { gte: opts.from } : undefined }, _sum: { refundFeeCents: true } }),
+  ]);
   return {
     byCategory: byType
       .map((t) => ({ type: t.type as EntryType, label: ENTRY_LABELS[t.type as EntryType], points: t._sum.points ?? 0, costCents: t._sum.inputCostCents ?? 0 }))
       .sort((a, b) => b.points - a.points),
     byProgram: [...byProgram.entries()].map(([name, points]) => ({ name, points })).sort((a, b) => b.points - a.points),
-    sales: { totalCents: sales._sum.totalCents ?? 0, points: sales._sum.points ?? 0 },
+    sales: { totalCents: (sales._sum.totalCents ?? 0) + (refunded._sum.refundFeeCents ?? 0), points: sales._sum.points ?? 0 },
   };
 }

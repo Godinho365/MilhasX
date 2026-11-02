@@ -311,7 +311,7 @@ async function OverviewView({ userId, holderId, money }: { userId: string; holde
 
 async function SalesView({ userId, money }: { userId: string; money: Money }) {
   const d = await salesDashboard(userId);
-  if (d.totals.count === 0) {
+  if (d.totals.count + d.totals.refunds === 0) {
     return (
       <Empty title="Nenhuma venda ainda" icon={<HandCoins className="h-5 w-5" />}>
         <p className="max-w-sm text-sm text-muted">Quando você registrar vendas, este painel mostra faturamento, lucro e milhas vendidas.</p>
@@ -321,11 +321,12 @@ async function SalesView({ userId, money }: { userId: string; money: Money }) {
   }
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <Stat label="Faturamento" value={money(d.totals.revenueCents)} hint={`${d.totals.count} ${d.totals.count === 1 ? "venda" : "vendas"}`} />
+      <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${d.totals.refunds ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+        <Stat label="Faturamento" value={money(d.totals.revenueCents)} hint={`${d.totals.count} ${d.totals.count === 1 ? "venda" : "vendas"}${d.totals.refunds ? " + taxas de reembolso" : ""}`} />
         <Stat label="Lucro" value={money(d.totals.profitCents)} hint={d.totals.marginPct != null ? `margem de ${d.totals.marginPct.toLocaleString("pt-BR")}%` : undefined} accent />
         <Stat label="Milhas vendidas" value={fmtPts(d.totals.points)} />
         <Stat label="Preço médio" value={money(d.totals.avgPriceCpmCents)} hint="por milheiro" />
+        {d.totals.refunds > 0 && <Stat label="Reembolsos" value={String(d.totals.refunds)} hint={`${money(d.totals.refundFeesCents)} em taxas de administração`} />}
       </div>
       <section className="card card-pad mt-4">
         <h2 className="text-lg font-semibold">Faturamento e lucro por mês</h2>

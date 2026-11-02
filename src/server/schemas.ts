@@ -525,3 +525,8 @@ export const clubPlanSchema = z.object({
   signupBonus: z.number().int().min(0).max(10_000_000),
   active: z.boolean(),
 });
+
+export const saleRefundSchema = z.object({
+  feeCents: z.number().int().min(0).max(10_000_000),
+  date: dateStr,
+});

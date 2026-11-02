@@ -37,6 +37,7 @@ enum EntryType {
   TRANSFER_BONUS // Bônus de transferência (divide o custo da transferência)
   TRANSFER_OUT // Saída de transferência
   SALE // Venda de pontos (débito)
+  SALE_REFUND // Reembolso de venda: as milhas voltam com o custo com que saíram
   FLIGHT_REDEMPTION // Emissão de passagem
   CAR_RENTAL // Aluguel de veículo
   HOTEL_REDEMPTION // Reserva de hotel
@@ -359,6 +360,8 @@ model Sale {
   points            Int // soma dos pontos dos itens
   totalCents        Int // total da venda: valor dos itens + custos repassados ao cliente
   occurredAt        DateTime
+  refundedAt        DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
+  refundFeeCents    Int              @default(0) // taxa de administração cobrada do cliente no reembolso
   createdAt         DateTime         @default(now())
 
   items         SaleItem[]

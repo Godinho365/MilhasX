@@ -248,6 +248,7 @@ export async function updateSale(userId: string, id: string, input: SaleInput) {
   return withLedger(userId, async (tx) => {
     const old = await tx.sale.findFirst({ where: { id, userId } });
     if (!old) throw new DomainError(404, "Venda não encontrada");
+    if (old.refundedAt) throw new DomainError(409, "Venda reembolsada: desfaça o reembolso para editar");
     const groupId = old.groupId ?? `sale:${randomUUID()}`;
     const first = old.groupId ? await tx.entry.findFirst({ where: { userId, groupId: old.groupId }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }) : null;
     if (old.groupId) await tx.entry.deleteMany({ where: { userId, groupId: old.groupId } });
@@ -284,8 +285,18 @@ const saleInclude = {
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
 
+/**
+ * Venda reembolsada: as milhas voltam para a conta e a taxa de embarque e os outros repasses voltam para o
+ * cliente, então nada disso entra no faturamento. Fica só a taxa de administração, que é toda lucro.
+ */
+export function refundedFinancials(feeCents: number) {
+  return { totalCents: feeCents, costCents: 0, resultCents: feeCents, pricedCents: feeCents, pointsValueCents: 0, investedCents: 0, marginPct: feeCents > 0 ? 100 : null, roePct: null };
+}
+
 function present(s: SaleRow) {
-  const f = saleFinancials(s);
+  const sold = saleFinancials(s);
+  const refunded = !!s.refundedAt;
+  const f = refunded ? refundedFinancials(s.refundFeeCents) : sold;
   const own = s.origin === "OWN";
   return {
     id: s.id,
@@ -298,9 +309,12 @@ function present(s: SaleRow) {
     programName: (own ? s.account?.program.name : s.supplierAccount?.program.name) ?? "Programa excluído",
     description: s.items.map(itemSummary).join(" + "),
     customers: [...new Map(s.items.flatMap((i) => i.customers).map((c) => [c.id, c.name])).values()],
-    points: s.points,
+    // reembolsada: as milhas voltaram, então não contam como vendidas (os números da venda ficam em refund);
+    // os CPFs continuam gastos na conta e são a base da taxa de administração
+    points: refunded ? 0 : s.points,
     cpfs: saleCpfs(s.items),
     ...f,
+    refund: refunded ? { date: s.refundedAt!.toISOString(), feeCents: s.refundFeeCents, points: s.points, totalCents: sold.totalCents, resultCents: sold.resultCents } : null,
     attachments: s._count.attachments,
     items: s.items.map((i) => ({
       id: i.id,
@@ -364,11 +378,55 @@ export async function deleteSale(userId: string, id: string) {
     const s = await tx.sale.findFirst({ where: { id, userId } });
     if (!s) throw new DomainError(404, "Venda não encontrada");
     if (s.groupId) await tx.entry.deleteMany({ where: { userId, groupId: s.groupId } });
-    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
+    // reembolsada: o saldo do fornecedor já voltou no reembolso
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points && !s.refundedAt) {
       await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
     }
     await tx.sale.delete({ where: { id: s.id } });
     return { ok: true };
+  });
+}
+
+/* ---------------- Reembolso ---------------- */
+
+/**
+ * Reembolsa a venda: as milhas voltam para a conta (lançamento "Reembolso de venda", com o custo com que
+ * saíram) ou para o saldo do fornecedor. Os CPFs usados continuam usados. No faturamento fica só a taxa
+ * de administração cobrada do cliente.
+ */
+export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }) {
+  if (!Number.isInteger(input.feeCents) || input.feeCents < 0) throw new DomainError(400, "Taxa de administração inválida");
+  return withLedger(userId, async (tx) => {
+    const s = await tx.sale.findFirst({ where: { id, userId } });
+    if (!s) throw new DomainError(404, "Venda não encontrada");
+    if (s.refundedAt) throw new DomainError(409, "Essa venda já foi reembolsada");
+    if (input.date < s.occurredAt) throw new DomainError(400, "O reembolso não pode ser antes da venda");
+    const debits = s.groupId ? await tx.entry.findMany({ where: { userId, groupId: s.groupId, type: "SALE" } }) : [];
+    for (const d of debits) {
+      await tx.entry.create({
+        data: { userId, accountId: d.accountId, type: "SALE_REFUND", points: -d.points, occurredAt: input.date, description: d.description.replace(/^Venda/, "Reembolso"), groupId: s.groupId },
+      });
+    }
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
+      await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
+    }
+    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: input.date, refundFeeCents: input.feeCents } });
+  });
+}
+
+/** Desfaz o reembolso: as milhas saem de novo e a venda volta a contar no faturamento. */
+export async function undoRefund(userId: string, id: string) {
+  return withLedger(userId, async (tx) => {
+    const s = await tx.sale.findFirst({ where: { id, userId } });
+    if (!s) throw new DomainError(404, "Venda não encontrada");
+    if (!s.refundedAt) throw new DomainError(409, "Essa venda não foi reembolsada");
+    if (s.groupId) await tx.entry.deleteMany({ where: { userId, groupId: s.groupId, type: "SALE_REFUND" } });
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
+      const sa = await tx.supplierAccount.findFirst({ where: { id: s.supplierAccountId, userId }, select: { balance: true } });
+      if (sa && sa.balance < s.points) throw new DomainError(422, "O fornecedor não tem mais saldo para desfazer o reembolso");
+      await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { decrement: s.points } } });
+    }
+    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: null, refundFeeCents: 0 } });
   });
 }
 
