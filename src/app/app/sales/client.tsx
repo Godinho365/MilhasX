@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2 } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
-import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, fmtDate, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { airportLabel } from "@/domain/airports";
 import { ProgramDot } from "@/components/stat";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
@@ -25,6 +25,13 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   const [editingSale, setEditingSale] = useState<SaleView | null>(editSale ?? null);
   const [menu, setMenu] = useState<{ s: SaleView; top: number; right: number } | null>(null);
   const [refunding, setRefunding] = useState<SaleView | null>(null);
+  // prazo de reembolso (24h depois da emissão): o relógio da tela anda sozinho a cada minuto
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const refundOpen = (s: SaleView) => !!s.refundUntil && new Date(s.refundUntil).getTime() > now;
 
   useEffect(() => {
     const open = () => setCreating(true);
@@ -99,7 +106,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
               <tbody>
                 {sales.map((s) => (
                   <tr key={s.id} className={s.refund ? "bg-amber-500/5" : undefined}>
-                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}{s.refund && <span className="block text-xs text-amber-300" title={`Reembolsada em ${fmtDate(s.refund.date)}`}>Reembolsada</span>}</td>
+                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}{s.refund && <span className="block text-xs text-amber-300" title={`Reembolsada em ${fmtDate(s.refund.date)}`}>Reembolsada</span>}{refundOpen(s) && <span className="block text-xs text-muted" title="Prazo para reembolso: 24 horas depois da emissão">Reembolso até {fmtDateTime(s.refundUntil!)} ({timeLeft(s.refundUntil!, now)})</span>}</td>
                     <td className="max-w-[180px]"><span className="flex items-center gap-2"><ProgramDot color={s.color} /><span className="truncate font-medium">{s.program}</span></span></td>
                     <td className="max-w-[260px]">
                       <button type="button" className="block max-w-full truncate text-left hover:underline" onClick={() => setViewing(s)}>{s.description}</button>
@@ -128,7 +135,9 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>}
           {menu.s.refund
             ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); undo(s); }}><Undo2 className="h-4 w-4" />Desfazer reembolso</button>
-            : <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setRefunding(menu.s); setMenu(null); }}><Undo2 className="h-4 w-4" />Reembolsar</button>}
+            : refundOpen(menu.s)
+              ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setRefunding(menu.s); setMenu(null); }}><Undo2 className="h-4 w-4" />Reembolsar</button>
+              : <button role="menuitem" disabled className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted" title={menu.s.refundUntil ? `O prazo de 24 horas acabou em ${fmtDateTime(menu.s.refundUntil)}` : undefined}><Undo2 className="h-4 w-4 shrink-0" />Prazo de reembolso encerrado</button>}
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); remove(s); }}><Trash2 className="h-4 w-4" />Excluir</button>
         </div>
       )}
@@ -138,6 +147,13 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {refunding && <RefundDialog sale={refunding} onClose={() => setRefunding(null)} />}
     </>
   );
+}
+
+/** Tempo que falta para o fim do prazo: "5h 20min", "40min". */
+function timeLeft(until: string, now: number) {
+  const min = Math.max(0, Math.round((new Date(until).getTime() - now) / 60_000));
+  const h = Math.floor(min / 60);
+  return h ? `faltam ${h}h ${String(min % 60).padStart(2, "0")}min` : `faltam ${min}min`;
 }
 
 /** R$ 100 por CPF emitido: o CPF fica gasto na conta mesmo com o reembolso. */
@@ -172,6 +188,7 @@ function RefundDialog({ sale: s, onClose }: { sale: SaleView; onClose: () => voi
       <form id="refund-form" onSubmit={save} className="space-y-4">
         {erro && <Alert>{erro}</Alert>}
         <p className="text-sm text-muted">{s.description} · {s.program}</p>
+        {s.refundUntil && <p className="text-sm">Prazo para reembolsar: até <b>{fmtDateTime(s.refundUntil)}</b> (24 horas depois da emissão).</p>}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Taxa de administração por CPF" required><input className="input" inputMode="decimal" placeholder="R$ 0,00" value={perCpf} onChange={(e) => setPerCpf(e.target.value)} aria-label="Taxa de administração por CPF" /></Field>
           <Field label="Data do reembolso" required><input className="input" type="date" min={s.date.slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data do reembolso" /></Field>
