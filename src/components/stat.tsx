@@ -1,13 +1,13 @@
 import { colorFor } from "@/lib/colors";
 
-export function Stat({ label, value, hint, accent, icon }: { label: string; value: string; hint?: string; accent?: boolean; icon?: React.ReactNode }) {
+export function Stat({ label, value, hint, accent, negative, icon }: { label: string; value: string; hint?: string; accent?: boolean; negative?: boolean; icon?: React.ReactNode }) {
   return (
     <div className="card card-pad">
       <div className="flex items-center gap-2">
         <p className="kicker">{label}</p>
         {icon && <span className="ml-auto text-muted">{icon}</span>}
       </div>
-      <p className={`mt-2 text-2xl font-semibold tabular-nums tracking-tight sm:text-[28px] ${accent ? "text-accent-light" : ""}`}>{value}</p>
+      <p className={`mt-2 text-2xl font-semibold tabular-nums tracking-tight sm:text-[28px] ${accent ? "text-accent-light" : negative ? "text-red-400" : ""}`}>{value}</p>
       {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
     </div>
   );

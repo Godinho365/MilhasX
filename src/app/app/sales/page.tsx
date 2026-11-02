@@ -9,6 +9,7 @@ import { saleQuerySchema } from "@/server/schemas";
 import { prisma } from "@/server/db";
 import { PageHeader, Stat } from "@/components/stat";
 import { Segmented } from "@/components/ui";
+import { Activity, DollarSign, Plane, Receipt, Target, TrendingUp } from "lucide-react";
 import { SalesClient, CustomersClient } from "./client";
 import { fmtBRL, fmtPts } from "@/lib/format";
 import { brDay } from "@/domain/brasilia";
@@ -40,6 +41,10 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const invested = sales.reduce((s, x) => s + x.investedCents, 0);
   const priced = sales.reduce((s, x) => s + x.pricedCents, 0);
   const cpfs = sales.reduce((s, x) => s + x.cpfs, 0);
+  const count = sales.filter((x) => !x.refund).length; // reembolsadas não contam como venda
+  const soldCpfs = sales.filter((x) => !x.refund).reduce((s, x) => s + x.cpfs, 0);
+  const cost = sales.reduce((s, x) => s + x.costCents, 0);
+  const milesCost = sales.reduce((s, x) => s + x.milesCostCents, 0);
   const pctFmt = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
   return (
     <>
@@ -49,14 +54,13 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
         <>
           <div className="mb-4"><RevenueNow r={now} /></div>
           {sales.length > 0 && (
-            <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 2xl:grid-cols-7">
-              <Stat label="Vendas" value={String(sales.length)} />
-              <Stat label="Total vendido" value={fmtBRL(total)} />
-              <Stat label="Resultado" value={fmtBRL(result)} accent />
-              <Stat label="Pontos vendidos" value={fmtPts(pts)} />
-              <Stat label="Margem" value={priced > 0 ? pctFmt((result / priced) * 100) : "-"} hint="resultado ÷ preço de venda" />
-              <Stat label="ROE" value={invested > 0 ? pctFmt((result / invested) * 100) : "-"} hint="resultado ÷ custo investido" />
-              <Stat label="Lucro por CPF" value={cpfs > 0 ? fmtBRL(Math.round(result / cpfs)) : "-"} hint={`${cpfs} ${cpfs === 1 ? "CPF emitido" : "CPFs emitidos"}`} />
+            <div className="mb-4 grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+              <Stat icon={<Target className="h-4 w-4" />} label="Lucro total" value={fmtBRL(result)} accent={result >= 0} negative={result < 0} hint={total > 0 ? `${pctFmt((result / total) * 100)} do total vendido` : undefined} />
+              <Stat icon={<TrendingUp className="h-4 w-4" />} label="Total de vendas" value={fmtBRL(total)} hint={`${count} ${count === 1 ? "venda" : "vendas"}${count > 0 ? ` · ticket médio ${fmtBRL(Math.round(total / count))}` : ""}`} />
+              <Stat icon={<DollarSign className="h-4 w-4" />} label="Custo total" value={fmtBRL(cost)} hint="milhas, emissões pagas e taxas repassadas" />
+              <Stat icon={<Receipt className="h-4 w-4" />} label="Custo das milhas" value={fmtBRL(milesCost)} hint={pts > 0 && milesCost > 0 ? `milheiro médio ${fmtBRL(Math.round((milesCost * 1000) / pts))}` : "custo dos pontos usados"} />
+              <Stat icon={<Plane className="h-4 w-4" />} label="Total de milhas" value={fmtPts(pts)} hint={soldCpfs > 0 ? `média por emissão: ${fmtPts(Math.round(pts / soldCpfs))}` : undefined} />
+              <Stat icon={<Activity className="h-4 w-4" />} label="Performance (ROE)" value={invested > 0 ? pctFmt((result / invested) * 100) : "-"} hint={[priced > 0 && `margem ${pctFmt((result / priced) * 100)}`, cpfs > 0 && `lucro por CPF ${fmtBRL(Math.round(result / cpfs))} (${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"})`].filter(Boolean).join(" · ")} />
             </div>
           )}
           <SalesClient

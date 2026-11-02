@@ -96,7 +96,8 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
   const pointsValueCents = s.items.filter((i) => i.issuedWith === "POINTS").reduce((t, i) => t + i.salePriceCents, 0);
   // ROE: resultado sobre o que foi investido na emissão (custo dos pontos ou valor pago); custos repassados ficam de fora
   const investedCents = parts.reduce((t, p, k) => t + p.pointsCostCents + s.items[k].cashCostCents, 0);
-  return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, investedCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null, roePct: pct(resultCents, investedCents) };
+  const milesCostCents = parts.reduce((t, p) => t + p.pointsCostCents, 0); // só o custo dos pontos usados
+  return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, investedCents, milesCostCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null, roePct: pct(resultCents, investedCents) };
 }
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
@@ -291,7 +292,7 @@ type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
  * cliente, então nada disso entra no faturamento. Fica só a taxa de administração, que é toda lucro.
  */
 export function refundedFinancials(feeCents: number) {
-  return { totalCents: feeCents, costCents: 0, resultCents: feeCents, pricedCents: feeCents, pointsValueCents: 0, investedCents: 0, marginPct: feeCents > 0 ? 100 : null, roePct: null };
+  return { totalCents: feeCents, costCents: 0, resultCents: feeCents, pricedCents: feeCents, pointsValueCents: 0, investedCents: 0, milesCostCents: 0, marginPct: feeCents > 0 ? 100 : null, roePct: null };
 }
 
 export const REFUND_WINDOW_MS = 24 * 3_600_000;
