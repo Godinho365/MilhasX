@@ -1,5 +1,5 @@
 // Vendas de emissão: itens, custos repassados, fornecedor, exclusão, clientes e anexos.
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resetDb, Client, seedPrograms } from "./helpers";
 import * as register from "@/app/api/auth/register/route";
 import * as holders from "@/app/api/holders/route";
@@ -13,6 +13,7 @@ import * as customers from "@/app/api/customers/route";
 import * as customer from "@/app/api/customers/[id]/route";
 import { prisma } from "@/server/db";
 import { salesDashboard } from "@/server/services/extras";
+import { refundDeadline } from "@/server/services/sales";
 
 let c: Client;
 let userId: string;
@@ -187,6 +188,30 @@ describe("CPFs emitidos", () => {
 });
 
 describe("reembolso de venda", () => {
+  // o prazo é de 24 horas depois da emissão: o relógio fica no dia das vendas do teste (10/10)
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T20:00:00Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("prazo de 24 horas: pelo horário da venda do CRM, ou pelo registro da lançada à mão no mesmo dia", () => {
+    expect(refundDeadline({ occurredAt: new Date("2026-11-02T01:54:31Z"), createdAt: new Date("2026-11-02T01:54:31Z") }).toISOString()).toBe("2026-11-03T01:54:31.000Z");
+    expect(refundDeadline({ occurredAt: new Date("2026-11-02T00:00:00Z"), createdAt: new Date("2026-11-02T14:00:00Z") }).toISOString()).toBe("2026-11-03T14:00:00.000Z");
+    // lançada depois, com data passada: conta do início do dia da venda em Brasília (vale até o fim desse dia)
+    expect(refundDeadline({ occurredAt: new Date("2026-10-30T00:00:00Z"), createdAt: new Date("2026-11-02T14:00:00Z") }).toISOString()).toBe("2026-10-31T03:00:00.000Z");
+  });
+
+  it("depois de 24 horas não dá mais para reembolsar", async () => {
+    const id = (await newSale({ items: [flight()] })).data.item.id;
+    await prisma.sale.update({ where: { id }, data: { occurredAt: new Date("2026-10-10T15:30:00Z") } });
+    expect((await view(id)).refundUntil).toBe("2026-10-11T15:30:00.000Z");
+    vi.setSystemTime(new Date("2026-10-11T15:31:00Z"));
+    const r = await refund(id, { feeCents: 10000, date: "2026-10-11" });
+    expect(r.status).toBe(409);
+    expect(r.data.erro).toContain("prazo de reembolso");
+  });
+
   const refund = (id: string, body: Record<string, unknown>) => c.call(refundRoute.POST, "POST", `/api/sales/${id}/refund`, body, { id });
   const undo = (id: string) => c.call(refundRoute.DELETE, "DELETE", `/api/sales/${id}/refund`, undefined, { id });
 
@@ -210,6 +235,16 @@ describe("reembolso de venda", () => {
     // não reembolsa duas vezes nem edita reembolsada
     expect((await refund(id, { feeCents: 10000, date: "2026-10-15" })).status).toBe(409);
     expect((await c.call(sale.PATCH, "PATCH", `/api/sales/${id}`, { origin: "OWN", accountId: lat, occurredAt: "2026-10-10", items: [flight()] }, { id })).status).toBe(409);
+  });
+
+  it("dá para reembolsar no mesmo dia, mesmo com a venda gravada com horário (CRM Milhas)", async () => {
+    const id = (await newSale({ items: [flight()] })).data.item.id;
+    await prisma.sale.update({ where: { id }, data: { occurredAt: new Date("2026-10-10T15:30:00Z") } });
+    await prisma.entry.updateMany({ where: { type: "SALE" }, data: { occurredAt: new Date("2026-10-10T15:30:00Z") } });
+    expect((await refund(id, { feeCents: 10000, date: "2026-10-10" })).status).toBe(200);
+    const e = await prisma.entry.findFirstOrThrow({ where: { type: "SALE_REFUND" } });
+    expect(e.occurredAt.toISOString()).toBe("2026-10-10T15:30:00.000Z"); // não fica antes da venda no extrato
+    expect(await acc(lat)).toMatchObject({ balance: 20000, costCents: 50000 });
   });
 
   it("desfazer o reembolso tira as milhas de novo e a venda volta ao faturamento", async () => {

@@ -2,6 +2,7 @@
 // origem dos pontos (minha conta ou fornecedor), custos repassados, clientes e anexos.
 import { randomUUID } from "node:crypto";
 import { ANONYMOUS } from "@/domain/beneficiaries";
+import { brDay } from "@/domain/brasilia";
 import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { assertFeature } from "./plan-limits";
@@ -293,6 +294,20 @@ export function refundedFinancials(feeCents: number) {
   return { totalCents: feeCents, costCents: 0, resultCents: feeCents, pricedCents: feeCents, pointsValueCents: 0, investedCents: 0, marginPct: feeCents > 0 ? 100 : null, roePct: null };
 }
 
+export const REFUND_WINDOW_MS = 24 * 3_600_000;
+const BR_OFFSET_MS = 3 * 3_600_000; // meia-noite em Brasília = 03:00 UTC (sem horário de verão)
+
+/**
+ * Até quando dá para reembolsar: 24 horas depois da emissão. A venda do CRM Milhas guarda o horário; a
+ * lançada à mão só tem o dia, então vale a hora em que foi registrada (se foi no mesmo dia) ou o início do
+ * dia em Brasília (o prazo acaba no fim do dia da venda).
+ */
+export function refundDeadline(s: { occurredAt: Date; createdAt: Date }) {
+  const dateOnly = s.occurredAt.getTime() % 86_400_000 === 0;
+  const issuedAt = !dateOnly ? s.occurredAt : brDay(s.createdAt) === s.occurredAt.toISOString().slice(0, 10) ? s.createdAt : new Date(s.occurredAt.getTime() + BR_OFFSET_MS);
+  return new Date(issuedAt.getTime() + REFUND_WINDOW_MS);
+}
+
 function present(s: SaleRow) {
   const sold = saleFinancials(s);
   const refunded = !!s.refundedAt;
@@ -314,6 +329,7 @@ function present(s: SaleRow) {
     points: refunded ? 0 : s.points,
     cpfs: saleCpfs(s.items),
     ...f,
+    refundUntil: refunded ? null : refundDeadline(s).toISOString(),
     refund: refunded ? { date: s.refundedAt!.toISOString(), feeCents: s.refundFeeCents, points: s.points, totalCents: sold.totalCents, resultCents: sold.resultCents } : null,
     attachments: s._count.attachments,
     items: s.items.map((i) => ({
@@ -394,23 +410,31 @@ export async function deleteSale(userId: string, id: string) {
  * saíram) ou para o saldo do fornecedor. Os CPFs usados continuam usados. No faturamento fica só a taxa
  * de administração cobrada do cliente.
  */
-export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }) {
+export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }, now = new Date()) {
   if (!Number.isInteger(input.feeCents) || input.feeCents < 0) throw new DomainError(400, "Taxa de administração inválida");
   return withLedger(userId, async (tx) => {
     const s = await tx.sale.findFirst({ where: { id, userId } });
     if (!s) throw new DomainError(404, "Venda não encontrada");
     if (s.refundedAt) throw new DomainError(409, "Essa venda já foi reembolsada");
-    if (input.date < s.occurredAt) throw new DomainError(400, "O reembolso não pode ser antes da venda");
+    const deadline = refundDeadline(s);
+    if (now > deadline) {
+      const when = deadline.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+      throw new DomainError(409, `O prazo de reembolso (24 horas depois da emissão) acabou em ${when}`);
+    }
+    // compara só o dia: dá para reembolsar no mesmo dia (a venda do CRM Milhas guarda também o horário)
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    if (day(input.date) < day(s.occurredAt)) throw new DomainError(400, "O reembolso não pode ser antes da venda");
+    const at = input.date < s.occurredAt ? s.occurredAt : input.date;
     const debits = s.groupId ? await tx.entry.findMany({ where: { userId, groupId: s.groupId, type: "SALE" } }) : [];
     for (const d of debits) {
       await tx.entry.create({
-        data: { userId, accountId: d.accountId, type: "SALE_REFUND", points: -d.points, occurredAt: input.date, description: d.description.replace(/^Venda/, "Reembolso"), groupId: s.groupId },
+        data: { userId, accountId: d.accountId, type: "SALE_REFUND", points: -d.points, occurredAt: at, description: d.description.replace(/^Venda/, "Reembolso"), groupId: s.groupId },
       });
     }
     if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
       await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
     }
-    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: input.date, refundFeeCents: input.feeCents } });
+    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: at, refundFeeCents: input.feeCents } });
   });
 }
 
