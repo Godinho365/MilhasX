@@ -2,7 +2,7 @@
 // Vendas: lista (Data, Programa, Descrição, Pontos, Valor, Resultado, Ações), detalhes e a aba Clientes.
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2 } from "lucide-react";
+import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2, CircleCheck } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
@@ -68,6 +68,15 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
     toast("Venda excluída");
     refreshSafe(router);
   }
+  async function receive(s: SaleView, kind: "miles" | "tax") {
+    const what = kind === "miles" ? `o estorno das ${fmtPts(s.refund?.points ?? 0)} milhas` : `o estorno da taxa (${fmtBRL(s.refund?.taxCents ?? 0)})`;
+    const ok = await confirmDialog({ title: "Estorno recebido?", body: `Marcar ${what} como recebido hoje?${kind === "miles" ? " As milhas saem do bloqueio e entram no saldo da conta." : ""}`, confirmLabel: "Marcar recebido" });
+    if (!ok) return;
+    const r = await api(`/api/sales/${s.id}/refund/receipt`, "POST", { kind, date: today() });
+    if (!r.ok) return toast(r.erro, "error");
+    toast(kind === "miles" ? "Estorno das milhas recebido" : "Estorno da taxa recebido");
+    refreshSafe(router);
+  }
   async function undo(s: SaleView) {
     const ok = await confirmDialog({ title: "Desfazer reembolso?", body: "As milhas saem da conta de novo e a venda volta a contar no faturamento.", confirmLabel: "Desfazer" });
     if (!ok) return;
@@ -106,7 +115,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
               <tbody>
                 {sales.map((s) => (
                   <tr key={s.id} className={s.refund ? "bg-amber-500/5" : undefined}>
-                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}{s.refund && <span className="block text-xs text-amber-300" title={`Reembolsada em ${fmtDate(s.refund.date)}`}>Reembolsada</span>}{refundOpen(s) && <span className="block text-xs text-muted" title="Prazo para reembolso: 24 horas depois da emissão">Reembolso até {fmtDateTime(s.refundUntil!)} ({timeLeft(s.refundUntil!, now)})</span>}</td>
+                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}{s.refund && <span className="block text-xs text-amber-300" title={`Reembolsada em ${fmtDate(s.refund.date)}`}>Reembolsada{refundWaiting(s) && <span className="text-muted"> · aguardando estorno {refundWaiting(s)}</span>}</span>}{refundOpen(s) && <span className="block text-xs text-muted" title="Prazo para reembolso: 24 horas depois da emissão">Reembolso até {fmtDateTime(s.refundUntil!)} ({timeLeft(s.refundUntil!, now)})</span>}</td>
                     <td className="max-w-[180px]"><span className="flex items-center gap-2"><ProgramDot color={s.color} /><span className="truncate font-medium">{s.program}</span></span></td>
                     <td className="max-w-[260px]">
                       <button type="button" className="block max-w-full truncate text-left hover:underline" onClick={() => setViewing(s)}>{s.description}</button>
@@ -133,6 +142,8 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-44 rounded-xl border border-line bg-panel2 p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setViewing(menu.s); setMenu(null); }}><Eye className="h-4 w-4" />Ver detalhes</button>
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>}
+          {menu.s.refund && !menu.s.refund.milesReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "miles"); }}><CircleCheck className="h-4 w-4 shrink-0" />Milhas estornadas</button>}
+          {menu.s.refund && !menu.s.refund.taxReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "tax"); }}><CircleCheck className="h-4 w-4 shrink-0" />Taxa estornada</button>}
           {menu.s.refund
             ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); undo(s); }}><Undo2 className="h-4 w-4" />Desfazer reembolso</button>
             : refundOpen(menu.s)
@@ -147,6 +158,13 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {refunding && <RefundDialog sale={refunding} onClose={() => setRefunding(null)} />}
     </>
   );
+}
+
+/** O que ainda falta a companhia estornar: "das milhas e da taxa", "das milhas", "da taxa" (ou vazio). */
+function refundWaiting(s: SaleView) {
+  if (!s.refund) return "";
+  const miles = !s.refund.milesReceivedAt, tax = !s.refund.taxReceivedAt;
+  return miles && tax ? "das milhas e da taxa" : miles ? "das milhas" : tax ? "da taxa" : "";
 }
 
 /** Tempo que falta para o fim do prazo: "5h 20min", "40min". */
@@ -194,13 +212,13 @@ function RefundDialog({ sale: s, onClose }: { sale: SaleView; onClose: () => voi
           <Field label="Data do reembolso" required><input className="input" type="date" min={s.date.slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data do reembolso" /></Field>
         </div>
         <div className="divide-y divide-line rounded-xl border border-line px-3">
-          {s.origin === "OWN" ? line("Milhas que voltam para a conta", s.points ? fmtPts(s.points) : "-") : line("Milhas que voltam para o fornecedor", s.points ? fmtPts(s.points) : "-")}
-          {passCents > 0 && line("Taxa de embarque e repasses (voltam para o cliente)", fmtBRL(passCents))}
+          {line(s.origin === "OWN" ? "Milhas bloqueadas até o estorno da companhia" : "Milhas que voltam para o fornecedor no estorno", s.points ? fmtPts(s.points) : "-")}
+          {passCents > 0 && line("Taxa de embarque e repasses (estorno da companhia, voltam para o cliente)", fmtBRL(passCents))}
           {line("Sai do faturamento", fmtBRL(s.totalCents))}
           {line(`Taxa de administração (${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"} × ${fmtBRL(perCpfCents ?? 0)})`, fmtBRL(feeCents ?? 0))}
           {line("Fica no faturamento (lucro)", <span className="text-ok">{fmtBRL(feeCents ?? 0)}</span>)}
         </div>
-        <p className="text-xs text-muted">Os CPFs usados na emissão continuam gastos no limite da conta; por isso a taxa é cobrada por CPF.</p>
+        <p className="text-xs text-muted">Depois, marque no menu da venda quando a companhia estornar as milhas e a taxa. Os CPFs usados na emissão continuam gastos no limite da conta; por isso a taxa é cobrada por CPF.</p>
       </form>
     </Modal>
   );
@@ -222,7 +240,13 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
           <div><p className="text-xs text-muted">ROE</p><p className="font-semibold tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</p></div>
           <div><p className="text-xs text-muted">Lucro por CPF</p><p className="font-semibold tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}<span className="block text-xs font-normal text-muted">{s.cpfs} {s.cpfs === 1 ? "CPF" : "CPFs"}</span></p></div>
         </div>
-        {s.refund && <Alert kind="info">Reembolsada em {fmtDate(s.refund.date)}: {fmtPts(s.refund.points)} milhas voltaram {s.origin === "OWN" ? "para a conta" : "para o fornecedor"}. No faturamento fica só a taxa de administração de {fmtBRL(s.refund.feeCents)} (a venda era de {fmtBRL(s.refund.totalCents)}).</Alert>}
+        {s.refund && (
+          <Alert kind="info">
+            Reembolsada em {fmtDate(s.refund.date)}. No faturamento fica só a taxa de administração de {fmtBRL(s.refund.feeCents)} (a venda era de {fmtBRL(s.refund.totalCents)}).
+            <span className="mt-1 block">Milhas ({fmtPts(s.refund.points)}): {s.refund.milesReceivedAt ? `estornadas em ${fmtDate(s.refund.milesReceivedAt)}` : "aguardando estorno da companhia (bloqueadas)"}</span>
+            {s.refund.taxCents > 0 && <span className="block">Taxa ({fmtBRL(s.refund.taxCents)}): {s.refund.taxReceivedAt ? `estornada em ${fmtDate(s.refund.taxReceivedAt)}` : "aguardando estorno da companhia"}</span>}
+          </Alert>
+        )}
         <div className="divide-y divide-line">
           {line("Data", fmtDate(s.date))}
           {line("Origem dos pontos", s.origin === "OWN" ? "Meus pontos" : "Fornecedor")}

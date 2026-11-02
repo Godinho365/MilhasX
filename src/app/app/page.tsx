@@ -328,6 +328,19 @@ async function SalesView({ userId, money }: { userId: string; money: Money }) {
         <Stat label="Preço médio" value={money(d.totals.avgPriceCpmCents)} hint="por milheiro" />
         {d.totals.refunds > 0 && <Stat label="Reembolsos" value={String(d.totals.refunds)} hint={`${money(d.totals.refundFeesCents)} em taxas de administração`} />}
       </div>
+      {d.totals.refundWaiting.sales > 0 && (
+        <section className="card card-pad mt-4" aria-label="Aguardando estorno">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold">Aguardando estorno da companhia</h2>
+            <Link className="text-sm text-accent-light hover:underline" href="/app/sales">Marcar nas vendas</Link>
+          </div>
+          <p className="mb-3 text-sm text-muted">{d.totals.refundWaiting.sales} {d.totals.refundWaiting.sales === 1 ? "reembolso" : "reembolsos"} com estorno pendente. Marque no menu da venda quando chegar.</p>
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <Stat label="Milhas bloqueadas" value={fmtPts(d.totals.refundWaiting.points)} hint="voltam ao saldo no estorno" />
+            <Stat label="Taxas a receber" value={money(d.totals.refundWaiting.taxCents)} hint="taxa de embarque e repasses" />
+          </div>
+        </section>
+      )}
       <section className="card card-pad mt-4">
         <h2 className="text-lg font-semibold">Faturamento e lucro por mês</h2>
         <p className="mb-4 text-sm text-muted">Últimos 12 meses</p>

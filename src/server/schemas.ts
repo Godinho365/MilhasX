@@ -530,3 +530,8 @@ export const saleRefundSchema = z.object({
   feeCents: z.number().int().min(0).max(10_000_000),
   date: dateStr,
 });
+
+export const saleRefundReceiptSchema = z.object({
+  kind: z.enum(["miles", "tax"]),
+  date: dateStr,
+});

@@ -330,7 +330,18 @@ function present(s: SaleRow) {
     cpfs: saleCpfs(s.items),
     ...f,
     refundUntil: refunded ? null : refundDeadline(s).toISOString(),
-    refund: refunded ? { date: s.refundedAt!.toISOString(), feeCents: s.refundFeeCents, points: s.points, totalCents: sold.totalCents, resultCents: sold.resultCents } : null,
+    refund: refunded
+      ? {
+          date: s.refundedAt!.toISOString(),
+          feeCents: s.refundFeeCents,
+          points: s.points,
+          totalCents: sold.totalCents,
+          resultCents: sold.resultCents,
+          taxCents: s.items.reduce((t, i) => t + sumCosts(i.costs), 0), // taxa de embarque e repasses que a companhia estorna
+          milesReceivedAt: s.refundMilesReceivedAt?.toISOString() ?? null,
+          taxReceivedAt: s.refundTaxReceivedAt?.toISOString() ?? null,
+        }
+      : null,
     attachments: s._count.attachments,
     items: s.items.map((i) => ({
       id: i.id,
@@ -394,8 +405,8 @@ export async function deleteSale(userId: string, id: string) {
     const s = await tx.sale.findFirst({ where: { id, userId } });
     if (!s) throw new DomainError(404, "Venda não encontrada");
     if (s.groupId) await tx.entry.deleteMany({ where: { userId, groupId: s.groupId } });
-    // reembolsada: o saldo do fornecedor já voltou no reembolso
-    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points && !s.refundedAt) {
+    // reembolsada com as milhas já estornadas: o saldo do fornecedor já voltou
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points && !s.refundMilesReceivedAt) {
       await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
     }
     await tx.sale.delete({ where: { id: s.id } });
@@ -406,9 +417,9 @@ export async function deleteSale(userId: string, id: string) {
 /* ---------------- Reembolso ---------------- */
 
 /**
- * Reembolsa a venda: as milhas voltam para a conta (lançamento "Reembolso de venda", com o custo com que
- * saíram) ou para o saldo do fornecedor. Os CPFs usados continuam usados. No faturamento fica só a taxa
- * de administração cobrada do cliente.
+ * Reembolsa a venda. As milhas ficam bloqueadas esperando o estorno da companhia (lançamento "Reembolso de
+ * venda" a receber); a taxa de embarque e os repasses também. Cada estorno é marcado depois (receiveRefund).
+ * Os CPFs usados continuam usados. No faturamento fica só a taxa de administração cobrada do cliente.
  */
 export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }, now = new Date()) {
   if (!Number.isInteger(input.feeCents) || input.feeCents < 0) throw new DomainError(400, "Taxa de administração inválida");
@@ -428,13 +439,13 @@ export async function refundSale(userId: string, id: string, input: { feeCents: 
     const debits = s.groupId ? await tx.entry.findMany({ where: { userId, groupId: s.groupId, type: "SALE" } }) : [];
     for (const d of debits) {
       await tx.entry.create({
-        data: { userId, accountId: d.accountId, type: "SALE_REFUND", points: -d.points, occurredAt: at, description: d.description.replace(/^Venda/, "Reembolso"), groupId: s.groupId },
+        data: { userId, accountId: d.accountId, type: "SALE_REFUND", status: "PENDING", points: -d.points, occurredAt: at, description: d.description.replace(/^Venda/, "Reembolso"), groupId: s.groupId },
       });
     }
-    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
-      await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
-    }
-    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: at, refundFeeCents: input.feeCents } });
+    // sem taxa de embarque nem repasses não há estorno de taxa para esperar
+    const items = await tx.saleItem.findMany({ where: { saleId: s.id }, select: { costs: true } });
+    const hasTax = items.some((i) => sumCosts(i.costs) > 0);
+    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: at, refundFeeCents: input.feeCents, refundMilesReceivedAt: s.points ? null : at, refundTaxReceivedAt: hasTax ? null : at } });
   });
 }
 
@@ -445,12 +456,36 @@ export async function undoRefund(userId: string, id: string) {
     if (!s) throw new DomainError(404, "Venda não encontrada");
     if (!s.refundedAt) throw new DomainError(409, "Essa venda não foi reembolsada");
     if (s.groupId) await tx.entry.deleteMany({ where: { userId, groupId: s.groupId, type: "SALE_REFUND" } });
-    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points && s.refundMilesReceivedAt) {
       const sa = await tx.supplierAccount.findFirst({ where: { id: s.supplierAccountId, userId }, select: { balance: true } });
       if (sa && sa.balance < s.points) throw new DomainError(422, "O fornecedor não tem mais saldo para desfazer o reembolso");
       await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { decrement: s.points } } });
     }
-    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: null, refundFeeCents: 0 } });
+    return tx.sale.update({ where: { id: s.id }, data: { refundedAt: null, refundFeeCents: 0, refundMilesReceivedAt: null, refundTaxReceivedAt: null } });
+  });
+}
+
+/**
+ * Estorno recebido da companhia. Milhas: o lançamento a receber é confirmado na data do estorno e entra no
+ * saldo (no fornecedor, o saldo dele volta). Taxa: a taxa de embarque e os repasses voltaram para o cartão.
+ */
+export async function receiveRefund(userId: string, id: string, input: { kind: "miles" | "tax"; date: Date }) {
+  return withLedger(userId, async (tx) => {
+    const s = await tx.sale.findFirst({ where: { id, userId } });
+    if (!s) throw new DomainError(404, "Venda não encontrada");
+    if (!s.refundedAt) throw new DomainError(409, "Essa venda não foi reembolsada");
+    if (input.date.toISOString().slice(0, 10) < s.refundedAt.toISOString().slice(0, 10)) throw new DomainError(400, "O estorno não pode ser antes do reembolso");
+    const at = input.date < s.refundedAt ? s.refundedAt : input.date;
+    if (input.kind === "tax") {
+      if (s.refundTaxReceivedAt) throw new DomainError(409, "O estorno da taxa já foi marcado");
+      return tx.sale.update({ where: { id: s.id }, data: { refundTaxReceivedAt: at } });
+    }
+    if (s.refundMilesReceivedAt) throw new DomainError(409, "O estorno das milhas já foi marcado");
+    if (s.groupId) await tx.entry.updateMany({ where: { userId, groupId: s.groupId, type: "SALE_REFUND", status: "PENDING" }, data: { status: "CONFIRMED", occurredAt: at } });
+    if (s.origin === "SUPPLIER" && s.supplierAccountId && s.points) {
+      await tx.supplierAccount.updateMany({ where: { id: s.supplierAccountId, userId }, data: { balance: { increment: s.points } } });
+    }
+    return tx.sale.update({ where: { id: s.id }, data: { refundMilesReceivedAt: at } });
   });
 }
 

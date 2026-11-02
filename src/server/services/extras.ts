@@ -445,10 +445,16 @@ export async function salesDashboard(userId: string, months = 12) {
   const customers = new Map<string, { revenue: number; count: number }>();
   const programs = new Map<string, number>();
   let revenue = 0, profit = 0, points = 0, priced = 0, pointsValue = 0, refunds = 0, refundFees = 0;
+  // reembolsos esperando o estorno da companhia: milhas bloqueadas e taxas a receber
+  const waiting = { sales: 0, points: 0, taxCents: 0 };
   for (const s of sales) {
     if (s.refund) {
       refunds++;
       refundFees += s.refund.feeCents;
+      const miles = !s.refund.milesReceivedAt, tax = !s.refund.taxReceivedAt;
+      if (miles || tax) waiting.sales++;
+      if (miles) waiting.points += s.refund.points;
+      if (tax) waiting.taxCents += s.refund.taxCents;
     }
     revenue += s.totalCents;
     profit += s.resultCents;
@@ -476,6 +482,7 @@ export async function salesDashboard(userId: string, months = 12) {
       count: sales.length - refunds,
       refunds,
       refundFeesCents: refundFees,
+      refundWaiting: waiting,
       // Preço por milheiro e margem sobre o valor dos pontos: taxa de embarque e outros repasses não contam
       avgPriceCpmCents: points > 0 ? Math.round((pointsValue * 1000) / points) : null,
       marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : null,
