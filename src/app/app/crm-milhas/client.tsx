@@ -351,6 +351,9 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
   const options = priceOptions({ costCpmCents, avgSaleCpmCents, points, cpfs });
   const roe = currentCpmCents ? roeOf(currentCpmCents, costCpmCents) : null;
   const profit = currentCpmCents ? Math.round(((currentCpmCents - costCpmCents) * points) / 1000) : 0;
+  // margem = lucro ÷ valor da venda (o ROE divide pelo custo)
+  const margin = currentCpmCents ? ((currentCpmCents - costCpmCents) / currentCpmCents) * 100 : null;
+  const milesPerCpf = cpfs > 0 && points > 0 ? Math.round(points / cpfs) : null;
   const pct = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
   return (
     <section className="space-y-2 rounded-xl border border-line p-3" aria-label="Milheiro sugerido">
@@ -358,11 +361,14 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
         <h3 className="mr-auto text-sm font-semibold">Milheiro sugerido</h3>
         {roe != null && (
           <span className={`text-xs ${roe < 0 ? "text-red-300" : "text-muted"}`}>
-            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · lucro {fmtBRL(profit)}{cpfs > 1 && <> · <b className={profit < 0 ? "text-red-300" : "text-zinc-100"}>{fmtBRL(Math.round(profit / cpfs))}</b>/CPF</>}
+            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · margem <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(margin)}</b> · lucro {fmtBRL(profit)}{cpfs > 1 && <> · <b className={profit < 0 ? "text-red-300" : "text-zinc-100"}>{fmtBRL(Math.round(profit / cpfs))}</b>/CPF</>}
           </span>
         )}
       </div>
-      <p className="text-xs text-muted">Custo da conta {fmtBRL(costCpmCents)} o milheiro. ROE = lucro ÷ custo dos pontos. Clique para usar o preço.</p>
+      <p className="text-xs text-muted">
+        Custo da conta {fmtBRL(costCpmCents)} o milheiro.
+        {milesPerCpf != null && <> Venda de <b className="text-zinc-100">{milesPerCpf.toLocaleString("pt-BR")}</b> milhas por CPF ({cpfs} {cpfs === 1 ? "CPF" : "CPFs"}).</>} ROE = lucro ÷ custo dos pontos; margem = lucro ÷ valor da venda. Clique para usar o preço.
+      </p>
       <div className="grid gap-2 sm:grid-cols-5">
         {options.map((o) => (
           <button
