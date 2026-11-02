@@ -444,8 +444,12 @@ export async function salesDashboard(userId: string, months = 12) {
   }
   const customers = new Map<string, { revenue: number; count: number }>();
   const programs = new Map<string, number>();
-  let revenue = 0, profit = 0, points = 0, priced = 0, pointsValue = 0;
+  let revenue = 0, profit = 0, points = 0, priced = 0, pointsValue = 0, refunds = 0, refundFees = 0;
   for (const s of sales) {
+    if (s.refund) {
+      refunds++;
+      refundFees += s.refund.feeCents;
+    }
     revenue += s.totalCents;
     profit += s.resultCents;
     points += s.points;
@@ -469,7 +473,9 @@ export async function salesDashboard(userId: string, months = 12) {
       revenueCents: revenue,
       profitCents: profit,
       points,
-      count: sales.length,
+      count: sales.length - refunds,
+      refunds,
+      refundFeesCents: refundFees,
       // Preço por milheiro e margem sobre o valor dos pontos: taxa de embarque e outros repasses não contam
       avgPriceCpmCents: points > 0 ? Math.round((pointsValue * 1000) / points) : null,
       marginPct: priced > 0 ? Math.round((profit / priced) * 1000) / 10 : null,

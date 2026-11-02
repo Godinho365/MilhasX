@@ -16,6 +16,7 @@ export type EntryType =
   | "TRANSFER_BONUS"
   | "TRANSFER_OUT"
   | "SALE"
+  | "SALE_REFUND"
   | "FLIGHT_REDEMPTION"
   | "CAR_RENTAL"
   | "HOTEL_REDEMPTION"
@@ -46,7 +47,7 @@ export const MANUAL_DEBIT_TYPES = [
   "EXPIRATION",
 ] as const satisfies readonly EntryType[];
 
-export const CREDIT_TYPES: EntryType[] = [...MANUAL_CREDIT_TYPES, "TRANSFER_IN", "TRANSFER_BONUS"];
+export const CREDIT_TYPES: EntryType[] = [...MANUAL_CREDIT_TYPES, "TRANSFER_IN", "TRANSFER_BONUS", "SALE_REFUND"];
 export const DEBIT_TYPES: EntryType[] = [...MANUAL_DEBIT_TYPES, "TRANSFER_OUT", "SALE"];
 
 export const ENTRY_LABELS: Record<EntryType, string> = {
@@ -63,6 +64,7 @@ export const ENTRY_LABELS: Record<EntryType, string> = {
   TRANSFER_BONUS: "Bônus de transferência",
   TRANSFER_OUT: "Transferência (saída)",
   SALE: "Venda",
+  SALE_REFUND: "Reembolso de venda",
   FLIGHT_REDEMPTION: "Emissão de passagem",
   CAR_RENTAL: "Aluguel de veículo",
   HOTEL_REDEMPTION: "Reserva de hotel",
@@ -112,10 +114,11 @@ export function sortForReplay(entries: LedgerEntry[]): LedgerEntry[] {
   // A entrada (e o bônus) de uma transferência leva o custo que sai da origem; por isso nunca pode
   // ser processada antes da saída, mesmo que a data de entrega informada seja anterior à da transferência.
   const debitAt = new Map<string, number>();
-  for (const e of entries) if (e.groupId && e.type === "TRANSFER_OUT") debitAt.set(e.groupId, e.occurredAt.getTime());
+  // O mesmo vale para o reembolso de uma venda: ele devolve o custo que saiu com a venda.
+  for (const e of entries) if (e.groupId && (e.type === "TRANSFER_OUT" || e.type === "SALE")) debitAt.set(e.groupId, Math.max(debitAt.get(e.groupId) ?? 0, e.occurredAt.getTime()));
   const at = (e: LedgerEntry) => {
     const t = e.occurredAt.getTime();
-    return e.groupId && (e.type === "TRANSFER_IN" || e.type === "TRANSFER_BONUS") ? Math.max(t, debitAt.get(e.groupId) ?? t) : t;
+    return e.groupId && (e.type === "TRANSFER_IN" || e.type === "TRANSFER_BONUS" || e.type === "SALE_REFUND") ? Math.max(t, debitAt.get(e.groupId) ?? t) : t;
   };
   return [...entries].sort(
     (a, b) =>
@@ -142,6 +145,9 @@ export function replayLedger(entries: LedgerEntry[]): ReplayResult {
   const groupCreditPoints = new Map<string, number>();
   const groupFees = new Map<string, number>();
   const groupCreditAssigned = new Map<string, { points: number; cost: number }>();
+  // venda: custo que saiu da conta por grupo e conta, devolvido no reembolso
+  const saleCost = new Map<string, { points: number; cost: number }>();
+  const saleKey = (e: LedgerEntry) => `${e.groupId}|${e.accountId}`;
 
   const state = (id: string) => {
     let s = accounts.get(id);
@@ -215,6 +221,21 @@ export function replayLedger(entries: LedgerEntry[]): ReplayResult {
       if (e.groupId && e.type === "TRANSFER_OUT") {
         groupCost.set(e.groupId, (groupCost.get(e.groupId) ?? 0) + removed);
       }
+      if (e.groupId && e.type === "SALE") {
+        const sc = saleCost.get(saleKey(e)) ?? { points: 0, cost: 0 };
+        saleCost.set(saleKey(e), { points: sc.points + qty, cost: sc.cost + removed });
+      }
+      continue;
+    }
+
+    // Reembolso: as milhas voltam com o custo com que saíram na venda (não é dinheiro novo investido)
+    if (e.type === "SALE_REFUND" && e.groupId) {
+      const sc = saleCost.get(saleKey(e)) ?? { points: 0, cost: 0 };
+      const cost = sc.points > 0 ? (e.points >= sc.points ? sc.cost : Math.round((sc.cost * e.points) / sc.points)) : 0;
+      saleCost.set(saleKey(e), { points: Math.max(0, sc.points - e.points), cost: sc.cost - cost });
+      s.balance += e.points;
+      s.costCents += cost;
+      entryCosts.set(e.id, cost);
       continue;
     }
 

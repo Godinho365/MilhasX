@@ -8,6 +8,7 @@ import * as entries from "@/app/api/entries/route";
 import * as entry from "@/app/api/entries/[id]/route";
 import * as sales from "@/app/api/sales/route";
 import * as sale from "@/app/api/sales/[id]/route";
+import * as refundRoute from "@/app/api/sales/[id]/refund/route";
 import * as customers from "@/app/api/customers/route";
 import * as customer from "@/app/api/customers/[id]/route";
 import { prisma } from "@/server/db";
@@ -182,5 +183,58 @@ describe("CPFs emitidos", () => {
       { kind: "BAGGAGE", issuedWith: "POINTS", passengers: null, customers: [] },
       { kind: "FLIGHT", issuedWith: "CASH", passengers: 3, customers: [] },
     ])).toBe(3);
+  });
+});
+
+describe("reembolso de venda", () => {
+  const refund = (id: string, body: Record<string, unknown>) => c.call(refundRoute.POST, "POST", `/api/sales/${id}/refund`, body, { id });
+  const undo = (id: string) => c.call(refundRoute.DELETE, "DELETE", `/api/sales/${id}/refund`, undefined, { id });
+
+  it("milhas voltam com o custo da venda, taxa de embarque sai do faturamento e fica só a taxa de administração", async () => {
+    const r = await newSale({ items: [flight({ costs: [{ type: "TAXA_EMBARQUE", amountCents: 8000 }] })] });
+    const id = r.data.item.id;
+    // compra mais cara depois da venda: o reembolso devolve o custo da venda (R$ 25), não o médio do dia
+    await c.call(entries.POST, "POST", "/e", { accountId: lat, type: "PURCHASE", points: 10000, occurredAt: "2026-10-12", costs: [{ type: "PONTOS", amountCents: 40000 }] });
+    expect((await refund(id, { feeCents: 10000, date: "2026-10-09" })).status).toBe(400); // antes da venda
+    expect((await refund(id, { feeCents: 10000, date: "2026-10-15" })).status).toBe(200);
+    expect(await acc(lat)).toMatchObject({ balance: 30000, costCents: 25000 + 40000 + 25000 });
+    const e = await prisma.entry.findFirstOrThrow({ where: { type: "SALE_REFUND" } });
+    expect(e).toMatchObject({ points: 10000, costCents: 25000 });
+    const v = await view(id);
+    // o CPF continua gasto (conta como emitido) e a taxa é de R$ 100 por CPF
+    expect(v).toMatchObject({ totalCents: 10000, resultCents: 10000, costCents: 0, points: 0, cpfs: 1, roePct: null });
+    expect(v.refund).toMatchObject({ feeCents: 10000, points: 10000, totalCents: 38000 });
+    expect(await prisma.accountBeneficiary.count({ where: { saleId: id } })).toBe(1);
+    const d = await salesDashboard(userId);
+    expect(d.totals).toMatchObject({ revenueCents: 10000, profitCents: 10000, points: 0, count: 0, refunds: 1, refundFeesCents: 10000 });
+    // não reembolsa duas vezes nem edita reembolsada
+    expect((await refund(id, { feeCents: 10000, date: "2026-10-15" })).status).toBe(409);
+    expect((await c.call(sale.PATCH, "PATCH", `/api/sales/${id}`, { origin: "OWN", accountId: lat, occurredAt: "2026-10-10", items: [flight()] }, { id })).status).toBe(409);
+  });
+
+  it("desfazer o reembolso tira as milhas de novo e a venda volta ao faturamento", async () => {
+    const id = (await newSale({ items: [flight()] })).data.item.id;
+    await refund(id, { feeCents: 10000, date: "2026-10-11" });
+    expect((await undo(id)).status).toBe(200);
+    expect(await acc(lat)).toMatchObject({ balance: 10000, costCents: 25000 });
+    expect(await prisma.entry.count({ where: { type: "SALE_REFUND" } })).toBe(0);
+    expect(await view(id)).toMatchObject({ totalCents: 30000, resultCents: 5000, points: 10000, refund: null });
+  });
+
+  it("fornecedor: o saldo volta no reembolso e não volta de novo ao excluir", async () => {
+    const sup = await prisma.supplier.create({ data: { userId, name: "Fornecedor" } });
+    const sa = await prisma.supplierAccount.create({ data: { userId, supplierId: sup.id, programId: latamId, balance: 50000, priceCpmCents: 1800 } });
+    const id = (await newSale({ origin: "SUPPLIER", accountId: null, supplierAccountId: sa.id, items: [flight({ points: 30000, salePriceCents: 70000 })] })).data.item.id;
+    await refund(id, { feeCents: 0, date: "2026-10-11" });
+    expect((await prisma.supplierAccount.findUniqueOrThrow({ where: { id: sa.id } })).balance).toBe(50000);
+    await c.call(sale.DELETE, "DELETE", `/api/sales/${id}`, undefined, { id });
+    expect((await prisma.supplierAccount.findUniqueOrThrow({ where: { id: sa.id } })).balance).toBe(50000);
+  });
+
+  it("isola por usuário", async () => {
+    const id = (await newSale({ items: [flight()] })).data.item.id;
+    const other = new Client();
+    await other.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-1" });
+    expect((await other.call(refundRoute.POST, "POST", `/api/sales/${id}/refund`, { feeCents: 0, date: "2026-10-11" }, { id })).status).toBe(404);
   });
 });

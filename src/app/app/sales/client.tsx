@@ -2,10 +2,10 @@
 // Vendas: lista (Data, Programa, Descrição, Pontos, Valor, Resultado, Ações), detalhes e a aba Clientes.
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus } from "lucide-react";
-import { api } from "@/lib/api";
+import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2 } from "lucide-react";
+import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
-import { fmtBRL, fmtDate, fmtPts } from "@/lib/format";
+import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
 import { airportLabel } from "@/domain/airports";
 import { ProgramDot } from "@/components/stat";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
@@ -24,6 +24,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   const [viewing, setViewing] = useState<SaleView | null>(null);
   const [editingSale, setEditingSale] = useState<SaleView | null>(editSale ?? null);
   const [menu, setMenu] = useState<{ s: SaleView; top: number; right: number } | null>(null);
+  const [refunding, setRefunding] = useState<SaleView | null>(null);
 
   useEffect(() => {
     const open = () => setCreating(true);
@@ -60,6 +61,14 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
     toast("Venda excluída");
     refreshSafe(router);
   }
+  async function undo(s: SaleView) {
+    const ok = await confirmDialog({ title: "Desfazer reembolso?", body: "As milhas saem da conta de novo e a venda volta a contar no faturamento.", confirmLabel: "Desfazer" });
+    if (!ok) return;
+    const r = await api(`/api/sales/${s.id}/refund`, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Reembolso desfeito");
+    refreshSafe(router);
+  }
 
   return (
     <>
@@ -89,17 +98,17 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
               </thead>
               <tbody>
                 {sales.map((s) => (
-                  <tr key={s.id}>
-                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}</td>
+                  <tr key={s.id} className={s.refund ? "bg-amber-500/5" : undefined}>
+                    <td className="whitespace-nowrap tabular-nums">{fmtDate(s.date)}{s.refund && <span className="block text-xs text-amber-300" title={`Reembolsada em ${fmtDate(s.refund.date)}`}>Reembolsada</span>}</td>
                     <td className="max-w-[180px]"><span className="flex items-center gap-2"><ProgramDot color={s.color} /><span className="truncate font-medium">{s.program}</span></span></td>
                     <td className="max-w-[260px]">
                       <button type="button" className="block max-w-full truncate text-left hover:underline" onClick={() => setViewing(s)}>{s.description}</button>
                       {s.customers.length > 0 && <span className="block truncate text-xs text-muted">{s.customers.join(", ")}</span>}
                     </td>
-                    <td className="text-right tabular-nums">{s.points ? fmtPts(s.points) : "-"}</td>
+                    <td className="text-right tabular-nums">{s.refund ? <span className="text-muted line-through" title="Milhas devolvidas à conta">{s.refund.points ? fmtPts(s.refund.points) : "-"}</span> : s.points ? fmtPts(s.points) : "-"}</td>
                     <td className="text-right tabular-nums">{s.points > 0 && s.pointsValueCents > 0 ? fmtBRL(Math.round((s.pointsValueCents * 1000) / s.points)) : "-"}</td>
                     <td className="text-right tabular-nums">{s.cpfs || "-"}</td>
-                    <td className="text-right tabular-nums">{fmtBRL(s.totalCents)}</td>
+                    <td className="text-right tabular-nums" title={s.refund ? "Taxa de administração do reembolso" : undefined}>{fmtBRL(s.totalCents)}</td>
                     <td className={`text-right font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}</td>
                     <td className="text-right tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</td>
                     <td className="text-right tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}</td>
@@ -116,14 +125,67 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {menu && (
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-44 rounded-xl border border-line bg-panel2 p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setViewing(menu.s); setMenu(null); }}><Eye className="h-4 w-4" />Ver detalhes</button>
-          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>
+          {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>}
+          {menu.s.refund
+            ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); undo(s); }}><Undo2 className="h-4 w-4" />Desfazer reembolso</button>
+            : <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setRefunding(menu.s); setMenu(null); }}><Undo2 className="h-4 w-4" />Reembolsar</button>}
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); remove(s); }}><Trash2 className="h-4 w-4" />Excluir</button>
         </div>
       )}
       {creating && <SaleDialog accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => setCreating(false)} />}
       {editingSale && <SaleDialog key={editingSale.id} editing={editingSale} accounts={accounts} suppliers={suppliers} customers={customers} cards={cards} onClose={() => { setEditingSale(null); if (sp.edit) nav("/app/sales", { replace: true }); }} />}
       {viewing && <SaleDetails sale={viewing} onClose={() => setViewing(null)} />}
+      {refunding && <RefundDialog sale={refunding} onClose={() => setRefunding(null)} />}
     </>
+  );
+}
+
+/** R$ 100 por CPF emitido: o CPF fica gasto na conta mesmo com o reembolso. */
+const REFUND_FEE_PER_CPF = "100,00";
+
+/** Reembolso: as milhas voltam para a conta, a taxa de embarque volta para o cliente e só a taxa de
+ *  administração fica no faturamento. */
+function RefundDialog({ sale: s, onClose }: { sale: SaleView; onClose: () => void }) {
+  const router = useRouter();
+  const cpfs = Math.max(1, s.cpfs);
+  const [perCpf, setPerCpf] = useState(REFUND_FEE_PER_CPF);
+  const [date, setDate] = useState(() => { const t = today(); return t < s.date.slice(0, 10) ? s.date.slice(0, 10) : t; });
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  const perCpfCents = perCpf.trim() ? parseBRLToCents(perCpf) : 0;
+  const feeCents = perCpfCents == null ? null : perCpfCents * cpfs;
+  const passCents = s.items.reduce((t, i) => t + i.costs.reduce((u, c) => u + c.amountCents, 0), 0);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (feeCents == null || feeCents < 0) return setErro("Taxa de administração inválida");
+    setBusy(true);
+    const r = await api(`/api/sales/${s.id}/refund`, "POST", { feeCents, date });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast("Venda reembolsada");
+    onClose();
+    refreshSafe(router);
+  }
+  const line = (label: string, value: React.ReactNode) => <div className="flex items-start justify-between gap-4 py-1.5 text-sm"><span className="text-muted">{label}</span><span className="text-right font-medium tabular-nums">{value}</span></div>;
+  return (
+    <Modal open onClose={onClose} title="Reembolsar venda" footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button><button form="refund-form" className="btn-primary" disabled={busy}>Reembolsar</button></>}>
+      <form id="refund-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <p className="text-sm text-muted">{s.description} · {s.program}</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Taxa de administração por CPF" required><input className="input" inputMode="decimal" placeholder="R$ 0,00" value={perCpf} onChange={(e) => setPerCpf(e.target.value)} aria-label="Taxa de administração por CPF" /></Field>
+          <Field label="Data do reembolso" required><input className="input" type="date" min={s.date.slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data do reembolso" /></Field>
+        </div>
+        <div className="divide-y divide-line rounded-xl border border-line px-3">
+          {s.origin === "OWN" ? line("Milhas que voltam para a conta", s.points ? fmtPts(s.points) : "-") : line("Milhas que voltam para o fornecedor", s.points ? fmtPts(s.points) : "-")}
+          {passCents > 0 && line("Taxa de embarque e repasses (voltam para o cliente)", fmtBRL(passCents))}
+          {line("Sai do faturamento", fmtBRL(s.totalCents))}
+          {line(`Taxa de administração (${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"} × ${fmtBRL(perCpfCents ?? 0)})`, fmtBRL(feeCents ?? 0))}
+          {line("Fica no faturamento (lucro)", <span className="text-ok">{fmtBRL(feeCents ?? 0)}</span>)}
+        </div>
+        <p className="text-xs text-muted">Os CPFs usados na emissão continuam gastos no limite da conta; por isso a taxa é cobrada por CPF.</p>
+      </form>
+    </Modal>
   );
 }
 
@@ -143,6 +205,7 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
           <div><p className="text-xs text-muted">ROE</p><p className="font-semibold tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</p></div>
           <div><p className="text-xs text-muted">Lucro por CPF</p><p className="font-semibold tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}<span className="block text-xs font-normal text-muted">{s.cpfs} {s.cpfs === 1 ? "CPF" : "CPFs"}</span></p></div>
         </div>
+        {s.refund && <Alert kind="info">Reembolsada em {fmtDate(s.refund.date)}: {fmtPts(s.refund.points)} milhas voltaram {s.origin === "OWN" ? "para a conta" : "para o fornecedor"}. No faturamento fica só a taxa de administração de {fmtBRL(s.refund.feeCents)} (a venda era de {fmtBRL(s.refund.totalCents)}).</Alert>}
         <div className="divide-y divide-line">
           {line("Data", fmtDate(s.date))}
           {line("Origem dos pontos", s.origin === "OWN" ? "Meus pontos" : "Fornecedor")}

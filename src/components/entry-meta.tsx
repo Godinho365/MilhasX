@@ -1,6 +1,6 @@
 import {
   ShoppingCart, CreditCard, Store, CalendarClock, Plane, Hotel, Gift, Coins, Wallet, Repeat, Percent,
-  Ticket, Car, BedDouble, Package, HandCoins, Hourglass, MinusCircle,
+  Ticket, Car, BedDouble, Package, HandCoins, Hourglass, MinusCircle, Undo2,
 } from "lucide-react";
 import type { EntryType } from "@/domain/ledger";
 
@@ -18,6 +18,7 @@ const ICONS: Record<EntryType, React.ComponentType<{ className?: string }>> = {
   TRANSFER_BONUS: Percent,
   TRANSFER_OUT: Repeat,
   SALE: HandCoins,
+  SALE_REFUND: Undo2,
   FLIGHT_REDEMPTION: Ticket,
   CAR_RENTAL: Car,
   HOTEL_REDEMPTION: BedDouble,
