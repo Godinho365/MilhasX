@@ -491,6 +491,7 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime  @default(now())
   key       String? // aviso que só pode sair uma vez (ex.: bônus do mês); único por usuário
+  clearedAt DateTime? // limpa da lista; a linha fica para o aviso com key não sair de novo
 
   @@unique([userId, key])
   @@index([userId, createdAt])
