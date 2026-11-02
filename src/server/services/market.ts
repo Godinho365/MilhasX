@@ -234,11 +234,16 @@ export async function deleteCustomer(userId: string, id: string) {
 }
 
 export async function listNotifications(userId: string) {
-  return prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: 50 });
+  return prisma.notification.findMany({ where: { userId, clearedAt: null }, orderBy: { createdAt: "desc" }, take: 50 });
 }
-export const unreadCount = (userId: string) => prisma.notification.count({ where: { userId, readAt: null } });
+export const unreadCount = (userId: string) => prisma.notification.count({ where: { userId, readAt: null, clearedAt: null } });
 export async function markAllRead(userId: string) {
   await prisma.notification.updateMany({ where: { userId, readAt: null }, data: { readAt: new Date() } });
+}
+/** Tira tudo da lista. Não apaga: o aviso com key (bônus do mês) continua registrado e não sai de novo. */
+export async function clearNotifications(userId: string, now = new Date()) {
+  await markAllRead(userId);
+  await prisma.notification.updateMany({ where: { userId, clearedAt: null }, data: { clearedAt: now } });
 }
 
 export async function reportOverview(userId: string, opts: { from?: Date; programId?: string; holderId?: string }) {

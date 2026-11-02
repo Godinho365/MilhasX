@@ -17,6 +17,7 @@ import * as entry from "@/app/api/entries/[id]/route";
 import * as summary from "@/app/api/summary/route";
 import * as alerts from "@/app/api/alerts/route";
 import * as notifications from "@/app/api/notifications/route";
+import * as notificationsClear from "@/app/api/notifications/clear/route";
 import * as promotions from "@/app/api/promotions/route";
 import * as adminPromotions from "@/app/api/admin/promotions/route";
 import * as adminGuides from "@/app/api/admin/guides/route";
@@ -179,6 +180,28 @@ describe("promoções", () => {
     expect((await a.call(promotions.GET, "GET", "/api/promotions")).data.items).toHaveLength(1);
     expect((await a.call(promotions.GET, "GET", "/api/promotions?history=1")).data.items).toHaveLength(1);
     expect((await admin.call(adminPromotions.POST, "POST", "/p", { ...body, url: "javascript:alert(1)" })).status).toBe(400);
+  });
+});
+
+describe("notificações", () => {
+  it("limpar tira tudo da lista só do usuário e o aviso do mês não volta", async () => {
+    const ua = (await prisma.user.findUniqueOrThrow({ where: { email: "a@x.test" } })).id;
+    const ub = (await prisma.user.findUniqueOrThrow({ where: { email: "b@x.test" } })).id;
+    await prisma.notification.createMany({ data: [
+      { userId: ua, title: "Lançamento recorrente", body: "x" },
+      { userId: ua, title: "Bônus", body: "y", key: "bonus:2026-11", readAt: new Date() },
+      { userId: ub, title: "Da Bia", body: "z" },
+    ] });
+    expect((await a.call(notifications.GET, "GET", "/n")).data).toMatchObject({ unread: 1, items: { length: 2 } });
+
+    expect((await a.call(notificationsClear.POST, "POST", "/c")).status).toBe(200);
+    expect((await a.call(notifications.GET, "GET", "/n")).data).toMatchObject({ unread: 0, items: [] });
+    expect((await b.call(notifications.GET, "GET", "/n")).data.items).toHaveLength(1);
+
+    // a linha continua guardada: o aviso com a mesma key não é criado de novo
+    expect(await prisma.notification.count({ where: { userId: ua } })).toBe(2);
+    await prisma.notification.create({ data: { userId: ua, title: "Nova", body: "w" } });
+    expect((await a.call(notifications.GET, "GET", "/n")).data).toMatchObject({ unread: 1, items: [{ title: "Nova" }] });
   });
 });
 

@@ -4,14 +4,17 @@ import { requirePageUser } from "@/server/session";
 import { listNotifications } from "@/server/services/market";
 import { PageHeader } from "@/components/stat";
 import { Empty } from "@/components/ui";
-import { MarkRead } from "./client";
+import { MarkRead, ClearAll } from "./client";
 
 export default async function NotificationsPage() {
   const user = await requirePageUser();
   const items = await listNotifications(user.id);
   return (
     <>
-      <PageHeader title="Notificações" subtitle="Alertas de saldo e de ofertas">{items.some((n) => !n.readAt) && <MarkRead />}</PageHeader>
+      <PageHeader title="Notificações" subtitle="Alertas de saldo e de ofertas">
+        {items.some((n) => !n.readAt) && <MarkRead />}
+        {items.length > 0 && <ClearAll />}
+      </PageHeader>
       {items.length === 0 ? <Empty title="Nenhuma notificação" icon={<Bell className="h-5 w-5" />} /> : (
         <ul className="card divide-y divide-line overflow-hidden">
           {items.map((n) => (
