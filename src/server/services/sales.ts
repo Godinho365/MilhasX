@@ -371,10 +371,17 @@ export type SaleView = ReturnType<typeof present>;
 
 export type SaleFilter = { q?: string; from?: Date; to?: Date; programId?: string; customerId?: string; sort?: "occurredAt" | "points" | "totalCents"; order?: "asc" | "desc"; holderId?: string };
 
+/** Dia da venda (AAAA-MM-DD): a venda só com data fica à meia-noite UTC; a do CRM tem hora e vale o dia em Brasília. */
+export const saleDay = (at: Date) => (at.getTime() % 86_400_000 === 0 ? at.toISOString().slice(0, 10) : brDay(at));
+
+/** Filtro por dia: from e to são dias inteiros (to inclui o dia todo, até 23:59 em Brasília). */
 export async function listSales(userId: string, f: SaleFilter = {}) {
+  const fromDay = f.from?.toISOString().slice(0, 10);
+  const toDay = f.to?.toISOString().slice(0, 10);
   const where: Prisma.SaleWhereInput = {
     userId,
-    occurredAt: f.from || f.to ? { gte: f.from, lte: f.to } : undefined,
+    // janela um pouco maior no banco; o corte exato pelo dia da venda é feito abaixo
+    occurredAt: f.from || f.to ? { gte: f.from && new Date(`${fromDay}T00:00:00Z`), lt: f.to && new Date(new Date(`${toDay}T00:00:00Z`).getTime() + 86_400_000 + BR_OFFSET_MS) } : undefined,
     items: f.customerId ? { some: { customers: { some: { id: f.customerId } } } } : undefined,
     OR: f.programId || f.holderId
       ? [
@@ -390,7 +397,7 @@ export async function listSales(userId: string, f: SaleFilter = {}) {
       : undefined,
   };
   const rows = await prisma.sale.findMany({ where, include: saleInclude, orderBy: [{ [f.sort ?? "occurredAt"]: f.order ?? "desc" }, { createdAt: "desc" }], take: 500 });
-  return rows.map(present);
+  return rows.filter((r) => (!fromDay || saleDay(r.occurredAt) >= fromDay) && (!toDay || saleDay(r.occurredAt) <= toDay)).map(present);
 }
 
 export async function getSale(userId: string, id: string) {

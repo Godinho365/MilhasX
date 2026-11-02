@@ -117,6 +117,24 @@ describe("venda de emissão", () => {
   });
 });
 
+describe("filtro por período", () => {
+  it("o dia final entra inteiro, inclusive a venda do CRM às 22h em Brasília", async () => {
+    await newSale({ occurredAt: "2026-10-09", items: [flight({ points: 1000 })] });
+    await newSale({ occurredAt: "2026-10-10", items: [flight({ points: 1000 })] });
+    const late = (await newSale({ occurredAt: "2026-10-10", items: [flight({ points: 1000 })] })).data.item.id;
+    // venda com hora: 10/10 às 22h em Brasília = 11/10 01:00 UTC
+    await prisma.sale.update({ where: { id: late }, data: { occurredAt: new Date("2026-10-11T01:00:00Z") } });
+    await newSale({ occurredAt: "2026-10-11", items: [flight({ points: 1000 })] });
+
+    const day = (await c.call(sales.GET, "GET", "/api/sales?from=2026-10-10&to=2026-10-10")).data.items;
+    expect(day).toHaveLength(2);
+    expect(day.map((x: { id: string }) => x.id)).toContain(late);
+    expect((await c.call(sales.GET, "GET", "/api/sales?from=2026-10-11&to=2026-10-31")).data.items).toHaveLength(1);
+    expect((await c.call(sales.GET, "GET", "/api/sales?to=2026-10-09")).data.items).toHaveLength(1);
+    expect((await c.call(sales.GET, "GET", "/api/sales")).data.items).toHaveLength(4);
+  });
+});
+
 describe("clientes", () => {
   it("cadastra com tipo, identificador e documentos; edita; mostra a última compra", async () => {
     const r = await c.call(customers.POST, "POST", "/c", { name: "Agência X", kind: "AGENCY", docType: "CNPJ", docNumber: "00.000.000/0000-00", email: "X@Agencia.test", phone: "(11) 90000-0000", documents: [{ type: "RG", number: "12.345.678-9" }] });

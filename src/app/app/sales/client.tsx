@@ -11,12 +11,13 @@ import { ProgramDot } from "@/components/stat";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { maskDoc } from "../programs/holder-dialog";
+import { DateRangePicker, rangeLabel, type DayRange } from "@/components/date-range";
 import { SaleDialog, type SaleAccount, type SaleSupplier, type SaleCustomer, type SaleCard } from "./sale-dialog";
 import type { SaleView } from "@/server/services/sales";
 
 const COST_LABELS: Record<string, string> = { TAXA_EMBARQUE: "Taxa de embarque", IOF: "IOF", BAGAGEM: "Bagagem", ASSENTO: "Assento", COMPLETAR_PONTOS: "Completar pontos", OUTROS: "Outros" };
 
-export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, editSale }: { sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; editSale?: SaleView | null }) {
+export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, editSale }: { sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; editSale?: SaleView | null }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
@@ -89,7 +90,8 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2">
-        <form className="relative min-w-0 flex-1" onSubmit={(e) => { e.preventDefault(); go({ q: String(new FormData(e.currentTarget).get("q") || "") || null }); }}>
+        <DateRangePicker value={range} onChange={(r) => go(r ? { from: r.from, to: r.to, periodo: null } : { from: null, to: null, periodo: "tudo" })} />
+        <form className="relative min-w-[220px] flex-1" onSubmit={(e) => { e.preventDefault(); go({ q: String(new FormData(e.currentTarget).get("q") || "") || null }); }}>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input className="input pl-9" name="q" placeholder="Buscar por descrição, localizador, cliente ou aeroporto" defaultValue={params.get("q") ?? ""} key={params.get("q") ?? ""} aria-label="Buscar vendas" />
         </form>
@@ -101,8 +103,8 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       </div>
 
       {sales.length === 0 ? (
-        <Empty title="Nenhuma venda cadastrada" icon={<HandCoins className="h-5 w-5" />}>
-          <p className="max-w-sm text-sm text-muted">{params.get("q") || params.get("customerId") ? "Nenhuma venda com esses filtros." : "Comece registrando sua primeira venda."}</p>
+        <Empty title={params.get("q") || params.get("customerId") || range ? "Nenhuma venda" : "Nenhuma venda cadastrada"} icon={<HandCoins className="h-5 w-5" />}>
+          <p className="max-w-sm text-sm text-muted">{params.get("q") || params.get("customerId") || range ? `Nenhuma venda ${range ? `em ${rangeLabel(range)}` : "com esses filtros"}.` : "Comece registrando sua primeira venda."}</p>
           <button className="btn-primary" onClick={() => setCreating(true)}>Registrar venda</button>
         </Empty>
       ) : (
