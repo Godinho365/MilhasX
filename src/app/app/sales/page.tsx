@@ -11,13 +11,19 @@ import { PageHeader, Stat } from "@/components/stat";
 import { Segmented } from "@/components/ui";
 import { SalesClient, CustomersClient } from "./client";
 import { fmtBRL, fmtPts } from "@/lib/format";
+import { brDay } from "@/domain/brasilia";
+import { monthRange } from "@/lib/day-range";
 
 export default async function SalesPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const user = await requirePageUser();
   const sp = await searchParams;
   const tab = sp.tab === "clientes" ? "clientes" : "vendas";
   const holderId = await selectedHolderId(user.id);
-  const parsed = saleQuerySchema.safeParse(Object.fromEntries(Object.entries(sp).filter(([k, v]) => v && k !== "tab")));
+  // período: o que veio na URL; sem nada, o mês atual (em Brasília); "periodo=tudo" mostra todas
+  const month = monthRange(brDay());
+  const period = sp.from || sp.to || sp.periodo === "tudo" ? sp : { ...sp, ...month };
+  const parsed = saleQuerySchema.safeParse(Object.fromEntries(Object.entries(period).filter(([k, v]) => v && k !== "tab" && k !== "periodo")));
+  const range = parsed.success && (parsed.data.from || parsed.data.to) ? { from: period.from ?? period.to!, to: period.to ?? period.from! } : null;
   const [sales, customers, accounts, suppliers, cards, now] = await Promise.all([
     listSales(user.id, { ...(parsed.success ? parsed.data : {}), holderId }),
     listCustomers(user.id),
@@ -55,6 +61,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
           )}
           <SalesClient
             sp={sp}
+            range={range}
             sales={sales}
             editSale={editSale}
             accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} ${a.holder.name}`, balance: a.balance, costCents: a.costCents }))}
