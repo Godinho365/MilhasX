@@ -1,11 +1,9 @@
-import { ProgramLogo } from "@/components/program-logo";
 import { notFound } from "next/navigation";
 import { Gift } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { accountDetail, credentialsEnabled } from "@/server/services/accounts";
 import { DomainError, prisma } from "@/server/db";
 import { fmtPts, shortName } from "@/lib/format";
-import { ProgramDot } from "@/components/stat";
 import { Recurrences, Credentials } from "./client";
 import { BeneficiaryLimit } from "./beneficiaries";
 import { bonusUsage } from "@/server/services/transfer-bonus";
@@ -13,6 +11,7 @@ import { brWindows } from "@/domain/brasilia";
 import { accountsPeriod, periodFromQuery } from "@/server/services/account-month";
 import { AccountToolbar, MonthHistory } from "./month";
 import { PeriodCards } from "./period-cards";
+import { AccountHeader } from "./header";
 
 export default async function AccountPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ de?: string; ate?: string; periodo?: string }> }) {
   const user = await requirePageUser();
@@ -33,13 +32,12 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <ProgramLogo programId={a.program.id} name={a.program.name} color={a.program.color} version={a.program.logoUpdatedAt?.getTime().toString()} size={44} />
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{a.program.name}</h1>
-          <p className="flex items-center gap-1.5 text-sm text-muted"><ProgramDot color={a.program.color} />{a.holder.name}</p>
-        </div>
-      </div>
+      <AccountHeader
+        account={{ id: a.id, nickname: a.nickname, cpfAvailable: a.cpfAvailable, transferBonusPct: a.transferBonusPct, transferBonusCap: a.transferBonusCap, tags: a.tags, programName: a.program.name, holderName: a.holder.name, archived: a.archived, pinned: a.pinned, holderId: a.holderId }}
+        title={a.nickname || a.holder.name}
+        program={{ id: a.program.id, code: a.program.code, color: a.program.color, logo: a.program.logoUpdatedAt?.getTime().toString() }}
+        phone={a.holder.phone}
+      />
 
       <AccountToolbar base={`/app/programs/${a.id}`} range={range} showValues={showValues} hasCpfs={hasCpfs} exportQuery={`accountId=${a.id}`} />
 
