@@ -91,12 +91,29 @@ export interface CardInput {
   dueDay: number;
   annualFeeCents: number;
   feeWaiverCents?: number | null;
+  bank?: string | null; brandTier?: string | null; last4?: string | null; printedName?: string | null;
+  modality?: string | null; cardType?: string | null; status?: string;
+  expMonth?: number | null; expYear?: number | null; limitCents?: number | null; annualFeeMonth?: number | null;
+  color?: string | null; benefits?: string[]; benefitsUrl?: string | null; tags?: string[]; notes?: string | null;
+}
+
+/** Textos vazios viram nulo; tags e benefícios sem repetição. */
+function cardData(input: CardInput) {
+  const t = (v?: string | null) => v?.trim() || null;
+  return {
+    ...input, name: input.name.trim(), brand: t(input.brand), bank: t(input.bank), brandTier: t(input.brandTier), printedName: t(input.printedName?.toUpperCase()),
+    benefitsUrl: t(input.benefitsUrl), notes: t(input.notes),
+    ...(input.tags ? { tags: [...new Set(input.tags.map((x) => x.trim()).filter(Boolean))] } : {}),
+    ...(input.benefits ? { benefits: [...new Set(input.benefits)] } : {}),
+  };
 }
 
 export async function createCard(userId: string, input: CardInput) {
   const acc = await prisma.account.findFirst({ where: { id: input.accountId, userId } });
   if (!acc) throw new DomainError(404, "Conta não encontrada");
-  return prisma.creditCard.create({ data: { ...input, userId, name: input.name.trim(), brand: input.brand?.trim() || null } });
+  const card = await prisma.creditCard.create({ data: { ...cardData(input), userId } });
+  await prisma.cardActivity.create({ data: { cardId: card.id, kind: "ACTIVITY", text: "Cartão cadastrado" } });
+  return card;
 }
 
 /** Edita o cartão; as faturas em aberto são recalculadas (pontos e parcela da anuidade). */
@@ -107,8 +124,10 @@ export async function updateCard(userId: string, id: string, input: CardInput) {
   if (!acc) throw new DomainError(404, "Conta não encontrada");
   const hasClosed = await prisma.cardInvoice.count({ where: { cardId: id, status: "CLOSED" } });
   if (hasClosed && input.accountId !== card.accountId) throw new DomainError(409, "O cartão já tem faturas fechadas nesta conta; a conta que recebe os pontos não pode mudar.");
-  const data = { ...input, name: input.name.trim(), brand: input.brand?.trim() || null, feeWaiverCents: input.feeWaiverCents || null };
+  const data = { ...cardData(input), feeWaiverCents: input.feeWaiverCents || null };
   const updated = await prisma.creditCard.update({ where: { id }, data });
+  const STATUS: Record<string, string> = { ACTIVE: "Ativo", BLOCKED: "Bloqueado", CANCELED: "Cancelado", EXPIRED: "Vencido" };
+  await prisma.cardActivity.create({ data: { cardId: id, kind: "ACTIVITY", text: input.status && input.status !== card.status ? `Situação: ${STATUS[card.status] ?? card.status} → ${STATUS[input.status] ?? input.status}` : "Cartão editado" } });
   const open = await prisma.cardInvoice.findMany({ where: { cardId: id, status: "OPEN" } });
   for (const i of open) {
     await prisma.cardInvoice.update({

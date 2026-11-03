@@ -5,9 +5,11 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { watchLinkClicks, refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, LineChart, FileText, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
+  LayoutDashboard, LineChart, FileText, CreditCard, Percent, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Palette, Plane, ChevronDown, Users, Gem, Landmark, Briefcase,
+  Ticket, ArrowLeftRight, CalendarClock, Crown, Lightbulb, ShoppingCart, Luggage, FileSpreadsheet, ListChecks, Workflow, Target, UserRound,
+  Truck, IdCard, MapPinned, Wallet,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -24,7 +26,7 @@ import { AssistantButton } from "./assistant";
 type Icon = React.ComponentType<{ className?: string }>;
 
 type NavLeaf = { href: string; label: string; icon: Icon; badge?: "unread" | "news"; external?: boolean };
-type NavGroup = { key: string; label: string; icon: Icon; children: { href: string; label: string }[] };
+type NavGroup = { key: string; label: string; icon: Icon; children: { href: string; label: string; icon: Icon }[] };
 type NavItem = NavLeaf | NavGroup;
 const isGroup = (it: NavItem): it is NavGroup => "children" in it;
 
@@ -37,46 +39,42 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: "Operação", items: [
     { href: "/app/sales", label: "Vendas", icon: ReceiptText },
     { key: "crm", label: "CRM", icon: KanbanSquare, children: [
-      { href: "/app/crm", label: "CRM Passagens" },
-      { href: "/app/crm-milhas", label: "CRM Milhas" },
+      { href: "/app/crm", label: "CRM Passagens", icon: Ticket },
+      { href: "/app/crm-milhas", label: "CRM Milhas", icon: Coins },
     ] },
-    { key: "voos", label: "Voos", icon: Plane, children: [
-      { href: "/app/buscador", label: "Buscador" },
-      { href: "/app/tradutor", label: "Tradutor de milhas" },
-    ] },
+    { href: "/app/buscador", label: "Buscador", icon: Plane },
   ] },
   { group: "Recursos", items: [
     { key: "milhas", label: "Milhas", icon: WalletCards, children: [
-      { href: "/app", label: "Painel" },
-      { href: "/app/entries", label: "Extrato" },
-      { href: "/app/programs", label: "Central de Contas" },
-      { href: "/app/credit-cards", label: "Central de Cartões" },
-      { href: "/app/entries?novo=transfer", label: "Transferência" },
-      { href: "/app/entries?status=PENDING", label: "Agendamentos" },
-      { href: "/app/milhas/clubes", label: "Clubes" },
-      { href: "/app/milhas/sugerir", label: "Sugerir Conta" },
-      { href: "/app/milhas/sugestor-compra", label: "Sugestor de Compra" },
-      { href: "/app/milhas/viaje-facil", label: "ViajeFácil" },
+      { href: "/app", label: "Painel", icon: LayoutDashboard },
+      { href: "/app/entries", label: "Extrato", icon: FileText },
+      { href: "/app/programs", label: "Central de Contas", icon: Wallet },
+      { href: "/app/credit-cards", label: "Central de Cartões", icon: CreditCard },
+      { href: "/app/entries?novo=transfer", label: "Transferência", icon: ArrowLeftRight },
+      { href: "/app/entries?status=PENDING", label: "Agendamentos", icon: CalendarClock },
+      { href: "/app/milhas/clubes", label: "Clubes", icon: Crown },
+      { href: "/app/milhas/sugerir", label: "Sugerir Conta", icon: Lightbulb },
+      { href: "/app/milhas/sugestor-compra", label: "Sugestor de Compra", icon: ShoppingCart },
+      { href: "/app/milhas/viaje-facil", label: "ViajeFácil", icon: Luggage },
     ] },
     { key: "financeiro", label: "Financeiro", icon: Landmark, children: [
-      { href: "/app/financeiro", label: "Financeiro" },
-      { href: "/app/financeiro/notas", label: "Notas Fiscais" },
+      { href: "/app/financeiro", label: "Financeiro", icon: Landmark },
+      { href: "/app/financeiro/notas", label: "Notas Fiscais", icon: FileSpreadsheet },
     ] },
-    { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
   ] },
   { group: "Gestão", items: [
     { key: "equipe", label: "Equipe", icon: Briefcase, children: [
-      { href: "/app/equipe", label: "Equipe" },
-      { href: "/app/equipe/tarefas", label: "Tarefas" },
-      { href: "/app/equipe/processos", label: "Processos" },
-      { href: "/app/equipe/metas", label: "Metas" },
+      { href: "/app/equipe", label: "Equipe", icon: Users },
+      { href: "/app/equipe/tarefas", label: "Tarefas", icon: ListChecks },
+      { href: "/app/equipe/processos", label: "Processos", icon: Workflow },
+      { href: "/app/equipe/metas", label: "Metas", icon: Target },
     ] },
     { key: "contatos", label: "Contatos", icon: Contact, children: [
-      { href: "/app/sales?tab=clientes", label: "Clientes" },
-      { href: "/app/management?tab=fornecedores", label: "Fornecedores" },
-      { href: "/app/contatos/passageiros", label: "Passageiros" },
-      { href: "/app/contatos/interesses", label: "Interesses de Viagem" },
+      { href: "/app/sales?tab=clientes", label: "Clientes", icon: UserRound },
+      { href: "/app/management?tab=fornecedores", label: "Fornecedores", icon: Truck },
+      { href: "/app/contatos/passageiros", label: "Passageiros", icon: IdCard },
+      { href: "/app/contatos/interesses", label: "Interesses de Viagem", icon: MapPinned },
     ] },
   ] },
   { group: "Conta", items: [
@@ -91,10 +89,9 @@ const NAV_OPEN_KEY = (key: string) => `mm:nav-${key}`;
 const NAV_HREFS = NAV.flatMap((g) => g.items.flatMap((it) => (isGroup(it) ? it.children.map((c) => c.href) : [it.href])));
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
-const SIM_LABELS: Record<string, string> = { "purchase/bonificada": "Compra Bonificada", purchase: "Compra Bonificada", "purchase/store-comparison": "Pontos vs Cashback", "purchase/pontos": "Compra de Pontos", transfer: "Transferência", flight: "Passagem Aérea", hotel: "Hospedagem", sale: "Venda", "supplier-ranking": "Melhor fornecedor" };
 const TITLES: [string, string][] = [
   ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
-  ["/app/credit-cards", "Cartões de Crédito"], ["/app/simulators", "Simuladores"], ["/app/sales", "Vendas"],
+  ["/app/credit-cards", "Central de Cartões"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
   ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
 ];
@@ -102,7 +99,7 @@ const TITLES: [string, string][] = [
 // Tag dos guias que explica cada página (botão "Tutorial" do cabeçalho)
 const TUTORIAL_TAGS: [string, string][] = [
   ["/app/entries", "Extrato"], ["/app/credit-cards", "Cartões"],
-  ["/app/simulators", "Cálculos"], ["/app/reports", "Métricas"], ["/app/programs", "Programas"],
+  ["/app/reports", "Métricas"], ["/app/programs", "Programas"],
 ];
 
 const BOTTOM: { href: string; label: string; icon: Icon }[] = [
@@ -138,9 +135,7 @@ export function Shell(props: {
   const fab =
     path === "/app/programs" && search.get("view") === "titulares"
       ? { label: "Novo titular", event: "mm:new-holder", icon: <UserPlus className="h-5 w-5" /> }
-      : path.startsWith("/app/simulators/")
-        ? { label: "Simular", event: "mm:simulate", icon: <Calculator className="h-5 w-5" /> }
-        : path === "/app/crm" && search.get("view") !== "dashboard"
+      : path === "/app/crm" && search.get("view") !== "dashboard"
           ? { label: "Novo pedido", event: "mm:new-order", icon: <FilePlus2 className="h-5 w-5" /> }
         : path === "/app/crm-milhas" && !search.get("view") // só no Kanban, que é quem abre a negociação nova
           ? { label: "Nova negociação", event: "mm:new-deal", icon: <Coins className="h-5 w-5" /> }
@@ -184,12 +179,9 @@ export function Shell(props: {
     : [...props.guides].sort((a, b) => Number(b.video) - Number(a.video)).find((g) => g.tags.includes(tutorialTag));
   // Terceiro nível do caminho nas abas dos relatórios (Painel › Relatórios › Compras)
   const reportTab = REPORT_LABELS[path.split("/")[3] ?? ""];
-  const simTab = SIM_LABELS[path.replace(/^\/app\/simulators\//, "")];
   const sub = path.startsWith("/app/reports/") && reportTab
     ? { parent: "/app/reports", label: reportTab }
-    : path.startsWith("/app/simulators/") && simTab
-      ? { parent: "/app/simulators", label: simTab }
-      : null;
+    : null;
 
   useEffect(() => {
     try {
@@ -299,10 +291,11 @@ export function Shell(props: {
                 key={c.href}
                 href={c.href}
                 aria-current={active(c.href) ? "page" : undefined}
-                className={`relative block rounded-lg py-[6px] pl-[37px] pr-2.5 text-[13px] font-medium transition-colors ${active(c.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
+                className={`relative flex items-center gap-2 rounded-lg py-[6px] pl-[30px] pr-2.5 text-[13px] font-medium transition-colors ${active(c.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
               >
                 {active(c.href) && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent-light" aria-hidden />}
-                {c.label}
+                <c.icon className="h-[15px] w-[15px] shrink-0 opacity-80" aria-hidden />
+                <span className="truncate">{c.label}</span>
               </Link>
             ))}
           </div>
