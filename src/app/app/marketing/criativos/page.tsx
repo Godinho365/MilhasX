@@ -28,7 +28,7 @@ export default async function CriativosPage() {
       </section>
       <section className="grid gap-3 sm:grid-cols-2">
         <div className="card card-pad"><p className="flex items-center gap-2 font-medium"><ImageIcon className="h-4 w-4 text-muted" />Enquanto isso</p><p className="mt-1 text-sm text-muted">Monte os pacotes na <Link href="/app/marketing/vitrine" className="text-accent-light hover:underline">Vitrine</Link> e compartilhe o link no Instagram e no WhatsApp.</p></div>
-        <div className="card card-pad"><p className="flex items-center gap-2 font-medium"><Palette className="h-4 w-4 text-muted" />Sua marca</p><p className="mt-1 text-sm text-muted">O banner e a cor da sua página ficam em <Link href="/editor" className="text-accent-light hover:underline">Marketing › Site</Link>.</p></div>
+        <div className="card card-pad"><p className="flex items-center gap-2 font-medium"><Palette className="h-4 w-4 text-muted" />Sua marca</p><p className="mt-1 text-sm text-muted">Logo e cores da agência ficam em <Link href="/app/marketing/site" className="text-accent-light hover:underline">Marketing › Site</Link>.</p></div>
       </section>
     </div>
   );

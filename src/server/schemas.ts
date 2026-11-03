@@ -682,3 +682,10 @@ export const showcaseSchema = z.object({
 });
 export const showcaseSettingsSchema = z.object({ active: z.boolean(), title: optText(80) });
 export const showcaseMoveSchema = z.object({ dir: z.union([z.literal(-1), z.literal(1)]) });
+
+export const siteSaveSchema = z.object({
+  slug: z.string().trim().toLowerCase().min(3, "Mínimo de 3 caracteres").max(40).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "Use letras minúsculas, números e hífen").nullable().optional(),
+  theme: z.string().trim().max(30),
+  published: z.boolean(),
+  content: z.unknown(), // normalizado no serviço (domain/site.ts)
+});

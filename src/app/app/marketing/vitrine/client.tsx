@@ -191,12 +191,12 @@ function ConfigDialog({ settings, publicUrl, onClose }: { settings: Settings; pu
   return (
     <Modal open onClose={onClose} size="sm" title="Vitrine pública" footer={settings ? <><button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button><button type="button" className="btn-primary" onClick={save}>Salvar</button></> : undefined}>
       {!settings ? (
-        <p className="text-sm text-muted">A vitrine usa o endereço da sua página de atendimento. Crie a página primeiro em <Link href="/editor" className="text-accent-light hover:underline">Marketing › Site</Link>.</p>
+        <p className="text-sm text-muted">A vitrine usa o mesmo endereço do site da agência. Escolha o endereço primeiro em <Link href="/app/marketing/site" className="text-accent-light hover:underline">Marketing › Site</Link>.</p>
       ) : (
         <div className="space-y-4">
           {erro && <Alert>{erro}</Alert>}
           <p className="text-sm text-muted">Compartilhe o endereço com quem quiser: os cards visíveis aparecem sem login.</p>
-          <Field label="Endereço da vitrine" hint="Para mudar, troque o endereço da página em Marketing › Site">
+          <Field label="Endereço da vitrine" hint="Para mudar, troque o endereço na Central de atendimento">
             <span className="flex gap-2"><input className="input font-mono text-xs" readOnly value={publicUrl ?? ""} /><button type="button" className="btn-ghost h-10 border border-line" onClick={() => publicUrl && navigator.clipboard.writeText(publicUrl).then(() => toast("Endereço copiado"))} aria-label="Copiar endereço"><Copy className="h-4 w-4" /></button></span>
           </Field>
           <Field label="Título da vitrine"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} placeholder="Pacotes em destaque" /></Field>

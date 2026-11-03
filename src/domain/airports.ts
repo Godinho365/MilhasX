@@ -88,3 +88,17 @@ export const airportLabel = (code: string | null | undefined) => {
   const a = AIRPORTS.find((x) => x.code === code);
   return a ? `${a.code} — ${a.city} (${a.name})` : code ?? "";
 };
+
+const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+/**
+ * Código do aeroporto a partir do que a pessoa digitou: código, nome da cidade ou do aeroporto, sem ligar
+ * para acento e maiúsculas. Cidade com mais de um aeroporto (Rio, São Paulo, BH) fica com o principal, o
+ * primeiro da lista. Nome antes do código: "Rio de Janeiro" começa com três letras e virava "RIO".
+ */
+export function airportCodeOf(v: string) {
+  const t = v.trim();
+  const f = fold(t);
+  const byName = f && AIRPORTS.find((a) => fold(a.city) === f || fold(a.name) === f);
+  if (byName) return byName.code;
+  return /^[A-Za-z]{3}(\s|$|—)/.test(t) ? t.slice(0, 3).toUpperCase() : "";
+}

@@ -46,7 +46,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { key: "marketing", label: "Marketing", icon: Megaphone, children: [
       { href: "/app/marketing/criativos", label: "Criativos", icon: Sparkles },
       { href: "/app/marketing/vitrine", label: "Vitrine", icon: Store },
-      { href: "/editor", label: "Site", icon: Globe },
+      { href: "/app/marketing/site", label: "Site", icon: Globe },
       { href: "/app/marketing/trafego", label: "Tráfego", icon: TrendingUp },
     ] },
   ] },
@@ -96,7 +96,7 @@ const NAV_HREFS = NAV.flatMap((g) => g.items.flatMap((it) => (isGroup(it) ? it.c
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const TITLES: [string, string][] = [
   ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
-  ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
+  ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/site", "Site"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
   ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
 ];
