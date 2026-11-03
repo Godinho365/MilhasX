@@ -4,7 +4,7 @@ import { Wallet, Package, DollarSign, Gift, Percent, CreditCard, Users, Calculat
 import { requirePageUser } from "@/server/session";
 import { accountDetail, credentialsEnabled } from "@/server/services/accounts";
 import { DomainError, prisma } from "@/server/db";
-import { fmtBRL, fmtDate, fmtPts, monthLabel } from "@/lib/format";
+import { fmtBRL, fmtDate, fmtPts, monthLabel, shortName } from "@/lib/format";
 import { ProgramDot } from "@/components/stat";
 import { Recurrences, Credentials } from "./client";
 import { BeneficiaryLimit } from "./beneficiaries";
@@ -74,7 +74,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
       <MonthHistory data={m} accountId={a.id} color={a.program.color} showValues={showValues} />
 
       {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
-      {hasCpfs && <div id="cpfs" className="mt-4 scroll-mt-20"><BeneficiaryLimit accountId={a.id} /></div>}
+      {hasCpfs && <div id="cpfs" className="mt-4 scroll-mt-20"><BeneficiaryLimit accountId={a.id} title={`${a.program.name} ${shortName(a.holder.name)}`} /></div>}
       {bonus && <div className="mt-4"><BonusCapCard b={bonus} /></div>}
 
       <Recurrences

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Minus, ArrowLeftRight, Users, Upload, Eye, EyeOff, CalendarDays, ChevronLeft, ChevronRight, Search, ArrowDownLeft, ArrowUpRight, FileText } from "lucide-react";
 import { openEntryForm } from "@/components/entry-forms";
+import { openCpfManager } from "./beneficiaries";
 import { api } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { toast } from "@/components/feedback";
@@ -29,7 +30,7 @@ export function AccountToolbar({ accountId, month, prev, next, showValues, hasCp
       <button type="button" className="btn-primary h-10" onClick={() => openEntryForm("credit")}><Plus className="h-4 w-4" />Adicionar milhas</button>
       <button type="button" className={btn} onClick={() => openEntryForm("debit")}><Minus className="h-4 w-4" />Debitar milhas</button>
       <button type="button" className={btn} onClick={() => openEntryForm("transfer")}><ArrowLeftRight className="h-4 w-4" />Transferir milhas</button>
-      {hasCpfs && <button type="button" className={btn} onClick={() => document.getElementById("cpfs")?.scrollIntoView({ behavior: "smooth", block: "start" })}><Users className="h-4 w-4" />Gerir CPFs</button>}
+      {hasCpfs && <button type="button" className={btn} onClick={openCpfManager}><Users className="h-4 w-4" />Gerir CPFs</button>}
       <a className={`${btn} w-10 px-0`} href={`/api/entries/export?accountId=${accountId}&from=${month}-01&to=${lastDay}`} aria-label={`Exportar lançamentos de ${monthLabel(month)}`} title="Exportar o mês (CSV)"><Upload className="h-4 w-4" /></a>
       <button type="button" className={`${btn} w-10 px-0`} onClick={toggleValues} aria-label={showValues ? "Ocultar valores" : "Mostrar valores"} title={showValues ? "Ocultar valores" : "Mostrar valores"}>{showValues ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}</button>
       <div className="ml-auto flex items-center gap-1 rounded-xl border border-line bg-panel px-2 py-1" role="group" aria-label="Mês">
