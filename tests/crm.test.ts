@@ -5,6 +5,10 @@ import * as register from "@/app/api/auth/register/route";
 import * as orders from "@/app/api/orders/route";
 import * as order from "@/app/api/orders/[id]/route";
 import * as move from "@/app/api/orders/[id]/move/route";
+import * as pipelinesRoute from "@/app/api/pipelines/route";
+import * as pipelineRoute from "@/app/api/pipelines/[id]/route";
+import * as stagesRoute from "@/app/api/pipelines/[id]/stages/route";
+import * as stageRoute from "@/app/api/pipeline-stages/[id]/route";
 import * as archive from "@/app/api/orders/[id]/archive/route";
 import * as quotes from "@/app/api/quotes/route";
 import * as quote from "@/app/api/quotes/[id]/route";
@@ -24,6 +28,10 @@ beforeEach(async () => {
   c = new Client();
   userId = (await c.call(register.POST, "POST", "/r", { name: "Ana", email: "ana@x.test", password: "senha-forte-1" })).data.user.id;
 });
+type Pipe = { id: string; name: string; stages: { id: string; name: string; color: string; orders: number }[] };
+const pipes = async (who = c) => (await who.call(pipelinesRoute.GET, "GET", "/api/pipelines")).data.items as Pipe[];
+const stageOf = async (pipeline: string, stage: string) => (await pipes()).find((p) => p.name === pipeline)!.stages.find((s) => s.name === stage)!.id;
+
 const body = (over: Record<string, unknown> = {}) => ({
   customerName: "Godinho", customerPhone: "(21) 99999-0000", tripType: "ONE_WAY", cabin: "ECONOMY",
   segments: [{ origin: "BSB", destination: "GIG", date: "2027-01-23" }], adults: 1, children: 0, infants: 0, budgetCents: 35000, ...over,
@@ -34,12 +42,12 @@ describe("CRM de pedidos", () => {
     const a = await c.call(orders.POST, "POST", "/x", body());
     const b = await c.call(orders.POST, "POST", "/x", body({ customerName: "Bia", tripType: "ROUND_TRIP", segments: [{ origin: "GRU", destination: "LIS", date: "2027-02-01" }, { origin: "LIS", destination: "GRU", date: "2027-02-15" }] }));
     expect([a.status, a.data.item.number, b.data.item.number]).toEqual([201, 1, 2]);
-    expect(a.data.item).toMatchObject({ stage: "NEW", route: "BSB → GIG · 23/01/2027" });
+    expect(a.data.item).toMatchObject({ stageName: "Novos pedidos", route: "BSB → GIG · 23/01/2027" });
     expect(b.data.item.route).toBe("GRU ⇄ LIS · 01/02/2027");
-    expect((await c.call(move.POST, "POST", "/x", { stage: "QUOTE_SENT" }, { id: a.data.item.id })).status).toBe(200);
+    expect((await c.call(move.POST, "POST", "/x", { stageId: await stageOf("Funil Comercial", "Cotação enviada") }, { id: a.data.item.id })).status).toBe(200);
     const d = await c.call(order.GET, "GET", "/x", undefined, { id: a.data.item.id });
-    expect(d.data.item.stage).toBe("QUOTE_SENT");
-    expect(d.data.item.events.map((e: { type: string }) => e.type)).toEqual(["stage", "created"]);
+    expect(d.data.item.stageName).toBe("Cotação enviada");
+    expect(d.data.item.events.map((e: { type: string; fromStage: string | null; toStage: string | null }) => [e.type, e.fromStage, e.toStage])).toEqual([["stage", "Novos pedidos", "Cotação enviada"], ["created", null, "Novos pedidos"]]);
     // validações
     expect((await c.call(orders.POST, "POST", "/x", body({ segments: [{ origin: "BSB", destination: "BSB", date: null }] }))).status).toBe(400);
     expect((await c.call(orders.POST, "POST", "/x", body({ adults: 1, infants: 2 }))).status).toBe(400);
@@ -51,12 +59,12 @@ describe("CRM de pedidos", () => {
     expect((await c.call(archive.POST, "POST", "/x", { reason: "Preço alto" }, { id: a.id })).status).toBe(200);
     expect((await c.call(orders.GET, "GET", "/api/orders")).data.items).toHaveLength(0);
     expect((await c.call(orders.GET, "GET", "/api/orders?archived=1")).data.items[0].archiveReason).toBe("Preço alto");
-    expect((await c.call(move.POST, "POST", "/x", { stage: "DONE" }, { id: a.id })).status).toBe(409);
+    expect((await c.call(move.POST, "POST", "/x", { stageId: await stageOf("Pós-Venda", "Viagem concluída") }, { id: a.id })).status).toBe(409);
     await c.call(archive.DELETE, "DELETE", "/x", undefined, { id: a.id });
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Outro", email: "o@x.test", password: "senha-forte-2" });
     expect((await o.call(order.GET, "GET", "/x", undefined, { id: a.id })).status).toBe(404);
-    expect((await o.call(move.POST, "POST", "/x", { stage: "DONE" }, { id: a.id })).status).toBe(404);
+    expect((await o.call(move.POST, "POST", "/x", { stageId: (await pipes(o))[0]!.stages[0]!.id }, { id: a.id })).status).toBe(404);
     expect((await o.call(order.DELETE, "DELETE", "/x", undefined, { id: a.id })).status).toBe(404);
   });
 
@@ -67,7 +75,66 @@ describe("CRM de pedidos", () => {
     expect(d.totals).toMatchObject({ orders: 2, withBudget: 1, budgetCents: 35000, avgBudgetCents: 35000, customers: 2 });
     expect(d.destinations[0]).toEqual({ name: "Rio de Janeiro (GIG)", value: 2 });
     expect(d.behavior).toMatchObject({ flexiblePct: 50, bagPct: 50, oneWay: 2 });
-    expect(d.pipeline.find((p) => p.stage === "NEW")!.count).toBe(2);
+    expect(d.pipelines.map((p) => p.name)).toEqual(["Funil Comercial", "Pós-Venda", "Recuperação de Venda"]);
+    expect(d.pipelines[0]!.stages.find((s) => s.name === "Novos pedidos")!.count).toBe(2);
+  });
+});
+
+describe("funis e colunas", () => {
+  it("todo usuário começa com 3 funis; cria funil, coluna, renomeia, pinta e reordena", async () => {
+    const start = await pipes();
+    expect(start.map((p) => p.name)).toEqual(["Funil Comercial", "Pós-Venda", "Recuperação de Venda"]);
+    expect(start[1]!.stages.map((s) => s.name)).toEqual(["Aguardando viagem", "Viagem em curso", "Aguardando avaliação", "Viagem concluída"]);
+    // chamadas ao mesmo tempo não duplicam os funis padrão
+    const fresh = new Client();
+    await fresh.call(register.POST, "POST", "/r", { name: "Novo", email: "novo@x.test", password: "senha-forte-3" });
+    await Promise.all([pipes(fresh), pipes(fresh), pipes(fresh)]);
+    expect(await pipes(fresh)).toHaveLength(3);
+
+    const np = await c.call(pipelinesRoute.POST, "POST", "/x", { name: "  Indicações  " });
+    expect(np.status).toBe(201);
+    const ind = (await pipes()).find((p) => p.id === np.data.id)!;
+    expect([ind.name, ind.stages.map((s) => s.name)]).toEqual(["Indicações", ["A fazer", "Em andamento", "Concluído"]]);
+    expect((await c.call(pipelineRoute.PUT, "PUT", "/x", { name: "Indicação de clientes" }, { id: ind.id })).status).toBe(200);
+    const col = await c.call(stagesRoute.POST, "POST", "/x", { name: "Ligar", color: "#ef4444" }, { id: ind.id });
+    expect(col.status).toBe(201);
+    expect((await c.call(stageRoute.PUT, "PUT", "/x", { name: "Ligar hoje", color: "#22c55e", position: 0 }, { id: col.data.id })).status).toBe(200);
+    const after = (await pipes()).find((p) => p.id === ind.id)!;
+    expect(after.name).toBe("Indicação de clientes");
+    expect(after.stages.map((s) => s.name)).toEqual(["Ligar hoje", "A fazer", "Em andamento", "Concluído"]);
+    expect(after.stages[0]!.color).toBe("#22c55e");
+    expect((await c.call(stagesRoute.POST, "POST", "/x", { name: "x", color: "vermelho" }, { id: ind.id })).status).toBe(400);
+  });
+
+  it("pedido entra na coluna escolhida, muda de funil e a coluna excluída leva os pedidos junto", async () => {
+    const lost = await stageOf("Recuperação de Venda", "Perdido recente");
+    const a = (await c.call(orders.POST, "POST", "/x", body({ stageId: lost }))).data.item;
+    expect(a).toMatchObject({ stageName: "Perdido recente" });
+    // pedido da página não escolhe coluna; pedido manual não usa coluna de outro usuário
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Outro", email: "o@x.test", password: "senha-forte-2" });
+    expect((await o.call(orders.POST, "POST", "/x", body({ stageId: lost }))).status).toBe(404);
+
+    const traveling = await stageOf("Pós-Venda", "Viagem em curso");
+    await c.call(move.POST, "POST", "/x", { stageId: traveling }, { id: a.id });
+    // coluna com pedidos: precisa dizer para onde vão
+    expect((await c.call(stageRoute.DELETE, "DELETE", "/api/pipeline-stages/x", undefined, { id: traveling })).status).toBe(409);
+    const done = await stageOf("Pós-Venda", "Viagem concluída");
+    expect((await c.call(stageRoute.DELETE, "DELETE", `/api/pipeline-stages/x?moveTo=${done}`, undefined, { id: traveling })).status).toBe(200);
+    const d = await c.call(order.GET, "GET", "/x", undefined, { id: a.id });
+    expect(d.data.item.stageName).toBe("Viagem concluída");
+    expect(d.data.item.events[0]).toMatchObject({ type: "stage", fromStage: "Viagem em curso", toStage: "Viagem concluída", note: "Coluna excluída" });
+
+    // funil com pedido não sai; vazio sai; o último não sai
+    const pos = (await pipes()).find((p) => p.name === "Pós-Venda")!;
+    expect((await c.call(pipelineRoute.DELETE, "DELETE", "/x", undefined, { id: pos.id })).status).toBe(409);
+    const rec = (await pipes()).find((p) => p.name === "Recuperação de Venda")!;
+    expect((await c.call(pipelineRoute.DELETE, "DELETE", "/x", undefined, { id: rec.id })).status).toBe(200);
+    expect((await o.call(pipelineRoute.DELETE, "DELETE", "/x", undefined, { id: pos.id })).status).toBe(404);
+    expect((await o.call(stageRoute.PUT, "PUT", "/x", { name: "hack" }, { id: done })).status).toBe(404);
+    const [first, ...rest] = await pipes(o);
+    for (const p of rest) await o.call(pipelineRoute.DELETE, "DELETE", "/x", undefined, { id: p.id });
+    expect((await o.call(pipelineRoute.DELETE, "DELETE", "/x", undefined, { id: first!.id })).status).toBe(409);
   });
 });
 
@@ -79,7 +146,7 @@ describe("captação pela página pública", () => {
     const r = await pub.call(publicOrder.POST, "POST", "/x", { ...body(), budgetCents: undefined }, { slug: "ana" });
     expect(r.status).toBe(201);
     const created = await prisma.travelOrder.findFirstOrThrow({ where: { userId } });
-    expect(created).toMatchObject({ source: "PUBLIC", stage: "NEW", customerName: "Godinho" });
+    expect(created).toMatchObject({ source: "PUBLIC", stageId: await stageOf("Funil Comercial", "Novos pedidos"), customerName: "Godinho" });
     expect(await prisma.notification.count({ where: { userId, title: "Novo pedido pela sua página" } })).toBe(1);
     // armadilha para robôs e contato obrigatório
     expect((await pub.call(publicOrder.POST, "POST", "/x", { ...body(), budgetCents: undefined, website: "spam" }, { slug: "ana" })).status).toBe(400);

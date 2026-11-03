@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { Prisma, type OrderStage } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment, MAX_BYTES, MAX_FILES } from "./holder-files";
-import { ORDER_STAGES, routeLabel, type Segment, type TripType } from "@/domain/orders";
+import { routeLabel, type Segment, type TripType } from "@/domain/orders";
+import { entryStage, ownStage, listPipelines } from "./pipelines";
 import { AIRPORTS } from "@/domain/airports";
 
-// CRM de pedidos de emissão: Kanban por etapa, lista, dashboard e captação pela página pública.
+// CRM de pedidos de emissão: Kanban por funil e coluna, lista, dashboard e captação pela página pública.
 
 export type OrderInput = {
   customerId?: string | null;
@@ -25,14 +26,17 @@ export type OrderInput = {
   notes?: string | null;
 };
 
-const view = (o: Prisma.TravelOrderGetPayload<{ include: { _count: { select: { attachments: true; quotes: true } } } }>) => ({
+const view = (o: Prisma.TravelOrderGetPayload<{ include: typeof withCounts }>) => ({
   id: o.id,
   number: o.number,
   customerId: o.customerId,
   customerName: o.customerName,
   customerPhone: o.customerPhone,
   customerEmail: o.customerEmail,
-  stage: o.stage,
+  stageId: o.stageId,
+  stageName: o.stage.name,
+  stageColor: o.stage.color,
+  pipelineId: o.stage.pipelineId,
   position: o.position,
   tripType: o.tripType as TripType,
   cabin: o.cabin,
@@ -55,7 +59,7 @@ const view = (o: Prisma.TravelOrderGetPayload<{ include: { _count: { select: { a
   quotes: o._count.quotes,
 });
 export type OrderView = ReturnType<typeof view>;
-const withCounts = { _count: { select: { attachments: true, quotes: true } } } as const;
+const withCounts = { _count: { select: { attachments: true, quotes: true } }, stage: { select: { name: true, color: true, pipelineId: true } } } as const;
 
 function validate(input: OrderInput) {
   const name = input.customerName.trim();
@@ -75,9 +79,11 @@ async function nextNumber(tx: Prisma.TransactionClient, userId: string) {
   return (last._max.number ?? 0) + 1;
 }
 
-export async function createOrder(userId: string, input: OrderInput, source: "MANUAL" | "PUBLIC" = "MANUAL") {
+/** Novo pedido na coluna escolhida ou, sem ela, na primeira coluna do primeiro funil. */
+export async function createOrder(userId: string, input: OrderInput, source: "MANUAL" | "PUBLIC" = "MANUAL", stageId?: string | null) {
   validate(input);
   if (input.customerId && !(await prisma.customer.findFirst({ where: { id: input.customerId, userId }, select: { id: true } }))) throw new DomainError(404, "Cliente não encontrado");
+  const stage = stageId ? await ownStage(userId, stageId) : await entryStage(userId);
   // Número sequencial por usuário; repete se dois pedidos chegarem juntos
   for (let attempt = 0; ; attempt++) {
     try {
@@ -85,7 +91,7 @@ export async function createOrder(userId: string, input: OrderInput, source: "MA
         const number = await nextNumber(tx, userId);
         const o = await tx.travelOrder.create({
           data: {
-            userId, number, source,
+            userId, number, source, stageId: stage.id,
             customerId: input.customerId || null,
             customerName: input.customerName.trim(),
             customerPhone: input.customerPhone?.trim() || null,
@@ -97,7 +103,7 @@ export async function createOrder(userId: string, input: OrderInput, source: "MA
           },
           include: withCounts,
         });
-        await tx.orderEvent.create({ data: { orderId: o.id, type: "created", toStage: "NEW", note: source === "PUBLIC" ? "Pedido pela página pública" : null } });
+        await tx.orderEvent.create({ data: { orderId: o.id, type: "created", toStage: stage.name, note: source === "PUBLIC" ? "Pedido pela página pública" : null } });
         return view(o);
       });
     } catch (e) {
@@ -129,16 +135,18 @@ export async function updateOrder(userId: string, id: string, input: OrderInput)
   return view(o);
 }
 
-/** Move o pedido para a etapa (e posição) indicada, reordenando a coluna de destino. */
-export async function moveOrder(userId: string, id: string, stage: OrderStage, position?: number) {
+/** Move o pedido para a coluna (de qualquer funil) e posição indicadas, reordenando a coluna de destino. */
+export async function moveOrder(userId: string, id: string, stageId: string, position?: number) {
   const o = await own(userId, id);
   if (o.archivedAt) throw new DomainError(409, "Desarquive o pedido antes de movê-lo");
+  const to = await ownStage(userId, stageId);
+  const from = o.stageId === to.id ? to : await ownStage(userId, o.stageId);
   await prisma.$transaction(async (tx) => {
-    const column = await tx.travelOrder.findMany({ where: { userId, stage, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
+    const column = await tx.travelOrder.findMany({ where: { userId, stageId: to.id, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
     const at = Math.max(0, Math.min(position ?? column.length, column.length));
     const ids = [...column.slice(0, at).map((c) => c.id), id, ...column.slice(at).map((c) => c.id)];
-    for (const [i, oid] of ids.entries()) await tx.travelOrder.update({ where: { id: oid }, data: { position: i, ...(oid === id ? { stage } : {}) } });
-    if (o.stage !== stage) await tx.orderEvent.create({ data: { orderId: id, type: "stage", fromStage: o.stage, toStage: stage } });
+    for (const [i, oid] of ids.entries()) await tx.travelOrder.update({ where: { id: oid }, data: { position: i, ...(oid === id ? { stageId: to.id } : {}) } });
+    if (from.id !== to.id) await tx.orderEvent.create({ data: { orderId: id, type: "stage", fromStage: from.name, toStage: to.name } });
   });
 }
 
@@ -214,12 +222,14 @@ const inc = (m: Map<string, number>, k: string, by = 1) => m.set(k, (m.get(k) ??
 
 export async function ordersDashboard(userId: string, days: number | null) {
   const since = days ? new Date(Date.now() - days * 86400_000) : undefined;
-  const [inPeriod, active, archived, profile] = await Promise.all([
+  const [inPeriod, active, archived, profile, pipelines] = await Promise.all([
     prisma.travelOrder.findMany({ where: { userId, createdAt: since ? { gte: since } : undefined } }),
-    prisma.travelOrder.findMany({ where: { userId, archivedAt: null }, select: { stage: true, updatedAt: true, priority: true, customerName: true, number: true, id: true } }),
+    prisma.travelOrder.findMany({ where: { userId, archivedAt: null }, select: { stageId: true, updatedAt: true, priority: true, customerName: true, number: true, id: true } }),
     prisma.travelOrder.findMany({ where: { userId, archivedAt: since ? { gte: since } : { not: null } }, select: { archiveReason: true } }),
     prisma.salesProfile.findUnique({ where: { userId }, select: { slug: true, published: true, acceptsOrders: true, views: true } }),
+    listPipelines(userId),
   ]);
+  const stageName = new Map(pipelines.flatMap((p) => p.stages.map((s) => [s.id, s.name] as const)));
   const withBudget = inPeriod.filter((o) => o.budgetCents);
   const total = withBudget.reduce((t, o) => t + (o.budgetCents ?? 0), 0);
   const dest = new Map<string, number>(), orig = new Map<string, number>(), months = new Map<string, number>(), cabins = new Map<string, number>(), reasons = new Map<string, number>();
@@ -241,8 +251,9 @@ export async function ordersDashboard(userId: string, days: number | null) {
   for (const a of archived) inc(reasons, a.archiveReason ?? "Outro");
   const n = inPeriod.length;
   const pct = (x: number) => (n ? Math.round((x / n) * 100) : 0);
-  // Alertas: pedidos novos ou em cotação parados há mais de 2 dias
-  const stale = active.filter((o) => (o.stage === "NEW" || o.stage === "QUOTING") && Date.now() - o.updatedAt.getTime() > 2 * 86400_000);
+  // Alertas: pedidos nas duas primeiras colunas do primeiro funil (novos e em cotação) parados há mais de 2 dias
+  const early = new Set(pipelines[0]?.stages.slice(0, 2).map((s) => s.id) ?? []);
+  const stale = active.filter((o) => early.has(o.stageId) && Date.now() - o.updatedAt.getTime() > 2 * 86400_000);
   const publicOrders = inPeriod.filter((o) => o.source === "PUBLIC").length;
   return {
     totals: {
@@ -253,8 +264,8 @@ export async function ordersDashboard(userId: string, days: number | null) {
     capture: profile ? { slug: profile.slug, active: profile.published && profile.acceptsOrders, views: profile.views, orders: publicOrders, conversion: profile.views ? Math.round((publicOrders / profile.views) * 1000) / 10 : null } : null,
     destinations: top(dest), origins: top(orig), months: top(months), cabins: top(cabins),
     behavior: { avgPax: n ? Math.round((pax / n) * 10) / 10 : 0, adt, chd, inf, oneWay, rt, multi, flexiblePct: pct(flex), bagPct: pct(bag) },
-    pipeline: ORDER_STAGES.map((s) => ({ stage: s, count: active.filter((o) => o.stage === s).length })),
-    alerts: stale.map((o) => ({ id: o.id, number: o.number, customerName: o.customerName, stage: o.stage, days: Math.floor((Date.now() - o.updatedAt.getTime()) / 86400_000) })),
+    pipelines: pipelines.map((p) => ({ id: p.id, name: p.name, stages: p.stages.map((s) => ({ id: s.id, name: s.name, count: active.filter((o) => o.stageId === s.id).length })) })),
+    alerts: stale.map((o) => ({ id: o.id, number: o.number, customerName: o.customerName, stage: stageName.get(o.stageId) ?? "", days: Math.floor((Date.now() - o.updatedAt.getTime()) / 86400_000) })),
     archiveReasons: top(reasons, 10),
   };
 }

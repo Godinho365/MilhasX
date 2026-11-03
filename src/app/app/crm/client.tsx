@@ -9,18 +9,16 @@ import { fmtBRL, fmtDate, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { TripFields, emptyTrip, tripSegments, type Trip } from "@/components/trip-fields";
-import { ORDER_STAGES, STAGE_LABELS, TRIP_LABELS, PRIORITY_LABELS, ARCHIVE_REASONS, WHATSAPP_TEMPLATES, whatsappText, whatsappLink, orderSummary, type OrderStageKey } from "@/domain/orders";
+import { TRIP_LABELS, PRIORITY_LABELS, ARCHIVE_REASONS, WHATSAPP_TEMPLATES, whatsappText, whatsappLink, orderSummary } from "@/domain/orders";
 import { CABIN_LABELS } from "@/domain/flight-search";
 import type { OrderView } from "@/server/services/orders";
+import type { PipelineView } from "@/server/services/pipelines";
+import { PipelinePicker, StageMenu, NewStage } from "./pipeline-bar";
 import { ClientPages } from "./client-pages";
 
 type Customer = { id: string; name: string; phone: string | null; email: string | null };
 const PRIORITY_CLS = { LOW: "bg-panel2 text-muted", MEDIUM: "bg-blue-500/15 text-blue-300", HIGH: "bg-red-500/15 text-red-300" } as const;
 const PRIORITY_DOT = { LOW: "bg-zinc-500", MEDIUM: "bg-blue-400", HIGH: "bg-red-400" } as const;
-// Cor de cada etapa do Kanban (barra no topo da coluna e ponto no título)
-const STAGE_COLOR: Record<OrderStageKey, string> = {
-  NEW: "#60a5fa", QUOTING: "#f59e0b", QUOTE_SENT: "#a78bfa", NEGOTIATION: "#fb923c", ISSUED: "#22c55e", TRAVELING: "#38bdf8", DONE: "#94a3b8",
-};
 const CABIN_SHORT: Record<string, string> = { ECONOMY: "Econômica", PREMIUM: "Premium", BUSINESS: "Executiva", FIRST: "Primeira" };
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 const ago = (iso: string) => {
@@ -30,7 +28,7 @@ const ago = (iso: string) => {
 
 /* ---------------- Novo / editar pedido ---------------- */
 
-export function OrderDialog({ order, customers, onClose }: { order: OrderView | null; customers: Customer[]; onClose: () => void }) {
+export function OrderDialog({ order, customers, stageId, onClose }: { order: OrderView | null; customers: Customer[]; stageId?: string; onClose: () => void }) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState(order?.customerId ?? "");
   const [name, setName] = useState(order?.customerName ?? "");
@@ -62,7 +60,7 @@ export function OrderDialog({ order, customers, onClose }: { order: OrderView | 
     const budgetCents = budget.trim() ? parseBRLToCents(budget) : null;
     if (budget.trim() && budgetCents === null) return setErro("Orçamento inválido");
     setBusy(true);
-    const body = { customerId: customerId || null, customerName: name, customerPhone: phone || null, customerEmail: email || null, ...trip, segments: tripSegments(trip, returnDate || null), priority, budgetCents, notes: notes || null };
+    const body = { customerId: customerId || null, customerName: name, customerPhone: phone || null, customerEmail: email || null, ...trip, segments: tripSegments(trip, returnDate || null), priority, budgetCents, notes: notes || null, ...(order ? {} : { stageId: stageId ?? null }) };
     const r = order ? await api(`/api/orders/${order.id}`, "PUT", body) : await api("/api/orders", "POST", body);
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
@@ -144,45 +142,47 @@ function Card({ o, onOpen, onDragStart }: { o: OrderView; onOpen: () => void; on
   );
 }
 
-export function Kanban({ orders, customers }: { orders: OrderView[]; customers: Customer[] }) {
+export function Kanban({ orders, customers, pipelines, pipeline }: { orders: OrderView[]; customers: Customer[]; pipelines: PipelineView[]; pipeline: PipelineView }) {
   const router = useRouter();
   const [list, setList] = useState(orders);
-  const [over, setOver] = useState<OrderStageKey | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<string | null>(null); // coluna do pedido novo
   const [query, setQuery] = useState("");
   const [prio, setPrio] = useState<"ALL" | "LOW" | "MEDIUM" | "HIGH">("ALL");
   const dragged = useRef<string | null>(null);
   useEffect(() => setList(orders), [orders]);
   useEffect(() => {
-    const h = () => setCreating(true);
+    const h = () => setCreating(pipeline.stages[0]?.id ?? "");
     window.addEventListener("mm:new-order", h);
     return () => window.removeEventListener("mm:new-order", h);
-  }, []);
+  }, [pipeline]);
 
-  async function move(id: string, stage: OrderStageKey, position?: number) {
+  async function move(id: string, stageId: string, position?: number) {
     const prev = list;
-    setList((l) => l.map((o) => (o.id === id ? { ...o, stage } : o)));
-    const r = await api(`/api/orders/${id}/move`, "POST", { stage, position });
+    setList((l) => l.map((o) => (o.id === id ? { ...o, stageId } : o)));
+    const r = await api(`/api/orders/${id}/move`, "POST", { stageId, position });
     if (!r.ok) {
       setList(prev);
       return toast(r.erro, "error");
     }
     refreshSafe(router);
   }
-  function drop(e: React.DragEvent, stage: OrderStageKey) {
+  function drop(e: React.DragEvent, stageId: string) {
     e.preventDefault();
     setOver(null);
     const id = dragged.current ?? e.dataTransfer.getData("text/plain");
     dragged.current = null;
-    if (id) move(id, stage, list.filter((o) => o.stage === stage && o.id !== id).length);
+    if (id) move(id, stageId, list.filter((o) => o.stageId === stageId && o.id !== id).length);
   }
   const q = query.trim().toLowerCase();
-  const shown = list.filter((o) => (prio === "ALL" || o.priority === prio) && (!q || o.customerName.toLowerCase().includes(q) || o.route.toLowerCase().includes(q) || String(o.number) === q.replace("#", "")));
+  const inPipeline = new Set(pipeline.stages.map((st) => st.id));
+  const shown = list.filter((o) => inPipeline.has(o.stageId) && (prio === "ALL" || o.priority === prio) && (!q || o.customerName.toLowerCase().includes(q) || o.route.toLowerCase().includes(q) || String(o.number) === q.replace("#", "")));
   const budget = shown.reduce((t, o) => t + (o.budgetCents ?? 0), 0);
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <PipelinePicker pipelines={pipelines} current={pipeline} />
         <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input className="input pl-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar cliente, rota ou nº do pedido" aria-label="Buscar pedidos" />
@@ -196,38 +196,41 @@ export function Kanban({ orders, customers }: { orders: OrderView[]; customers: 
       </div>
       <div className="-mx-3 overflow-x-auto px-3 pb-3 sm:-mx-5 sm:px-5">
         <div className="flex min-w-max gap-3">
-          {ORDER_STAGES.map((stage) => {
-            const items = shown.filter((o) => o.stage === stage);
+          {pipeline.stages.map((stage, index) => {
+            const items = shown.filter((o) => o.stageId === stage.id);
             const total = items.reduce((t, o) => t + (o.budgetCents ?? 0), 0);
             return (
-              <section key={stage} aria-label={STAGE_LABELS[stage]} onDragOver={(e) => { e.preventDefault(); setOver(stage); }} onDragLeave={() => setOver((s) => (s === stage ? null : s))} onDrop={(e) => drop(e, stage)}
-                className={`flex w-[300px] shrink-0 flex-col overflow-hidden rounded-2xl border transition-colors ${over === stage ? "border-accent-light bg-accent-soft/40" : "border-line bg-panel2/40"}`}>
-                <div className="h-1 shrink-0" style={{ backgroundColor: STAGE_COLOR[stage] }} aria-hidden />
+              <section key={stage.id} aria-label={stage.name} onDragOver={(e) => { e.preventDefault(); setOver(stage.id); }} onDragLeave={() => setOver((s) => (s === stage.id ? null : s))} onDrop={(e) => drop(e, stage.id)}
+                className={`flex w-[300px] shrink-0 flex-col rounded-2xl border transition-colors ${over === stage.id ? "border-accent-light bg-accent-soft/40" : "border-line bg-panel2/40"}`}>
+                <div className="h-1 shrink-0 rounded-t-2xl" style={{ backgroundColor: stage.color }} aria-hidden />
                 <h2 className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm font-semibold">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: STAGE_COLOR[stage] }} aria-hidden />
-                  <span className="flex-1 truncate">{STAGE_LABELS[stage]}</span>
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} aria-hidden />
+                  <span className="flex-1 truncate">{stage.name}</span>
                   <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-medium tabular-nums text-muted">{items.length}</span>
+                  <StageMenu stage={stage} index={index} pipeline={pipeline} pipelines={pipelines} />
                 </h2>
                 <p className="px-3 pb-2 text-[11px] text-muted">{total > 0 ? `${fmtBRL(total)} em orçamentos` : "\u00a0"}</p>
                 <ul className="max-h-[calc(100vh-320px)] min-h-[120px] flex-1 space-y-2 overflow-y-auto px-2 pb-2" role="list">
                   {items.map((o) => <Card key={o.id} o={o} onOpen={() => setOpen(o.id)} onDragStart={(e) => { dragged.current = o.id; e.dataTransfer.setData("text/plain", o.id); }} />)}
                   {items.length === 0 && <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-line text-center text-xs text-muted">{q || prio !== "ALL" ? "Nenhum pedido com esse filtro." : "Arraste pedidos para cá"}</li>}
                 </ul>
-                {stage === "NEW" && <button type="button" className="mx-2 mb-2 flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-sm text-muted transition-colors hover:border-zinc-500 hover:text-zinc-100" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Adicionar pedido</button>}
+                <button type="button" className="mx-2 mb-2 flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-sm text-muted transition-colors hover:border-zinc-500 hover:text-zinc-100" onClick={() => setCreating(stage.id)}><Plus className="h-4 w-4" />Adicionar pedido</button>
               </section>
             );
           })}
+          <NewStage pipeline={pipeline} />
         </div>
       </div>
-      {creating && <OrderDialog order={null} customers={customers} onClose={() => setCreating(false)} />}
-      {open && <OrderDetails id={open} customers={customers} onClose={() => setOpen(null)} onMove={(stage) => move(open, stage)} />}
+      {creating !== null && <OrderDialog order={null} customers={customers} stageId={creating || undefined} onClose={() => setCreating(null)} />}
+      {open && <OrderDetails id={open} customers={customers} pipelines={pipelines} onClose={() => setOpen(null)} onMove={(stageId) => move(open, stageId)} />}
     </>
   );
 }
 
 /* ---------------- Lista ---------------- */
 
-export function OrdersList({ active, archived, customers }: { active: OrderView[]; archived: OrderView[]; customers: Customer[] }) {
+export function OrdersList({ active, archived, customers, pipelines }: { active: OrderView[]; archived: OrderView[]; customers: Customer[]; pipelines: PipelineView[] }) {
+  const pipelineName = new Map(pipelines.map((p) => [p.id, p.name]));
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const router = useRouter();
@@ -240,14 +243,14 @@ export function OrdersList({ active, archived, customers }: { active: OrderView[
     rows.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{empty}</p> : (
       <div className="overflow-x-auto">
         <table className="table-base">
-          <thead><tr><th>Pedido</th><th>Cliente</th><th>Viagem</th><th className="hidden md:table-cell">Etapa</th><th className="hidden sm:table-cell">Prioridade</th><th className="hidden text-right lg:table-cell">Orçamento</th><th className="hidden lg:table-cell">Criado</th></tr></thead>
+          <thead><tr><th>Pedido</th><th>Cliente</th><th>Viagem</th><th className="hidden md:table-cell">Funil · coluna</th><th className="hidden sm:table-cell">Prioridade</th><th className="hidden text-right lg:table-cell">Orçamento</th><th className="hidden lg:table-cell">Criado</th></tr></thead>
           <tbody>
             {rows.map((o) => (
               <tr key={o.id} className="cursor-pointer hover:bg-panel2/50" onClick={() => setOpen(o.id)}>
                 <td className="tabular-nums">#{o.number}</td>
                 <td className="font-semibold">{o.customerName}</td>
                 <td>{o.route}</td>
-                <td className="hidden md:table-cell">{o.archivedAt ? <span className="text-muted">Arquivado: {o.archiveReason}</span> : STAGE_LABELS[o.stage]}</td>
+                <td className="hidden md:table-cell">{o.archivedAt ? <span className="text-muted">Arquivado: {o.archiveReason}</span> : `${pipelineName.get(o.pipelineId) ?? ""} · ${o.stageName}`}</td>
                 <td className="hidden sm:table-cell">{PRIORITY_LABELS[o.priority as keyof typeof PRIORITY_LABELS]}</td>
                 <td className="hidden text-right tabular-nums lg:table-cell">{o.budgetCents ? fmtBRL(o.budgetCents) : "-"}</td>
                 <td className="hidden text-muted lg:table-cell">{fmtDate(o.createdAt)}</td>
@@ -262,7 +265,7 @@ export function OrdersList({ active, archived, customers }: { active: OrderView[
       <section className="card overflow-hidden" aria-label="Pedidos ativos"><h2 className="border-b border-line px-5 py-3 font-semibold">Pedidos ativos <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhum pedido ativo.")}</section>
       <section className="card overflow-hidden" aria-label="Pedidos arquivados"><h2 className="border-b border-line px-5 py-3 font-semibold">Pedidos arquivados <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhum pedido arquivado.")}</section>
       {creating && <OrderDialog order={null} customers={customers} onClose={() => setCreating(false)} />}
-      {open && <OrderDetails id={open} customers={customers} onClose={() => setOpen(null)} onMove={async (stage) => { const r = await api(`/api/orders/${open}/move`, "POST", { stage }); if (!r.ok) return toast(r.erro, "error"); refreshSafe(router); }} />}
+      {open && <OrderDetails id={open} customers={customers} pipelines={pipelines} onClose={() => setOpen(null)} onMove={async (stageId) => { const r = await api(`/api/orders/${open}/move`, "POST", { stageId }); if (!r.ok) return toast(r.erro, "error"); refreshSafe(router); }} />}
     </div>
   );
 }
@@ -273,7 +276,7 @@ type Detail = OrderView & { locator: string | null; clientNotes: string | null; 
 type FileRow = { id: string; name: string; mime: string; size: number; visibleToClient: boolean };
 type Quote = { id: string; label: string; miles: number | null; taxesCents: number | null; cashCents: number | null; departDate: string; notes: string | null };
 
-function OrderDetails({ id, customers, onClose, onMove }: { id: string; customers: Customer[]; onClose: () => void; onMove: (stage: OrderStageKey) => void | Promise<void> }) {
+function OrderDetails({ id, customers, pipelines, onClose, onMove }: { id: string; customers: Customer[]; pipelines: PipelineView[]; onClose: () => void; onMove: (stageId: string) => void | Promise<void> }) {
   const router = useRouter();
   const [o, setO] = useState<Detail | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
@@ -294,8 +297,8 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
     load();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function stage(s: OrderStageKey) {
-    await onMove(s);
+  async function stage(stageId: string) {
+    await onMove(stageId);
     await load();
   }
   async function upload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -351,11 +354,18 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
           </div>
 
           {!o.archivedAt && (
-            <nav aria-label="Etapa do pedido" className="flex flex-wrap gap-1.5">
-              {ORDER_STAGES.map((s) => (
-                <button key={s} type="button" aria-pressed={o.stage === s} onClick={() => stage(s)} className={`rounded-full border px-3 py-1 text-xs font-medium ${o.stage === s ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>{STAGE_LABELS[s]}</button>
-              ))}
-            </nav>
+            <div className="flex flex-wrap items-center gap-2">
+              <select className="input h-8 w-auto py-0 text-xs font-semibold" value={o.pipelineId} onChange={(e) => { const p = pipelines.find((x) => x.id === e.target.value); if (p?.stages[0]) stage(p.stages[0].id); }} aria-label="Funil do pedido">
+                {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <nav aria-label="Coluna do pedido" className="flex flex-wrap gap-1.5">
+                {(pipelines.find((p) => p.id === o.pipelineId)?.stages ?? []).map((st) => (
+                  <button key={st.id} type="button" aria-pressed={o.stageId === st.id} onClick={() => stage(st.id)} className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${o.stageId === st.id ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: st.color }} aria-hidden />{st.name}
+                  </button>
+                ))}
+              </nav>
+            </div>
           )}
           {o.archivedAt && <Alert kind="info">Arquivado em {fmtDate(o.archivedAt)}: {o.archiveReason}</Alert>}
 
@@ -420,7 +430,7 @@ function OrderDetails({ id, customers, onClose, onMove }: { id: string; customer
             <h3 className="kicker mb-2">Histórico</h3>
             <ul className="space-y-1 text-xs text-muted">
               {o.events.map((e) => (
-                <li key={e.id}>{fmtDate(e.createdAt)} · {e.type === "created" ? "Pedido criado" : e.type === "stage" ? `${STAGE_LABELS[e.fromStage as OrderStageKey] ?? ""} → ${STAGE_LABELS[e.toStage as OrderStageKey] ?? ""}` : e.type === "archived" ? `Arquivado (${e.note})` : e.type === "unarchived" ? "Desarquivado" : e.type === "quote" ? `Cotação: ${e.note}` : e.note}</li>
+                <li key={e.id}>{fmtDate(e.createdAt)} · {e.type === "created" ? "Pedido criado" : e.type === "stage" ? `${e.fromStage ?? ""} → ${e.toStage ?? ""}` : e.type === "archived" ? `Arquivado (${e.note})` : e.type === "unarchived" ? "Desarquivado" : e.type === "quote" ? `Cotação: ${e.note}` : e.note}</li>
               ))}
             </ul>
           </section>

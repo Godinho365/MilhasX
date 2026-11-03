@@ -1,15 +1,4 @@
-// CRM de pedidos de emissão: etapas do Kanban (as mesmas colunas do Quero Milhas).
-export const ORDER_STAGES = ["NEW", "QUOTING", "QUOTE_SENT", "NEGOTIATION", "ISSUED", "TRAVELING", "DONE"] as const;
-export type OrderStageKey = (typeof ORDER_STAGES)[number];
-export const STAGE_LABELS: Record<OrderStageKey, string> = {
-  NEW: "Novos pedidos",
-  QUOTING: "Pesquisa e Cotação",
-  QUOTE_SENT: "Cotação enviada",
-  NEGOTIATION: "Negociação e emissão",
-  ISSUED: "Emitido",
-  TRAVELING: "Viagem em curso",
-  DONE: "Viagem concluída",
-};
+// CRM de pedidos de emissão: rótulos da viagem, prioridade, arquivamento e mensagens. (Funis e colunas: domain/pipelines.ts)
 export const TRIP_LABELS = { ONE_WAY: "Somente ida", ROUND_TRIP: "Ida e volta", MULTI: "Múltiplos trechos" } as const;
 export type TripType = keyof typeof TRIP_LABELS;
 export const PRIORITY_LABELS = { LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta" } as const;

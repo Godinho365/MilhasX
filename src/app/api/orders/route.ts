@@ -11,5 +11,5 @@ export const GET = route(async (req) => {
 export const POST = route(async (req) => {
   const u = await requireUser(req);
   const b = await parseBody(req, orderSchema);
-  return json({ ok: true, item: await createOrder(u.id, { ...b, customerEmail: b.customerEmail || null }) }, 201);
+  return json({ ok: true, item: await createOrder(u.id, { ...b, customerEmail: b.customerEmail || null }, "MANUAL", b.stageId) }, 201);
 });
