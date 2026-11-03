@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
+import { fmtPts } from "@/lib/format";
 import { UserAvatar } from "./user-avatar";
 import { HolderPicker, type HolderOpt } from "./holder-picker";
 import { ThemeMenuItem } from "./theme-switch";
@@ -226,6 +227,12 @@ export function Shell(props: {
       setClosed(NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => window.localStorage.getItem(NAV_OPEN_KEY(g.key)) === "0").map((g) => g.key));
     } catch {}
   }, []);
+  // Ao entrar numa página de um grupo recolhido, ele abre; depois o usuário pode recolher de novo
+  const searchKey = search.toString();
+  useEffect(() => {
+    const here = NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => g.children.some((c) => active(c.href))).map((g) => g.key);
+    if (here.length) setClosed((c) => (c.some((k) => here.includes(k)) ? c.filter((k) => !here.includes(k)) : c));
+  }, [path, searchKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleGroup = (key: string, open: boolean) => {
     setClosed((c) => (open ? c.filter((k) => k !== key) : [...c, key]));
     try {
@@ -271,7 +278,7 @@ export function Shell(props: {
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
   const navGroup = (g: NavGroup) => {
     const here = g.children.some((c) => active(c.href));
-    const open = here || !closed.includes(g.key);
+    const open = !closed.includes(g.key);
     return (
       <div key={g.key} className="space-y-px">
         <button
@@ -304,23 +311,39 @@ export function Shell(props: {
     );
   };
   const badgeOf = (b?: NavLeaf["badge"]) => (b === "unread" ? props.unread : b === "news" ? props.unreadNews : undefined);
+  // Lista do menu: com um titular, as contas dele; com "Todos os titulares", uma linha por programa
+  // com o saldo somado de todos (sem repetir o mesmo logo por titular)
+  type ProgRow = { key: string; href: string; programId: string; program: string; color: string; logo?: string | null; balance: number; title: string; accounts: number };
+  const progRows: ProgRow[] = chosenHolder
+    ? topAccounts.map((a) => ({ key: a.id, href: `/app/programs/${a.id}`, programId: a.programId ?? a.id, program: a.program, color: a.color, logo: a.logo, balance: a.balance, title: `${a.holder} - ${a.program}`, accounts: 1 }))
+    : [...visibleAccounts.reduce((m, a) => {
+        const k = a.programId ?? a.program;
+        const r = m.get(k) ?? { key: k, href: "/app/programs", programId: a.programId ?? a.id, program: a.program, color: a.color, logo: a.logo, balance: 0, title: a.program, accounts: 0 };
+        r.balance += a.balance;
+        r.accounts += 1;
+        return m.set(k, r);
+      }, new Map<string, ProgRow>()).values()].sort((a, b) => b.balance - a.balance);
+  const shownRows = chosenHolder ? progRows : progRows.slice(0, 5);
   const programsBlock = (
     <div key="programas">
-      <div className="mb-1.5 flex items-center px-2.5">
+      <div className="mb-1 flex items-center px-2.5">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Programas</p>
         <Link href="/app/programs" className="ml-auto text-xs font-medium text-muted hover:text-white">Ver todos ({visibleAccounts.length})</Link>
       </div>
-      {/* Atalhos das contas (titular × programa), maiores saldos primeiro, como na referência */}
-      <div className="flex flex-wrap gap-1.5 px-2.5">
-        {topAccounts.map((a) => (
-          <Link key={a.id} href={`/app/programs/${a.id}`} title={`${a.holder} - ${a.program}`} aria-label={`${a.holder} - ${a.program}`} className="rounded-full transition-transform hover:scale-110">
-            <ProgramLogo programId={a.programId ?? a.id} name={a.program} color={a.color} version={a.logo} size={32} />
-          </Link>
-        ))}
-        {visibleAccounts.length > 5 && (
-          <Link href="/app/programs" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-line text-[11px] text-muted" aria-label={`Ver mais ${visibleAccounts.length - 5} programas`}>+{visibleAccounts.length - 5}</Link>
-        )}
-        {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
+      <div className="space-y-px">
+        {shownRows.map((a) => {
+          const here = chosenHolder ? path === a.href : false;
+          return (
+            <Link key={a.key} href={a.href} aria-current={here ? "page" : undefined} title={a.accounts > 1 ? `${a.program}: ${a.accounts} contas` : a.title}
+              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-[5px] text-[13px] font-medium transition-colors ${here ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}>
+              <ProgramLogo programId={a.programId} name={a.program} color={a.color} version={a.logo} size={22} />
+              <span className="min-w-0 flex-1 truncate">{a.program}</span>
+              <span className="text-xs tabular-nums text-muted">{fmtPts(a.balance)}</span>
+            </Link>
+          );
+        })}
+        {(chosenHolder ? visibleAccounts.length : progRows.length) > 5 && <Link href="/app/programs" className="block rounded-lg px-2.5 py-[5px] pl-[42px] text-xs text-muted hover:bg-panel2/70 hover:text-white">+{(chosenHolder ? visibleAccounts.length : progRows.length) - 5} programas</Link>}
+        {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 px-2.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
       </div>
     </div>
   );

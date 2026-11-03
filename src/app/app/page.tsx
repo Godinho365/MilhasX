@@ -15,7 +15,7 @@ import { ENTRY_LABELS, type EntryType } from "@/domain/ledger";
 import { Checklist } from "./checklist";
 import { HoldersTable } from "./holders-table";
 import { HolderEvolution, TotalEvolution, MonthlySales, HBar, CreditsDebits } from "@/components/charts";
-import { fmtBRL, fmtPts, fmtSignedPts } from "@/lib/format";
+import { fmtBRL, fmtPts, fmtSignedPts, shortName } from "@/lib/format";
 
 type Money = (c: number | null) => string;
 
@@ -67,9 +67,9 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
         .filter((a) => a.holderId === h.id)
         .flatMap((a) => {
           const v = value(a);
-          return v == null ? [] : [{ label: `${a.programName} ${a.holderName}`, note: withCpf ? cpfFree(a, usage) : undefined, value: v, color: a.programColor }];
+          return v == null ? [] : [{ label: `${a.programName} ${shortName(a.holderName)}`, note: withCpf ? cpfFree(a, usage) : undefined, value: v, color: a.programColor }];
         });
-      return { name: h.name, count: rows.length, value: groupValue?.(h), rows };
+      return { name: shortName(h.name), count: rows.length, value: groupValue?.(h), rows };
     }).filter((g) => g.rows.length > 0);
 
   const balance: Breakdown = { title: "Saldo por programa", groups: byHolder((a) => pts(a.balance), (h) => pts(h.balance), true), footer: { label: "Total", value: pts(s.totals.balance) }, empty: "Nenhuma conta ainda." };
@@ -81,7 +81,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
       const costCents = accs.reduce((t, a) => t + a.costCents, 0);
       const cost: Breakdown = {
         title: `Custo do milheiro · ${p.programName}`,
-        groups: [{ name: "Contas", rows: accs.map((a) => ({ label: a.holderName, note: withFree(pts(a.balance), freeOf(a, usage)), value: a.costCents > 0 && a.cpmCents != null ? money(a.cpmCents) : "-", color: a.programColor })) }],
+        groups: [{ name: "Contas", rows: accs.map((a) => ({ label: shortName(a.holderName), note: withFree(pts(a.balance), freeOf(a, usage)), value: a.costCents > 0 && a.cpmCents != null ? money(a.cpmCents) : "-", color: a.programColor })) }],
         footer: { label: "Média do programa", value: costCents > 0 ? money(Math.round((costCents * 1000) / balance)) : "-" },
       };
       // CPFs que ainda dá para emitir somando as contas do programa (só as que têm limite)
@@ -104,7 +104,7 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
   const toReceive: Breakdown = {
     title: "Detalhamento",
     groups: [
-      { name: "Faturas de cartão", rows: pending.invoices.map((e) => ({ label: `${e.invoice!.card.name} · ${e.account.program.name} ${e.account.holder.name}`, value: pts(e.points), color: e.account.program.color })) },
+      { name: "Faturas de cartão", rows: pending.invoices.map((e) => ({ label: `${e.invoice!.card.name} · ${e.account.program.name} ${shortName(e.account.holder.name)}`, value: pts(e.points), color: e.account.program.color })) },
       ...(pending.others.length ? [{ name: "Transferências e outros", rows: pending.others.map((e) => ({ label: e.description, value: pts(e.points), color: e.account.program.color })) }] : []),
     ],
     footer: { label: "Total", value: pts(pending.total) },
@@ -264,7 +264,7 @@ async function OverviewView({ userId, holderId, money }: { userId: string; holde
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{e.description}</p>
                       <p className="truncate text-xs text-muted">
-                        <span className="font-medium text-zinc-300">{e.account.program.name} {e.account.holder.name}</span> · {dayMonth(e.occurredAt)} · {CATEGORY[e.type] ?? ENTRY_LABELS[e.type]}
+                        <span className="font-medium text-zinc-300">{e.account.program.name} {shortName(e.account.holder.name)}</span> · {dayMonth(e.occurredAt)} · {CATEGORY[e.type] ?? ENTRY_LABELS[e.type]}
                         {e.status === "PENDING" && <span className="text-amber-300"> · a receber</span>}
                       </p>
                     </div>

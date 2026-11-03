@@ -1,48 +1,36 @@
-import Link from "next/link";
 import { ProgramLogo } from "@/components/program-logo";
 import { notFound } from "next/navigation";
-import { Wallet, Target, Package, DollarSign, FileText, Gift } from "lucide-react";
+import { Wallet, Package, DollarSign, Gift, Percent, CreditCard, Users, Calculator, CalendarDays, TrendingUp } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { accountDetail, credentialsEnabled } from "@/server/services/accounts";
 import { DomainError, prisma } from "@/server/db";
-import { fmtBRL, fmtPts, fmtSignedPts } from "@/lib/format";
-import { ENTRY_LABELS } from "@/domain/ledger";
+import { fmtBRL, fmtDate, fmtPts, monthLabel } from "@/lib/format";
 import { ProgramDot } from "@/components/stat";
 import { Recurrences, Credentials } from "./client";
 import { BeneficiaryLimit } from "./beneficiaries";
 import { bonusUsage } from "@/server/services/transfer-bonus";
 import { brWindows } from "@/domain/brasilia";
+import { accountMonth, monthOrCurrent, shiftMonth } from "@/server/services/account-month";
+import { AccountToolbar, MonthHistory } from "./month";
 
-const dm = (d: Date) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "");
-
-function IconStat({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+/** Cartão de indicador: rótulo, valor, legenda e ícone no canto. */
+function StatCard({ label, value, sub, icon, tone }: { label: string; value: string; sub: string; icon: React.ReactNode; tone?: string }) {
   return (
     <div className="card card-pad">
       <div className="flex items-start justify-between gap-2">
-        <p className="kicker">{label}</p>
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent-light">{icon}</span>
+        <p className="text-sm font-medium text-muted">{label}</p>
+        <span className="text-muted" aria-hidden>{icon}</span>
       </div>
-      <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight sm:text-[28px]">{value}</p>
+      <p className={`mt-1 text-2xl font-semibold tabular-nums tracking-tight ${tone ?? ""}`}>{value}</p>
+      <p className="mt-0.5 text-xs text-muted">{sub}</p>
     </div>
   );
 }
 
-function SectionHead({ icon, tone, title, sub, action }: { icon: React.ReactNode; tone: string; title: string; sub: string; action?: React.ReactNode }) {
-  return (
-    <div className="mb-4 flex items-start gap-3">
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}>{icon}</span>
-      <div className="min-w-0 flex-1">
-        <h2 className="font-semibold">{title}</h2>
-        <p className="text-sm text-muted">{sub}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-
-export default async function AccountPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AccountPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ mes?: string }> }) {
   const user = await requirePageUser();
   const { id } = await params;
+  const month = monthOrCurrent((await searchParams).mes);
   let d;
   try {
     d = await accountDetail(user.id, id);
@@ -53,7 +41,10 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   const pref = await prisma.userPreference.findUnique({ where: { userId: user.id }, select: { showValues: true } });
   const money = (c: number | null) => (pref?.showValues === false ? "R$ •••" : fmtBRL(c));
   const { account: a, stats } = d;
-  const [bonus] = await bonusUsage(user.id, new Date(), a.id);
+  const [[bonus], m] = await Promise.all([bonusUsage(user.id, new Date(), a.id), accountMonth(user.id, a.id, month)]);
+  const showValues = pref?.showValues !== false;
+  const mName = monthLabel(month).split(" ")[0]!.toLowerCase();
+  const hasCpfs = a.program.kind === "MILES" || a.beneficiaryLimit != null;
 
   return (
     <>
@@ -65,53 +56,26 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
-      {(a.program.kind === "MILES" || a.beneficiaryLimit != null) && <div className="mb-4"><BeneficiaryLimit accountId={a.id} /></div>}
-      {bonus && <div className="mb-4"><BonusCapCard b={bonus} /></div>}
+      <AccountToolbar accountId={a.id} month={month} prev={shiftMonth(month, -1)} next={shiftMonth(month, 1)} showValues={showValues} hasCpfs={hasCpfs} />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <IconStat label="Saldo atual" value={fmtPts(stats.balance)} icon={<Wallet className="h-5 w-5" />} />
-        <IconStat label="Custo do milheiro" value={money(stats.cpmCents)} icon={<Target className="h-5 w-5" />} />
-        <IconStat label="Pontos a receber" value={fmtPts(stats.pendingPoints)} icon={<Package className="h-5 w-5" />} />
-        <IconStat label="Valor em reais" value={money(stats.marketValueCents)} icon={<DollarSign className="h-5 w-5" />} />
+        <StatCard label="Lucro no mês" value={money(m.sales.profitCents)} sub={`${m.sales.count} ${m.sales.count === 1 ? "venda" : "vendas"} em ${mName}`} icon={<DollarSign className="h-5 w-5" />} tone={m.sales.profitCents > 0 ? "text-ok" : m.sales.profitCents < 0 ? "text-bad" : ""} />
+        <StatCard label="Total vendido" value={money(m.sales.totalCents)} sub={`vendas desta conta em ${mName}`} icon={<TrendingUp className="h-5 w-5" />} />
+        <StatCard label="Rendimento" value={m.sales.roePct == null ? "-" : `${m.sales.roePct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`} sub="retorno sobre o custo das milhas vendidas" icon={<Percent className="h-5 w-5" />} />
+        <StatCard label="Saldo atual" value={fmtPts(stats.balance)} sub="milhas" icon={<Wallet className="h-5 w-5" />} />
+        <StatCard label="CPM" value={money(stats.cpmCents)} sub="custo por milheiro" icon={<CreditCard className="h-5 w-5" />} />
+        <StatCard label="Valor investido" value={money(m.stockCents)} sub="custo das milhas em saldo" icon={<DollarSign className="h-5 w-5" />} />
+        <StatCard label="Pontos a receber" value={fmtPts(stats.pendingPoints)} sub={`valor de mercado do saldo: ${money(stats.marketValueCents)}`} icon={<Package className="h-5 w-5" />} />
+        <StatCard label="CPFs usados" value={m.cpf?.limit != null ? `${m.cpf.used}/${m.cpf.limit}` : "-"} sub={m.cpf?.limit != null ? `${Math.max(0, m.cpf.limit - m.cpf.used)} disponíveis` : "sem limite de CPFs"} icon={<Users className="h-5 w-5" />} />
+        <StatCard label="Média utilizável" value={m.perCpf != null ? fmtPts(m.perCpf) : "-"} sub="milhas por CPF livre" icon={<Calculator className="h-5 w-5" />} />
+        <StatCard label="Tempo de clube" value={m.club.active ? (m.club.months ? `${m.club.months} ${m.club.months === 1 ? "mês" : "meses"}` : "Este mês") : "Sem clube"} sub={m.club.since ? `${m.club.active ? "Membro" : "Primeiro clube"} desde ${fmtDate(m.club.since)}` : "nenhum ponto de clube lançado"} icon={<CalendarDays className="h-5 w-5" />} tone={m.club.active ? "" : "text-muted"} />
       </div>
 
+      <MonthHistory data={m} accountId={a.id} color={a.program.color} showValues={showValues} />
 
-      <div className="mt-4 grid gap-4 [&>*]:min-w-0">
-        <section className="card card-pad">
-          <SectionHead
-            icon={<FileText className="h-5 w-5" />}
-            tone="bg-accent-soft text-accent-light"
-            title="Lançamentos Recentes"
-            sub="Últimas movimentações"
-            action={<Link href={`/app/entries?accountId=${a.id}`} className="text-sm font-medium text-accent-light hover:underline">Ver todos</Link>}
-          />
-          {d.recent.length === 0 ? <p className="rounded-xl bg-panel2 py-10 text-center text-sm text-muted">Nenhum lançamento nesta conta.</p> : (
-            <ul className="space-y-2">
-              {d.recent.map((e) => {
-                return (
-                  <li key={e.id} className="flex items-center gap-3 rounded-xl bg-panel2/70 px-4 py-3">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.program.color }} aria-hidden />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{e.description}</p>
-                      <p className="truncate text-xs text-muted">
-                        {dm(e.occurredAt)}
-                        {e.description !== ENTRY_LABELS[e.type] && ` · ${ENTRY_LABELS[e.type]}`}
-                        {e.status === "PENDING" && <span className="text-amber-300"> · a receber</span>}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className={`text-sm font-semibold tabular-nums ${e.points > 0 ? "text-ok" : "text-bad"}`}>{fmtSignedPts(e.points)}</p>
-                      <p className="text-xs tabular-nums text-muted">{e.costCents !== 0 ? money(Math.abs(e.costCents)) : e.points > 0 ? "Orgânico" : "—"}</p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-      </div>
+      {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
+      {hasCpfs && <div id="cpfs" className="mt-4 scroll-mt-20"><BeneficiaryLimit accountId={a.id} /></div>}
+      {bonus && <div className="mt-4"><BonusCapCard b={bonus} /></div>}
 
       <Recurrences
         accountId={a.id}

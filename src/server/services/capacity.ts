@@ -1,4 +1,5 @@
 // Espaço das contas (milhas × CPFs livres) e sugestão de conta para emitir uma negociação do CRM Milhas.
+import { shortName } from "@/lib/format";
 import { prisma, DomainError } from "../db";
 import { beneficiaryUsage } from "./accounts";
 import { listSales, saleCpfs } from "./sales";
@@ -51,7 +52,7 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
       const load = { balance: a.balance, reserved: reservedBy.get(a.id) ?? 0, cpfFree: Math.max(0, (u.limit ?? 0) - u.used), ptsPerCpf: avg.ptsPerCpf };
       const space = accountSpace(load);
       const costCpmCents = a.balance > 0 && a.costCents > 0 ? Math.round((a.costCents * 1000) / a.balance) : null;
-      return { id: a.id, label: a.nickname || `${a.program.name} ${a.holder.name}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, leftover: accountLeftover(load, space.emissionsLeft, costCpmCents), ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0, realRevenueCents: soldBy.get(a.id) ?? 0 };
+      return { id: a.id, label: a.nickname || `${a.program.name} ${shortName(a.holder.name)}`, holderId: a.holderId, program: a.program.name, programCode: a.program.code, holder: a.holder.name, cpfUsed: u.used, cpfLimit: u.limit!, load, ...space, costCpmCents, leftover: accountLeftover(load, space.emissionsLeft, costCpmCents), ...capacityPotential(space.capacity, avg.saleCpmCents, costCpmCents), realProfitCents: realBy.get(a.id) ?? 0, realRevenueCents: soldBy.get(a.id) ?? 0 };
     })
     .sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
   return { avg, rows };
