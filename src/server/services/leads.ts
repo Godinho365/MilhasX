@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { prisma, DomainError } from "../db";
+import { sitePublished } from "./site";
 
 // Interessados em gestão de milhas, vindos da Central de Atendimento (página pública).
 export const LEAD_STATUS = { NEW: "Novo", CONTACTED: "Em contato", CLIENT: "Virou cliente", DISCARDED: "Descartado" } as const;
@@ -8,7 +9,8 @@ const PER_HOUR = 5;
 
 export async function createPublicLead(slug: string, input: { name: string; phone?: string | null; email?: string | null; message?: string | null; programs?: string[]; incomeRange?: string | null }, ip: string) {
   const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, published: true, acceptsLeads: true, user: { select: { status: true } } } });
-  if (!p || !p.published || !p.acceptsLeads || p.user.status !== "ACTIVE") throw new DomainError(404, "Página não encontrada");
+  // vale com a Central de atendimento publicada ou com o site da agência no ar
+  if (!p || !p.acceptsLeads || p.user.status !== "ACTIVE" || !(p.published || (await sitePublished(p.userId)))) throw new DomainError(404, "Página não encontrada");
   if (!input.phone?.trim() && !input.email?.trim()) throw new DomainError(400, "Informe um telefone ou e-mail para contato");
   const ipHash = createHash("sha256").update(`lead:${slug}:${ip}`).digest("hex").slice(0, 32);
   if ((await prisma.milesLead.count({ where: { userId: p.userId, ipHash, createdAt: { gte: new Date(Date.now() - 3600_000) } } })) >= PER_HOUR) throw new DomainError(429, "Muitos envios. Tente de novo mais tarde.");

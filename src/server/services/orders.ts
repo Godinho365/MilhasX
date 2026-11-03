@@ -5,6 +5,7 @@ import { detectAttachment, MAX_BYTES, MAX_FILES } from "./holder-files";
 import { routeLabel, type Segment, type TripType } from "@/domain/orders";
 import { entryStage, ownStage, listPipelines } from "./pipelines";
 import { AIRPORTS } from "@/domain/airports";
+import { sitePublished } from "./site";
 
 // CRM de pedidos de emissão: Kanban por funil e coluna, lista, dashboard e captação pela página pública.
 
@@ -277,7 +278,8 @@ const PUBLIC_LIMIT_PER_HOUR = 5;
 /** Pedido enviado pelo formulário da página pública (/p/<nome>). Sem login; limitado por IP. */
 export async function createPublicOrder(slug: string, input: OrderInput, ip: string) {
   const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, published: true, acceptsOrders: true, user: { select: { status: true } } } });
-  if (!p || !p.published || !p.acceptsOrders || p.user.status !== "ACTIVE") throw new DomainError(404, "Página não encontrada");
+  // vale com a Central de atendimento publicada ou com o site da agência no ar
+  if (!p || !p.acceptsOrders || p.user.status !== "ACTIVE" || !(p.published || (await sitePublished(p.userId)))) throw new DomainError(404, "Página não encontrada");
   const ipHash = createHash("sha256").update(`${slug}:${ip}`).digest("hex").slice(0, 32);
   const recent = await prisma.orderEvent.count({ where: { type: "created", note: `public:${ipHash}`, createdAt: { gte: new Date(Date.now() - 3600_000) } } });
   if (recent >= PUBLIC_LIMIT_PER_HOUR) throw new DomainError(429, "Muitos pedidos enviados. Tente de novo mais tarde.");

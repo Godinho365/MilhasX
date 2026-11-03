@@ -102,6 +102,8 @@ model User {
   avatarUpdatedAt DateTime?
   simulations     Simulation[]
   showcaseItems   ShowcaseItem[]
+  agencySite      AgencySite?
+  siteImages      SiteImage[]
 
   // Assinatura: o plano só muda pela administração (sem cobrança real)
   plan                Plan                @default(PESSOAL)
@@ -165,6 +167,29 @@ model SalesProfile {
   showcaseActive  Boolean   @default(false) // vitrine pública de pacotes (/p/<slug>/vitrine)
   showcaseTitle   String?
   updatedAt       DateTime  @updatedAt
+}
+
+// Site da agência (Marketing › Site): tema escolhido e conteúdo das páginas (domain/site.ts)
+model AgencySite {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme     String   @default("atlantico")
+  published Boolean  @default(false)
+  content   Json
+  updatedAt DateTime @updatedAt
+}
+
+// Fotos enviadas para o site (capa, textos, galeria e logo)
+model SiteImage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model ShowcaseItem {
