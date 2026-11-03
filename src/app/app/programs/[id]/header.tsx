@@ -41,28 +41,30 @@ export function AccountHeader({ account: a, title, program, phone }: Props) {
     nav("/app/programs");
     refreshSafe(router);
   }
-  const btn = "btn-ghost h-9 border border-line bg-panel";
+  const btn = "btn-ghost h-8 border border-line bg-panel px-2.5 text-xs";
   return (
-    <section className="mb-4 flex flex-wrap items-center gap-4 rounded-2xl border border-line p-5" style={{ backgroundColor: `${program.color}14` }} aria-label="Conta">
-      <ProgramLogo programId={program.id} name={a.programName} color={program.color} version={program.logo} size={48} />
+    <section className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-line px-4 py-3" style={{ backgroundColor: `${program.color}10` }} aria-label="Conta">
+      <ProgramLogo programId={program.id} name={a.programName} color={program.color} version={program.logo} size={36} />
       <div className="min-w-0 flex-1">
-        <div className="mb-1 inline-flex items-center gap-2 text-xs text-muted">
-          <button type="button" role="switch" aria-checked={!a.archived} aria-label="Conta ativa" onClick={() => patch({ archived: !a.archived }, a.archived ? "Conta ativada" : "Conta desativada (arquivada)")}
-            className={`relative h-5 w-9 rounded-full transition-colors ${a.archived ? "bg-panel2" : "bg-accent"}`}>
-            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${a.archived ? "left-0.5" : "left-[18px]"}`} />
-          </button>
-          {a.archived ? "Conta inativa" : "Conta ativa"}
+        <h1 className="truncate text-lg font-semibold leading-tight tracking-tight">{title}</h1>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+          <span className="inline-flex items-center gap-1.5 font-medium"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: program.color }} aria-hidden />{a.programName}</span>
+          <span className="inline-flex items-center gap-1.5">
+            <button type="button" role="switch" aria-checked={!a.archived} aria-label="Conta ativa" onClick={() => patch({ archived: !a.archived }, a.archived ? "Conta ativada" : "Conta desativada (arquivada)")}
+              className={`relative h-4 w-7 rounded-full transition-colors ${a.archived ? "bg-line" : "bg-accent"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-all ${a.archived ? "left-0.5" : "left-[14px]"}`} style={{ backgroundColor: "#fff" }} />
+            </button>
+            {a.archived ? "Inativa" : "Ativa"}
+          </span>
         </div>
-        <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
-        <span className="mt-1 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold text-white" style={{ backgroundColor: program.color }}>{program.code} · {a.programName}</span>
       </div>
-      <div className="grid grid-cols-[auto_auto] gap-2">
-        <button type="button" className={btn} onClick={() => setEditing(true)}><Pencil className="h-4 w-4" />Editar</button>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" className={btn} onClick={() => setEditing(true)}><Pencil className="h-3.5 w-3.5" />Editar</button>
+        <button type="button" className={btn} onClick={openOrganizer}><SlidersHorizontal className="h-3.5 w-3.5" />Organizar</button>
         {phone
-          ? <a className={`${btn} w-9 px-0`} href={whatsapp(phone)} target="_blank" rel="noreferrer" aria-label={`WhatsApp de ${a.holderName}`} title={`WhatsApp de ${a.holderName}: ${phone}`}><Phone className="h-4 w-4" /></a>
-          : <button type="button" className={`${btn} w-9 px-0 opacity-50`} disabled aria-label="Titular sem telefone" title="Cadastre o telefone/WhatsApp no titular para falar com ele daqui"><Phone className="h-4 w-4" /></button>}
-        <button type="button" className={`${btn} col-span-2`} onClick={openOrganizer}><SlidersHorizontal className="h-4 w-4" />Organizar</button>
-        <button type="button" className={`${btn} col-span-2 text-red-300`} onClick={remove}><Trash2 className="h-4 w-4" />Excluir conta</button>
+          ? <a className={`${btn} w-8 px-0`} href={whatsapp(phone)} target="_blank" rel="noreferrer" aria-label={`WhatsApp de ${a.holderName}`} title={`WhatsApp de ${a.holderName}: ${phone}`}><Phone className="h-3.5 w-3.5" /></a>
+          : <button type="button" className={`${btn} w-8 px-0 opacity-50`} disabled aria-label="Titular sem telefone" title="Cadastre o telefone/WhatsApp no titular para falar com ele daqui"><Phone className="h-3.5 w-3.5" /></button>}
+        <button type="button" className={`${btn} w-8 px-0 text-red-400`} onClick={remove} aria-label="Excluir conta" title="Excluir conta"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
       {editing && <AccountDialog account={a} tagSuggestions={[]} onClose={() => setEditing(false)} />}
     </section>
