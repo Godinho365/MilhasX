@@ -11,6 +11,7 @@ import { marketValueCents } from "@/domain/ledger";
 import { accountsPeriod, periodFromQuery } from "@/server/services/account-month";
 import { AccountToolbar, MonthHistory } from "../../[id]/month";
 import { PeriodCards } from "../../[id]/period-cards";
+import { OrganizeButton } from "../../[id]/cards-grid";
 
 export default async function ProgramPage({ params, searchParams }: { params: Promise<{ programId: string }>; searchParams: Promise<{ de?: string; ate?: string; periodo?: string }> }) {
   const user = await requirePageUser();
@@ -35,6 +36,7 @@ export default async function ProgramPage({ params, searchParams }: { params: Pr
           <h1 className="text-2xl font-semibold tracking-tight">{program.name}</h1>
           <p className="text-sm text-muted">Todos os titulares · {rows.length} {rows.length === 1 ? "conta" : "contas"}</p>
         </div>
+        <OrganizeButton />
       </div>
 
       <AccountToolbar base={`/app/programs/programa/${program.id}`} range={range} showValues={showValues} hasCpfs={false} exportQuery={`programId=${program.id}`} />

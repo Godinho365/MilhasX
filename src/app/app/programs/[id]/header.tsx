@@ -1,13 +1,14 @@
 "use client";
 // Cabeçalho da conta como na referência: conta ativa, nome, programa e as ações (editar, contato, organizar, excluir).
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Phone, SlidersHorizontal, Trash2, Pin, PinOff, Tags } from "lucide-react";
+import { Pencil, Phone, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { toast, confirmDialog } from "@/components/feedback";
 import { ProgramLogo } from "@/components/program-logo";
 import { AccountDialog, type EditableAccount } from "../client";
+import { openOrganizer } from "./cards-grid";
 
 type Props = {
   account: EditableAccount & { archived: boolean; pinned: boolean; holderId: string };
@@ -25,16 +26,6 @@ export function AccountHeader({ account: a, title, program, phone }: Props) {
   const router = useRouter();
   const nav = useNav();
   const [editing, setEditing] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
-    document.addEventListener("mousedown", close);
-    window.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("mousedown", close); window.removeEventListener("keydown", esc); };
-  }, [menu]);
 
   async function patch(body: Record<string, unknown>, ok: string) {
     const r = await api(`/api/accounts/${a.id}`, "PATCH", body);
@@ -70,15 +61,7 @@ export function AccountHeader({ account: a, title, program, phone }: Props) {
         {phone
           ? <a className={`${btn} w-9 px-0`} href={whatsapp(phone)} target="_blank" rel="noreferrer" aria-label={`WhatsApp de ${a.holderName}`} title={`WhatsApp de ${a.holderName}: ${phone}`}><Phone className="h-4 w-4" /></a>
           : <button type="button" className={`${btn} w-9 px-0 opacity-50`} disabled aria-label="Titular sem telefone" title="Cadastre o telefone/WhatsApp no titular para falar com ele daqui"><Phone className="h-4 w-4" /></button>}
-        <div ref={menuRef} className="relative col-span-2">
-          <button type="button" className={`${btn} w-full`} aria-expanded={menu} aria-haspopup="menu" onClick={() => setMenu((m) => !m)}><SlidersHorizontal className="h-4 w-4" />Organizar</button>
-          {menu && (
-            <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-56 rounded-xl border border-line bg-panel2 p-1 shadow-xl">
-              <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setMenu(false); patch({ pinned: !a.pinned }, a.pinned ? "Tirada da barra lateral" : "Fixada na barra lateral"); }}>{a.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}{a.pinned ? "Tirar da barra lateral" : "Fixar na barra lateral"}</button>
-              <button role="menuitem" type="button" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setMenu(false); setEditing(true); }}><Tags className="h-4 w-4" />Nome e tags</button>
-            </div>
-          )}
-        </div>
+        <button type="button" className={`${btn} col-span-2`} onClick={openOrganizer}><SlidersHorizontal className="h-4 w-4" />Organizar</button>
         <button type="button" className={`${btn} col-span-2 text-red-300`} onClick={remove}><Trash2 className="h-4 w-4" />Excluir conta</button>
       </div>
       {editing && <AccountDialog account={a} tagSuggestions={[]} onClose={() => setEditing(false)} />}

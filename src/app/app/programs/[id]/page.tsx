@@ -43,8 +43,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
 
       <PeriodCards m={m} showValues={showValues} marketValueCents={stats.marketValueCents} />
 
-      <MonthHistory data={m} color={a.program.color} showValues={showValues} fullHref={`/app/entries?accountId=${a.id}`} />
-
       {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
       {hasCpfs && <div id="cpfs" className="mt-4 scroll-mt-20"><BeneficiaryLimit accountId={a.id} title={`${a.program.name} ${shortName(a.holder.name)}`} /></div>}
       {bonus && <div className="mt-4"><BonusCapCard b={bonus} /></div>}
@@ -53,6 +51,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         accountId={a.id}
         items={d.recurrences.map((r) => ({ id: r.id, type: r.type, description: r.description, points: r.points, costCents: r.costCents, frequency: r.frequency, nextDate: r.nextDate.toISOString(), notify: r.notify, active: r.active }))}
       />
+
+      <MonthHistory data={m} color={a.program.color} showValues={showValues} fullHref={`/app/entries?accountId=${a.id}`} />
       <Credentials accountId={a.id} saved={d.credential ? d.credential.updatedAt.toISOString() : null} enabled={credentialsEnabled()} />
     </>
   );
