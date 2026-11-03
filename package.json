@@ -12,7 +12,6 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:logos": "tsx scripts/import-program-logos.ts",
-    "stores:import": "tsx scripts/import-stores.ts",
     "admin:create": "tsx scripts/create-admin.ts",
     "ledger:recalc": "tsx scripts/recalc-ledger.ts",
     "test": "vitest run",

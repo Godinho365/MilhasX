@@ -18,8 +18,6 @@ import * as summary from "@/app/api/summary/route";
 import * as alerts from "@/app/api/alerts/route";
 import * as notifications from "@/app/api/notifications/route";
 import * as notificationsClear from "@/app/api/notifications/clear/route";
-import * as promotions from "@/app/api/promotions/route";
-import * as adminPromotions from "@/app/api/admin/promotions/route";
 import * as adminGuides from "@/app/api/admin/guides/route";
 import * as adminNews from "@/app/api/admin/news/route";
 import * as news from "@/app/api/news/route";
@@ -162,24 +160,6 @@ describe("cartões e faturas", () => {
 
   it("não cria cartão em conta de outro usuário", async () => {
     expect((await b.call(cards.POST, "POST", "/c", { accountId: accA, name: "X", pointsPerDollar: 100, dollarRateCents: 550, closingDay: 1, dueDay: 8 })).status).toBe(404);
-  });
-});
-
-describe("promoções", () => {
-  it("só admin cria; quem tem alerta compatível é avisado; ativas × histórico", async () => {
-    const body = { kind: "TRANSFER_BONUS", title: "Bônus de 80%", fromProgramId: p.livelo.id, toProgramId: p.latam.id, bonusPercent: 80, startsAt: day(0), endsAt: day(5), active: true };
-    expect((await a.call(adminPromotions.POST, "POST", "/p", body)).status).toBe(403);
-
-    await a.call(alerts.POST, "POST", "/al", { type: "PROMOTION", programId: p.latam.id, threshold: 50 });
-    await b.call(alerts.POST, "POST", "/al", { type: "PROMOTION", programId: p.latam.id, threshold: 100 });
-    expect((await admin.call(adminPromotions.POST, "POST", "/p", body)).status).toBe(201);
-    expect((await a.call(notifications.GET, "GET", "/n")).data.unread).toBe(1);
-    expect((await b.call(notifications.GET, "GET", "/n")).data.unread).toBe(0);
-
-    await admin.call(adminPromotions.POST, "POST", "/p", { ...body, title: "Antiga", startsAt: day(-10), endsAt: day(-3) });
-    expect((await a.call(promotions.GET, "GET", "/api/promotions")).data.items).toHaveLength(1);
-    expect((await a.call(promotions.GET, "GET", "/api/promotions?history=1")).data.items).toHaveLength(1);
-    expect((await admin.call(adminPromotions.POST, "POST", "/p", { ...body, url: "javascript:alert(1)" })).status).toBe(400);
   });
 });
 

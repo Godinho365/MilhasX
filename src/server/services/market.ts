@@ -1,150 +1,19 @@
-// Lojas parceiras, favoritos, alertas, clientes, vendas, notificações e relatórios.
+// Alertas de saldo, clientes, vendas, notificações e relatórios.
 import type { EntryType, Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
-import { assertWithinLimit } from "./plan-limits";
 import { ENTRY_LABELS } from "@/domain/ledger";
-
-export type StoreSort = "popular" | "points" | "cashback" | "name";
-
-/**
- * Lojas com a melhor oferta de pontos (do programa filtrado, se houver) e de cashback.
- * "Mais populares" = mais favoritadas e mais usadas em compras.
- */
-type OfferRow = { pointsPerReal: number; upTo: boolean; perDollar: boolean; clubPointsPerReal: number | null; regularPointsPerReal: number | null; promotion: boolean; promoEndsAt: Date | null; partnerLink: string | null; observedAt: Date | null; cashbackBps: number; portal: string | null; program: { id: string; name: string; color: string; logoUpdatedAt: Date | null } | null };
-const pointsView = (o: OfferRow) => ({
-  pointsPerReal: o.pointsPerReal / 100,
-  program: o.program!.name,
-  programId: o.program!.id,
-  programColor: o.program!.color,
-  programLogo: o.program!.logoUpdatedAt?.getTime().toString() ?? null,
-  upTo: o.upTo,
-  perDollar: o.perDollar,
-  club: o.clubPointsPerReal != null && o.clubPointsPerReal > o.pointsPerReal ? o.clubPointsPerReal / 100 : null,
-  regular: o.regularPointsPerReal != null ? o.regularPointsPerReal / 100 : null,
-  promotion: o.promotion,
-  promoEndsAt: o.promoEndsAt?.toISOString() ?? null,
-  // Só links http(s) do próprio programa vão para a tela
-  link: o.partnerLink && /^https:\/\//.test(o.partnerLink) ? o.partnerLink : null,
-  observedAt: o.observedAt?.toISOString() ?? null,
-});
-
-const cashView = (o: OfferRow) => ({
-  percent: o.cashbackBps / 100,
-  portal: o.portal ?? "",
-  upTo: o.upTo,
-  link: o.partnerLink && /^https:\/\//.test(o.partnerLink) ? o.partnerLink : null,
-  observedAt: o.observedAt?.toISOString() ?? null,
-});
-
-export async function listStores(userId: string, opts: { q?: string; favorites?: boolean; page?: number; programId?: string; sort?: StoreSort }) {
-  const pageSize = 18;
-  const page = Math.max(opts.page ?? 1, 1);
-  const where: Prisma.StoreWhereInput = {
-    active: true,
-    name: opts.q ? { contains: opts.q, mode: "insensitive" } : undefined,
-    favorites: opts.favorites ? { some: { userId } } : undefined,
-    offers: opts.programId ? { some: { programId: opts.programId, pointsPerReal: { gt: 0 } } } : undefined,
-  };
-  const [stores, favs] = await Promise.all([
-    prisma.store.findMany({ where, include: { offers: { include: { program: true } }, _count: { select: { favorites: true, bonusPurchases: true } } }, orderBy: { name: "asc" } }),
-    prisma.favoriteStore.findMany({ where: { userId }, select: { storeId: true } }),
-  ]);
-  const favSet = new Set(favs.map((f) => f.storeId));
-  const all = stores.map((st) => {
-    const points = st.offers.filter((o) => o.programId && o.pointsPerReal > 0 && (!opts.programId || o.programId === opts.programId)).sort((a, b) => b.pointsPerReal - a.pointsPerReal);
-    const cash = st.offers.filter((o) => o.cashbackBps > 0).sort((a, b) => b.cashbackBps - a.cashbackBps);
-    return {
-      id: st.id,
-      name: st.name,
-      logo: st.logoUpdatedAt?.getTime().toString() ?? null,
-      favorite: favSet.has(st.id),
-      popularity: st._count.favorites * 2 + st._count.bonusPurchases,
-      bestPoints: points[0] ? pointsView(points[0]) : null,
-      programs: points.map(pointsView),
-      bestCashback: cash[0] ? cashView(cash[0]) : null,
-      cashbacks: cash.map(cashView),
-    };
-  });
-  const sort = opts.sort ?? "popular";
-  all.sort((a, b) =>
-    sort === "points" ? (b.bestPoints?.pointsPerReal ?? 0) - (a.bestPoints?.pointsPerReal ?? 0) || a.name.localeCompare(b.name)
-    : sort === "cashback" ? (b.bestCashback?.percent ?? 0) - (a.bestCashback?.percent ?? 0) || a.name.localeCompare(b.name)
-    : sort === "name" ? a.name.localeCompare(b.name)
-    : b.popularity - a.popularity || a.name.localeCompare(b.name),
-  );
-  const total = all.length;
-  const items = all.slice((page - 1) * pageSize, page * pageSize).map(({ popularity: _p, ...rest }) => rest);
-  return { total, page, pages: Math.max(1, Math.ceil(total / pageSize)), items };
-}
-
-/**
- * "Ative em um clique": lojas favoritas e as mais usadas nas compras, sem alerta ainda.
- * Sugere avisar a partir de 1,5× a melhor oferta atual (mínimo 3 pts/R$).
- */
-export async function alertSuggestions(userId: string) {
-  const [favs, used, existing] = await Promise.all([
-    prisma.favoriteStore.findMany({ where: { userId }, select: { storeId: true } }),
-    prisma.bonusPurchase.groupBy({ by: ["storeId"], where: { userId, storeId: { not: null } }, _count: true, orderBy: { _count: { storeId: "desc" } }, take: 10 }),
-    prisma.alert.findMany({ where: { userId, type: "STORE_POINTS" }, select: { storeId: true } }),
-  ]);
-  const taken = new Set(existing.map((a) => a.storeId));
-  const ids = [...new Set([...favs.map((f) => f.storeId), ...used.map((u) => u.storeId!)])].filter((id) => !taken.has(id));
-  let stores = await prisma.store.findMany({ where: { id: { in: ids }, active: true }, include: { offers: { where: { programId: { not: null } }, orderBy: { pointsPerReal: "desc" }, take: 1 } } });
-  // Sem favoritas nem compras: começa pelas lojas mais populares
-  if (stores.length === 0) {
-    stores = await prisma.store.findMany({ where: { active: true, id: { notIn: [...taken].filter((x): x is string => !!x) } }, include: { offers: { where: { programId: { not: null } }, orderBy: { pointsPerReal: "desc" }, take: 1 } }, orderBy: { favorites: { _count: "desc" } }, take: 4 });
-  }
-  return stores.slice(0, 6).map((st) => {
-    const best = (st.offers[0]?.pointsPerReal ?? 0) / 100;
-    return { storeId: st.id, name: st.name, threshold: Math.max(3, Math.ceil(best * 1.5)) };
-  });
-}
-
-export async function toggleFavorite(userId: string, storeId: string) {
-  const store = await prisma.store.findUnique({ where: { id: storeId } });
-  if (!store) throw new DomainError(404, "Loja não encontrada");
-  const key = { userId_storeId: { userId, storeId } };
-  const existing = await prisma.favoriteStore.findUnique({ where: key });
-  if (existing) {
-    await prisma.favoriteStore.delete({ where: key });
-    return { favorite: false };
-  }
-  await prisma.favoriteStore.create({ data: { userId, storeId } });
-  return { favorite: true };
-}
 
 export async function listAlerts(userId: string) {
   return prisma.alert.findMany({
     where: { userId },
-    include: { store: true, program: true, account: { include: { program: true, holder: true } } },
+    include: { program: true, account: { include: { program: true, holder: true } } },
     orderBy: { createdAt: "desc" },
   });
 }
 
-export async function createAlert(
-  userId: string,
-  input: { type: "STORE_POINTS" | "MIN_BALANCE" | "PROMOTION"; storeId?: string; programId?: string; accountId?: string; threshold: number },
-) {
-  if (input.type === "PROMOTION") {
-    if (!Number.isInteger(input.threshold) || input.threshold < 0 || input.threshold > 300) throw new DomainError(400, "Bônus mínimo inválido");
-    if (input.programId && !(await prisma.program.findUnique({ where: { id: input.programId } }))) throw new DomainError(400, "Programa inválido");
-    return prisma.alert.create({ data: { userId, type: "PROMOTION", programId: input.programId ?? null, threshold: input.threshold } });
-  }
+/** Alerta de saldo mínimo: avisa quando o saldo da conta fica abaixo do limite (em pontos). */
+export async function createAlert(userId: string, input: { type: "MIN_BALANCE"; accountId?: string; threshold: number }) {
   if (!Number.isInteger(input.threshold) || input.threshold <= 0) throw new DomainError(400, "Limite inválido");
-  if (input.type === "STORE_POINTS") {
-    if (!input.storeId || !(await prisma.store.findUnique({ where: { id: input.storeId } }))) {
-      throw new DomainError(400, "Escolha uma loja");
-    }
-    if (input.programId && !(await prisma.program.findUnique({ where: { id: input.programId } }))) {
-      throw new DomainError(400, "Programa inválido");
-    }
-    await assertWithinLimit(userId, "storeAlerts");
-    const alert = await prisma.alert.create({
-      data: { userId, type: "STORE_POINTS", storeId: input.storeId, programId: input.programId ?? null, threshold: input.threshold },
-    });
-    await evaluateStoreAlerts(input.storeId);
-    return alert;
-  }
   if (!input.accountId || !(await prisma.account.findFirst({ where: { id: input.accountId, userId } }))) {
     throw new DomainError(400, "Escolha uma conta");
   }
@@ -154,32 +23,6 @@ export async function createAlert(
 export async function deleteAlert(userId: string, id: string) {
   const { count } = await prisma.alert.deleteMany({ where: { id, userId } });
   if (!count) throw new DomainError(404, "Alerta não encontrado");
-}
-
-/** Dispara notificações para alertas de loja cuja oferta atingiu o limite. */
-export async function evaluateStoreAlerts(storeId: string) {
-  const [alerts, offers] = await Promise.all([
-    prisma.alert.findMany({ where: { storeId, type: "STORE_POINTS", active: true }, include: { store: true } }),
-    prisma.storeOffer.findMany({ where: { storeId, programId: { not: null } }, include: { program: true } }),
-  ]);
-  for (const al of alerts) {
-    const match = offers
-      .filter((o) => !al.programId || o.programId === al.programId)
-      .sort((a, b) => b.pointsPerReal - a.pointsPerReal)[0];
-    const hit = !!match && match.pointsPerReal >= al.threshold;
-    if (hit && !al.lastTriggeredAt) {
-      await prisma.notification.create({
-        data: {
-          userId: al.userId,
-          title: `Alerta: ${al.store!.name}`,
-          body: `${al.store!.name} está dando ${(match!.pointsPerReal / 100).toLocaleString("pt-BR")} pts/R$ em ${match!.program!.name}.`,
-        },
-      });
-      await prisma.alert.update({ where: { id: al.id }, data: { lastTriggeredAt: new Date() } });
-    } else if (!hit && al.lastTriggeredAt) {
-      await prisma.alert.update({ where: { id: al.id }, data: { lastTriggeredAt: null } });
-    }
-  }
 }
 
 /** Clientes com a data da última compra (venda em que aparecem em algum item). */

@@ -1,11 +1,10 @@
-// Detalhe da conta: recorrências (clubes), compras bonificadas pendentes e credenciais criptografadas.
+// Detalhe da conta: recorrências (clubes) e credenciais criptografadas.
 import { beneficiaryExpiry, beneficiaryKey, countDistinct, effectiveLimit, holderCpf, isAnonymous, windowStart, withoutHolder, type BeneficiaryWindow } from "@/domain/beneficiaries";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { EntryType, RecurrenceFrequency } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
 import { verifyPassword } from "../auth";
 import { createEntry, deleteEntry } from "./ledger";
-import { detectAttachment } from "./holder-files";
 import { cpmCents, marketValueCents, CREDIT_TYPES } from "@/domain/ledger";
 
 async function ownAccount(userId: string, accountId: string) {
@@ -21,10 +20,9 @@ const utcDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
 export async function accountDetail(userId: string, accountId: string) {
   const acc = await ownAccount(userId, accountId);
-  const [recent, pendingPoints, purchases, recurrences, credential] = await Promise.all([
+  const [recent, pendingPoints, recurrences, credential] = await Promise.all([
     prisma.entry.findMany({ where: { accountId }, orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }], take: 6 }),
     prisma.entry.aggregate({ where: { accountId, status: "PENDING", points: { gt: 0 } }, _sum: { points: true } }),
-    prisma.bonusPurchase.findMany({ where: { accountId, status: { in: ["PENDING", "DELIVERED"] } }, orderBy: { purchasedAt: "desc" } }),
     prisma.recurrence.findMany({ where: { accountId }, orderBy: { nextDate: "asc" } }),
     prisma.accountCredential.findUnique({ where: { accountId }, select: { updatedAt: true } }),
   ]);
@@ -37,7 +35,6 @@ export async function accountDetail(userId: string, accountId: string) {
       marketValueCents: marketValueCents(acc.balance, acc.program.marketValueCpmCents),
     },
     recent,
-    purchases,
     recurrences,
     credential: credential ? { updatedAt: credential.updatedAt } : null,
   };
@@ -152,151 +149,6 @@ export async function processDueRecurrences(userId: string, today = new Date()) 
     await prisma.recurrence.updateMany({ where: { id: r.id, nextDate: r.nextDate }, data: { nextDate: next, ...(ended ? { active: false } : {}) } });
   }
   return created;
-}
-
-/* ---------------- Compras bonificadas ---------------- */
-
-export const expectedPurchasePoints = (amountCents: number, pointsPerRealX100: number) => Math.floor((amountCents / 100) * (pointsPerRealX100 / 100));
-
-export interface PurchaseInput {
-  accountId: string;
-  storeId?: string | null;
-  storeName: string;
-  description?: string | null;
-  purchasedAt: Date;
-  amountCents: number;
-  extraCostCents: number;
-  costs?: { type: string; amountCents: number }[];
-  pointsPerReal: number;
-  expectedAt?: Date | null;
-  expectedDeliveryAt?: Date | null;
-  tags?: string[];
-  notes?: string | null;
-}
-
-export const PURCHASE_COST_LABELS: Record<string, string> = { DIFERENCA_PRECO: "Diferença de preço", FRETE: "Frete", TAXAS: "Taxas", OUTROS: "Outros" };
-
-export async function createPurchase(userId: string, input: PurchaseInput) {
-  await ownAccount(userId, input.accountId);
-  let storeName = input.storeName.trim();
-  if (input.storeId) {
-    const s = await prisma.store.findUnique({ where: { id: input.storeId } });
-    if (!s) throw new DomainError(404, "Loja não encontrada");
-    storeName = storeName || s.name;
-  }
-  // Sem loja parceira, a compra é identificada pela descrição
-  storeName = storeName || input.description?.trim() || "Compra";
-  const costs = input.costs?.filter((c) => c.amountCents > 0) ?? [];
-  const { costs: _c, tags, ...rest } = input;
-  return prisma.bonusPurchase.create({
-    data: {
-      ...rest,
-      userId,
-      storeName,
-      storeId: input.storeId ?? null,
-      description: input.description?.trim() || null,
-      notes: input.notes?.trim() || null,
-      extraCostCents: costs.length ? costs.reduce((t, c) => t + c.amountCents, 0) : input.extraCostCents,
-      costs: costs.length ? costs : undefined,
-      tags: [...new Set((tags ?? []).map((t) => t.trim()).filter(Boolean))],
-      expectedPoints: expectedPurchasePoints(input.amountCents, input.pointsPerReal),
-    },
-  });
-}
-
-export function listPurchases(userId: string, status?: "PENDING" | "DELIVERED" | "RECEIVED" | "CANCELED") {
-  return prisma.bonusPurchase.findMany({
-    where: { userId, status },
-    include: { account: { include: { program: true, holder: true } }, _count: { select: { attachments: true } } },
-    orderBy: { purchasedAt: "desc" },
-    take: 200,
-  });
-}
-
-/** Pontos caíram: lança o crédito (custo = custo extra) e marca a compra como recebida. */
-export async function receivePurchase(userId: string, id: string, input: { points?: number; receivedAt: Date }) {
-  const p = await prisma.bonusPurchase.findFirst({ where: { id, userId } });
-  if (!p) throw new DomainError(404, "Compra não encontrada");
-  if (p.status !== "PENDING" && p.status !== "DELIVERED") throw new DomainError(409, "A compra não está aguardando pontos");
-  const points = input.points ?? p.expectedPoints;
-  if (!Number.isInteger(points) || points <= 0) throw new DomainError(400, "Informe os pontos recebidos");
-  const { entry } = await createEntry(userId, {
-    accountId: p.accountId,
-    type: "PARTNER_PURCHASE",
-    points,
-    costCents: p.extraCostCents,
-    occurredAt: input.receivedAt,
-    description: p.storeId ? `Compra em ${p.storeName}` : p.description ?? `Compra em ${p.storeName}`,
-    idempotencyKey: `purchase:${p.id}`,
-  });
-  // Só uma requisição consegue sair de PENDING
-  const { count } = await prisma.bonusPurchase.updateMany({ where: { id: p.id, status: { in: ["PENDING", "DELIVERED"] } }, data: { status: "RECEIVED", entryId: entry.id, deliveredAt: p.deliveredAt ?? input.receivedAt } });
-  if (!count) throw new DomainError(409, "A compra não está aguardando pontos");
-  return entry;
-}
-
-/** Kanban: entre "Aguardando entrega" e "Aguardando pontos" (receber os pontos é outra ação). */
-export async function movePurchase(userId: string, id: string, stage: "PENDING" | "DELIVERED", date?: Date) {
-  const { count } = await prisma.bonusPurchase.updateMany({
-    where: { id, userId, status: { in: ["PENDING", "DELIVERED"] } },
-    data: { status: stage, deliveredAt: stage === "DELIVERED" ? (date ?? new Date()) : null },
-  });
-  if (!count) throw new DomainError(404, "Compra em andamento não encontrada");
-}
-
-/* Evidências da compra: prints, recibos ou vídeos (PNG, JPEG, WEBP, HEIC, PDF, MP4, MOV), 10 MB no total */
-export const PURCHASE_MAX_FILES = 10;
-export const PURCHASE_MAX_TOTAL = 10 * 1024 * 1024;
-
-export function detectEvidence(buf: Buffer): string | null {
-  const known = detectAttachment(buf);
-  if (known) return known;
-  if (buf.length >= 12 && buf.subarray(4, 8).toString("ascii") === "ftyp") {
-    const brand = buf.subarray(8, 12).toString("ascii");
-    if (brand === "qt  ") return "video/quicktime";
-    if (["isom", "iso2", "mp41", "mp42", "avc1", "M4V ", "dash"].includes(brand)) return "video/mp4";
-  }
-  return null;
-}
-
-async function ownPurchase(userId: string, purchaseId: string) {
-  const p = await prisma.bonusPurchase.findFirst({ where: { id: purchaseId, userId }, select: { id: true } });
-  if (!p) throw new DomainError(404, "Compra não encontrada");
-}
-
-export async function listPurchaseFiles(userId: string, purchaseId: string) {
-  await ownPurchase(userId, purchaseId);
-  return prisma.purchaseAttachment.findMany({ where: { purchaseId, userId }, select: { id: true, name: true, mime: true, size: true }, orderBy: { createdAt: "asc" } });
-}
-
-export async function addPurchaseFile(userId: string, purchaseId: string, name: string, buf: Buffer) {
-  await ownPurchase(userId, purchaseId);
-  if (buf.length === 0) throw new DomainError(400, "Arquivo vazio");
-  const mime = detectEvidence(buf);
-  if (!mime) throw new DomainError(415, "Envie PNG, JPEG, WEBP, HEIC, PDF, MP4 ou MOV");
-  const agg = await prisma.purchaseAttachment.aggregate({ where: { purchaseId }, _count: true, _sum: { size: true } });
-  if (agg._count >= PURCHASE_MAX_FILES) throw new DomainError(409, `No máximo ${PURCHASE_MAX_FILES} arquivos por compra`);
-  if ((agg._sum.size ?? 0) + buf.length > PURCHASE_MAX_TOTAL) throw new DomainError(413, "As evidências da compra passam de 10 MB");
-  const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "arquivo";
-  return prisma.purchaseAttachment.create({ data: { purchaseId, userId, name: clean, mime, size: buf.length, data: new Uint8Array(buf) }, select: { id: true, name: true, mime: true, size: true } });
-}
-
-export async function getPurchaseFile(userId: string, purchaseId: string, id: string) {
-  const a = await prisma.purchaseAttachment.findFirst({ where: { id, purchaseId, userId } });
-  if (!a) throw new DomainError(404, "Arquivo não encontrado");
-  return { name: a.name, mime: a.mime, data: Buffer.from(a.data) };
-}
-
-export async function cancelPurchase(userId: string, id: string) {
-  const { count } = await prisma.bonusPurchase.updateMany({ where: { id, userId, status: { in: ["PENDING", "DELIVERED"] } }, data: { status: "CANCELED" } });
-  if (!count) throw new DomainError(404, "Compra em andamento não encontrada");
-}
-
-export async function deletePurchase(userId: string, id: string) {
-  const p = await prisma.bonusPurchase.findFirst({ where: { id, userId } });
-  if (!p) throw new DomainError(404, "Compra não encontrada");
-  if (p.entryId) await deleteEntry(userId, p.entryId);
-  await prisma.bonusPurchase.delete({ where: { id } });
 }
 
 /* ---------------- Credenciais (AES-256-GCM) ---------------- */

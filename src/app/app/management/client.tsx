@@ -9,7 +9,7 @@ import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { Avatar, ProgramDot } from "@/components/stat";
 import { toast, confirmDialog } from "@/components/feedback";
 import { PointsInput, parsePts } from "@/components/form-parts";
-import { TagsInput } from "../purchases/purchases";
+import { TagsInput } from "@/components/tags-input";
 
 type Acc = { id: string; supplierId: string; supplier: string; programId: string; program: string; color: string; identifier: string | null; balance: number; priceCpmCents: number; cpfAvailable: number | null; tags: string[]; avgUsage: number | null; notes: string | null; updatedAt: string };
 

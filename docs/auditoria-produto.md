@@ -12,7 +12,7 @@ Legenda de estado: **C** = confirmado, **P** = parcialmente observado, **H** = h
 Barra lateral agrupada:
 
 - **Análise:** Painel (`/app`), Relatórios (`/app/reports/overview`), Extrato (`/app/entries`)
-- **Ganhar pontos:** Compras (`/app/purchases`, abas Lojas / Compras / Alertas), Promoções, Cartões de crédito
+- **Ganhar pontos:** Cartões de crédito (alertas de saldo em Notificações)
 - **Ferramentas:** Simuladores (`/app/simulators/purchase/bonificada`), Vendas (abas Vendas / Clientes), Fornecedores (abas Contas / Fornecedores)
 - **Programas** (`/app/programs`, visões "por titular" e "por programa"), Guias, Novidades (contador de não lidas), suporte por e-mail
 - Seletor global "Trocar titular" (todos ou um titular)

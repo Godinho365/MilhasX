@@ -416,7 +416,6 @@ type Detail = {
   };
   recurrence: { id: string; description: string; active: boolean } | null;
   legs: { id: string; type: EntryType; points: number; costCents: number; status: string; account: { program: { name: string }; holder: { name: string } } }[];
-  store: { name: string } | null;
 };
 const longDate = (d: string) => new Date(d).toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -467,7 +466,6 @@ function DetailsDialog({ row, onClose, onEdit }: { row: Row; onClose: () => void
           <div className="divide-y divide-line">
             {line("Pontos", <span className={credit ? "text-ok" : "text-bad"}>{fmtSignedPts(row.points)}</span>)}
             {line("Data", longDate(row.date))}
-            {data?.store && line("Loja parceira", data.store.name)}
             {det.parityFrom && line("Paridade", `${det.parityFrom}:${det.parityTo}`)}
             {det.cashReferenceCents != null && line("Valor de referência", fmtBRL(det.cashReferenceCents))}
             {det.passengers != null && line("Passageiros", det.passengers)}

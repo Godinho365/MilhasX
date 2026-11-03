@@ -2,7 +2,7 @@
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useState } from "react";
-import { CalendarClock, Plus, Bell, BellOff, MoreHorizontal, Trash2, Pause, Play, KeyRound, ShoppingBag, Eye, Copy, Pencil, Check } from "lucide-react";
+import { CalendarClock, Plus, Bell, BellOff, MoreHorizontal, Trash2, Pause, Play, KeyRound, Eye, Copy, Pencil, Check } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
 import { MANUAL_CREDIT_TYPES, ENTRY_LABELS, type EntryType } from "@/domain/ledger";
@@ -22,31 +22,6 @@ function Head({ icon, tone, title, sub, action }: { icon: React.ReactNode; tone:
       </div>
       {action}
     </div>
-  );
-}
-
-export function PendingPurchases({ items }: { items: { id: string; store: string; purchasedAt: string; amountCents: number; expectedPoints: number; expectedAt: string | null }[] }) {
-  if (items.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-xl bg-panel2/70 px-4 py-12 text-center">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-panel2 text-muted"><ShoppingBag className="h-5 w-5" /></span>
-        <p className="text-sm text-zinc-300">Nenhuma compra pendente.</p>
-        <p className="text-xs text-muted">Suas compras em andamento aparecerão aqui</p>
-      </div>
-    );
-  }
-  return (
-    <ul className="space-y-2">
-      {items.map((p) => (
-        <li key={p.id} className="flex items-center gap-3 rounded-xl bg-panel2/70 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{p.store}</p>
-            <p className="text-xs text-muted">{dm(p.purchasedAt)} · {fmtBRL(p.amountCents)}{p.expectedAt && ` · previsto ${dm(p.expectedAt)}`}</p>
-          </div>
-          <span className="text-sm font-semibold tabular-nums text-amber-300">+{fmtPts(p.expectedPoints)}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 

@@ -1,5 +1,5 @@
 // Dados de demonstração SINTÉTICOS. Nada aqui vem de clientes reais.
-// Uso: npm run db:seed  (idempotente para programas/lojas; recria a conta demo)
+// Uso: npm run db:seed  (idempotente para programas; recria a conta demo)
 import { existsSync } from "node:fs";
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -27,23 +27,6 @@ async function main() {
   }
   // Ícones dos programas (só onde o admin ainda não enviou um)
   await importProgramLogos(prisma);
-
-  // Lojas fictícias (nomes genéricos) com ofertas de exemplo
-  const stores: [string, string | null, number, string | null, number][] = [
-    ["Loja Exemplo Eletrônicos", "LIVELO", 300, "Portal Cashback A", 250],
-    ["Mercado Demo", "ESFERA", 200, null, 0],
-    ["Moda Fictícia", "LIVELO", 800, "Portal Cashback B", 600],
-    ["Farmácia Teste", "SMILES", 150, "Portal Cashback A", 400],
-    ["Viagens Simuladas", "AZUL", 500, null, 0],
-    ["Esportes Demo", "LATAM", 400, "Portal Cashback C", 300],
-  ];
-  for (const [name, code, ppr, portal, cash] of stores) {
-    const s = await prisma.store.upsert({ where: { name }, update: {}, create: { name } });
-    if (!(await prisma.storeOffer.count({ where: { storeId: s.id } }))) {
-      if (code) await prisma.storeOffer.create({ data: { storeId: s.id, programId: prog[code]!, pointsPerReal: ppr } });
-      if (portal) await prisma.storeOffer.create({ data: { storeId: s.id, portal, cashbackBps: cash } });
-    }
-  }
 
   // Conta demo (senha só para ambiente local; troque ou apague em produção)
   const email = "demo@milheiro.local";
@@ -83,11 +66,9 @@ async function main() {
   const card = await createCard(user.id, { accountId: l1, name: "Cartão Exemplo Black", brand: "Mastercard", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10, annualFeeCents: 0 });
   await addInvoice(user.id, card.id, { closingDate: d("2026-10-03"), dueDate: d("2026-10-10"), amountCents: 450000 });
 
-  const { upsertRecurrence, createPurchase } = await import("../src/server/services/accounts");
+  const { upsertRecurrence } = await import("../src/server/services/accounts");
   const nextMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 21));
   await upsertRecurrence(user.id, null, { accountId: l1, type: "CLUB", description: "Pontos de clube", points: 2000, costCents: 4990, frequency: "MONTHLY", nextDate: nextMonth, notify: true });
-  const store = await prisma.store.findUnique({ where: { name: "Moda Fictícia" } });
-  await createPurchase(user.id, { accountId: l1, storeId: store?.id ?? null, storeName: "Moda Fictícia", purchasedAt: d("2026-10-15"), amountCents: 50000, extraCostCents: 0, pointsPerReal: 800, expectedAt: d("2026-11-15") });
 
   await seedContent(prisma);
 

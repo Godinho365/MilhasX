@@ -1,6 +1,5 @@
 import type { Prisma, ProgramKind } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
-import { evaluateStoreAlerts } from "./market";
 import { detectImage } from "./extras";
 
 export async function listUsers(q?: string) {
@@ -77,21 +76,6 @@ export async function removeProgramLogo(actorId: string, programId: string) {
 export async function getProgramLogo(programId: string) {
   const l = await prisma.programLogo.findUnique({ where: { programId } });
   return l ? { data: Buffer.from(l.data), mime: l.mime } : null;
-}
-
-export async function upsertStoreOffer(
-  actorId: string,
-  input: { storeName: string; programId?: string | null; pointsPerReal: number; cashbackBps: number; portal?: string | null },
-) {
-  const store = await prisma.store.upsert({ where: { name: input.storeName.trim() }, update: {}, create: { name: input.storeName.trim() } });
-  const existing = await prisma.storeOffer.findFirst({ where: { storeId: store.id, programId: input.programId ?? null, portal: input.portal ?? null } });
-  const data = { pointsPerReal: input.pointsPerReal, cashbackBps: input.cashbackBps };
-  const offer = existing
-    ? await prisma.storeOffer.update({ where: { id: existing.id }, data })
-    : await prisma.storeOffer.create({ data: { ...data, storeId: store.id, programId: input.programId ?? null, portal: input.portal ?? null } });
-  await audit(prisma, actorId, "admin.store_offer", "StoreOffer", offer.id, { store: store.name, ...data });
-  await evaluateStoreAlerts(store.id);
-  return offer;
 }
 
 export async function metrics() {

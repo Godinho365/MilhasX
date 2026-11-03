@@ -1,7 +1,7 @@
-// Fornecedores, cartões e faturas, promoções, guias, novidades, foto de perfil e painel de vendas.
+// Fornecedores, cartões e faturas, guias, novidades, foto de perfil e painel de vendas.
 import { expectedCardPoints, invoiceFeeCents } from "@/domain/cards";
 import type { CostType } from "@/domain/costs";
-import type { GuideKind, GuideLevel, PromotionKind, Prisma } from "@prisma/client";
+import type { GuideKind, GuideLevel, Prisma } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { assertFeature } from "./plan-limits";
 import { createEntry, deleteEntry, updateEntry } from "./ledger";
@@ -268,75 +268,6 @@ export async function cardsOverview(userId: string, holderId?: string) {
     actions,
     cards,
   };
-}
-
-/* ---------------- Promoções ---------------- */
-
-export type PromotionSort = "ending" | "recent" | "bonus";
-
-export function listPromotions(opts: { history?: boolean; kind?: PromotionKind; q?: string; programId?: string; sort?: PromotionSort; take?: number }) {
-  const now = new Date();
-  const orderBy: Prisma.PromotionOrderByWithRelationInput[] = opts.history
-    ? [{ endsAt: "desc" }]
-    : opts.sort === "recent"
-      ? [{ startsAt: "desc" }]
-      : opts.sort === "bonus"
-        ? [{ bonusPercent: "desc" }, { endsAt: "asc" }]
-        : [{ endsAt: "asc" }];
-  return prisma.promotion.findMany({
-    where: {
-      active: true,
-      kind: opts.kind,
-      title: opts.q ? { contains: opts.q, mode: "insensitive" } : undefined,
-      ...(opts.programId ? { OR: [{ fromProgramId: opts.programId }, { toProgramId: opts.programId }] } : {}),
-      ...(opts.history ? { endsAt: { lt: now } } : { endsAt: { gte: now }, startsAt: { lte: now } }),
-    },
-    include: { fromProgram: true, toProgram: true },
-    orderBy,
-    take: opts.take ?? 100,
-  });
-}
-
-export interface PromotionInput {
-  kind: PromotionKind;
-  title: string;
-  description?: string | null;
-  fromProgramId?: string | null;
-  toProgramId?: string | null;
-  bonusPercent: number;
-  url?: string | null;
-  startsAt: Date;
-  endsAt: Date;
-  active: boolean;
-}
-
-export async function upsertPromotion(actorId: string, id: string | null, input: PromotionInput) {
-  if (input.endsAt < input.startsAt) throw new DomainError(400, "O fim precisa ser depois do início");
-  const data = { ...input, title: input.title.trim(), description: input.description?.trim() || null, url: input.url?.trim() || null };
-  const promo = id ? await prisma.promotion.update({ where: { id }, data }) : await prisma.promotion.create({ data });
-  await audit(prisma, actorId, id ? "admin.promotion_update" : "admin.promotion_create", "Promotion", promo.id);
-  if (!id && promo.active) await notifyPromotion(promo.id);
-  return promo;
-}
-
-export async function deletePromotion(actorId: string, id: string) {
-  await prisma.promotion.delete({ where: { id } });
-  await audit(prisma, actorId, "admin.promotion_delete", "Promotion", id);
-}
-
-/** Avisa quem tem alerta de promoção para algum dos programas envolvidos (com bônus mínimo). */
-async function notifyPromotion(promotionId: string) {
-  const p = await prisma.promotion.findUniqueOrThrow({ where: { id: promotionId }, include: { fromProgram: true, toProgram: true } });
-  const programs = [p.fromProgramId, p.toProgramId].filter((x): x is string => !!x);
-  const alerts = await prisma.alert.findMany({
-    where: { type: "PROMOTION", active: true, threshold: { lte: p.bonusPercent }, OR: [{ programId: null }, { programId: { in: programs } }] },
-  });
-  const users = new Set(alerts.map((a) => a.userId));
-  for (const userId of users) {
-    await prisma.notification.create({
-      data: { userId, title: "Nova promoção", body: `${p.title}${p.bonusPercent ? ` (${p.bonusPercent}% de bônus)` : ""} até ${p.endsAt.toLocaleDateString("pt-BR", { timeZone: "UTC" })}.` },
-    });
-  }
 }
 
 /* ---------------- Guias e novidades ---------------- */

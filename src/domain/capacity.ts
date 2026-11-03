@@ -82,3 +82,21 @@ export function rankForEmission<T extends { fit: EmissionFit; load: AccountLoad 
     return heavy ? excessNow(b) - excessNow(a) : excessNow(a) - excessNow(b);
   });
 }
+
+export type PurchaseLine = { target: number; available: number; buy: number; costCents: number; revenueCents: number | null };
+
+/** Sugestor de compra: quanto comprar na conta para usar todos os CPFs livres com `ptsPerCpf` milhas cada.
+ *  Meta = CPFs livres × milhas por CPF; compra = meta − (saldo − reservado), nunca negativa.
+ *  Custo e receita pelo milheiro de compra e (se informado) de venda. */
+export function purchaseLine(a: { balance: number; reserved: number; cpfFree: number }, ptsPerCpf: number, buyCpmCents: number, sellCpmCents: number | null): PurchaseLine {
+  const target = Math.max(0, a.cpfFree) * Math.max(0, ptsPerCpf);
+  const available = a.balance - a.reserved;
+  const buy = Math.max(0, target - available);
+  return {
+    target,
+    available,
+    buy,
+    costCents: Math.round((buy * buyCpmCents) / 1000),
+    revenueCents: sellCpmCents == null ? null : Math.round((buy * sellCpmCents) / 1000),
+  };
+}

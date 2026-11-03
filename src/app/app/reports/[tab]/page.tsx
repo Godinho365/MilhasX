@@ -1,12 +1,12 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PieChart as PieIcon, ShoppingBag, CreditCard, PiggyBank, TrendingUp, HandCoins, Landmark } from "lucide-react";
+import { PieChart as PieIcon, CreditCard, PiggyBank, TrendingUp, HandCoins, Landmark } from "lucide-react";
 import { requirePageUser, selectedHolderId, holderScopeLabel } from "@/server/session";
 import { listPrograms } from "@/server/services/admin";
 import {
   REPORT_TABS, type ReportTab, type ReportFilter, resolvePeriod,
-  overviewReport, purchasesReport, cardsReport, savingsReport, evolutionReport, salesReport, assetsReport, profitPotential,
+  overviewReport, cardsReport, savingsReport, evolutionReport, salesReport, assetsReport, profitPotential,
 } from "@/server/services/reports";
 import { PageHeader, Stat } from "@/components/stat";
 import { Donut, MonthlyMoney, MonthlySales, HBar, CreditsDebits, SeriesLines, StackedMonthly, ExpectedVsReceived } from "@/components/charts";
@@ -17,7 +17,6 @@ import { ReportToolbar } from "../client";
 const PRO_TABS = new Set<ReportTab>(["evolution", "sales", "assets"]);
 const NAV: { key: ReportTab; label: string; icon: React.ElementType; tone: string }[] = [
   { key: "overview", label: "Visão Geral", icon: PieIcon, tone: "bg-blue-500/15 text-blue-400" },
-  { key: "purchases", label: "Compras", icon: ShoppingBag, tone: "bg-green-500/15 text-green-400" },
   { key: "credit-cards", label: "Cartões", icon: CreditCard, tone: "bg-violet-500/15 text-violet-400" },
   { key: "savings", label: "Economia", icon: PiggyBank, tone: "bg-teal-500/15 text-teal-400" },
   { key: "evolution", label: "Evolução", icon: TrendingUp, tone: "bg-cyan-500/15 text-cyan-400" },
@@ -82,7 +81,6 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
             hidePeriod={tab === "assets"}
           />
           {tab === "overview" && <Overview f={f} />}
-          {tab === "purchases" && <Purchases f={f} />}
           {tab === "credit-cards" && <Cards f={f} />}
           {tab === "savings" && <Savings f={f} />}
           {tab === "evolution" && <Evolution f={f} />}
@@ -122,29 +120,6 @@ const List = ({ items, empty }: { items: { name: string; value: string; hint?: s
       ))}
     </ul>
   );
-
-async function Purchases({ f }: { f: ReportFilter }) {
-  const r = await purchasesReport(f);
-  const none = "Sem dados para exibir";
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <Stat label="Pontos acumulados" value={ptsOrDash(r.totals.points)} hint="no período" />
-        <Stat label="Custo extra" value={fmtBRL(r.totals.extraCents)} hint="no período" />
-        <Stat label="CPM médio" value={cpmOrOrganic(r.totals.cpmCents)} hint="custo por milheiro" />
-        <Stat label="Compras" value={String(r.totals.count)} hint={`${r.totals.partners} ${r.totals.partners === 1 ? "parceiro" : "parceiros"}`} />
-      </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card title="Pontos por parceiro" subtitle="Distribuição de pontos acumulados por loja parceira">{r.byStore.length ? <Donut data={r.byStore} label="Gráfico de pontos por parceiro" /> : <Empty text={none} />}</Card>
-        <Card title="Pontos por programa" subtitle="Pontos de compras acumulados por programa">{r.byProgram.length ? <Donut data={r.byProgram} label="Gráfico de pontos de compras por programa" /> : <Empty text={none} />}</Card>
-        <Card title="Pontos por status de compra" subtitle="Pontos no fluxo de acompanhamento, do pedido à finalização">{r.byStatus.length ? <HBar data={r.byStatus} /> : <Empty text={none} />}</Card>
-        <Card title="Origem dos pontos de compra" subtitle="Pontos registrados via acompanhamento de compras vs. lançamento direto">{r.origin.length ? <Donut data={r.origin} label="Gráfico da origem dos pontos de compra" /> : <Empty text={none} />}</Card>
-        <Card title="Custo extra por categoria" subtitle="Quanto você pagou para acumular pontos em compras, por tipo de custo">{r.byCost.length ? <Donut data={r.byCost} money label="Gráfico do custo extra por categoria" /> : <Empty text="Nenhum custo extra registrado" />}</Card>
-        <Card title="Multiplicador médio por parceiro" subtitle="Média ponderada de pontos por real gasto">{r.multiplier.length ? <HBar data={r.multiplier} unit="pts/R$" /> : <Empty text={none} />}</Card>
-      </div>
-    </div>
-  );
-}
 
 async function Cards({ f }: { f: ReportFilter }) {
   const r = await cardsReport(f);

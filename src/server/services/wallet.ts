@@ -241,16 +241,14 @@ export async function recentEntries(userId: string, direction: "credit" | "debit
 }
 
 export async function activationProgress(userId: string) {
-  const [fav, alerts, credits, transfers, sales] = await Promise.all([
-    prisma.favoriteStore.count({ where: { userId } }),
+  const [alerts, credits, transfers, sales] = await Promise.all([
     prisma.alert.count({ where: { userId } }),
     prisma.entry.count({ where: { userId, points: { gt: 0 } } }),
     prisma.entry.count({ where: { userId, type: "TRANSFER_OUT" } }),
     prisma.sale.count({ where: { userId } }),
   ]);
   const steps = [
-    { key: "fav", label: "Favoritar lojas preferidas", done: fav > 0, href: "/app/purchases?tab=lojas" },
-    { key: "alert", label: "Criar um alerta", done: alerts > 0, href: "/app/purchases?tab=alertas" },
+    { key: "alert", label: "Criar um alerta de saldo", done: alerts > 0, href: "/app/notifications" },
     { key: "entry", label: "Registrar entrada de pontos", done: credits > 0, href: "/app/entries?novo=1" },
     { key: "transfer", label: "Registrar uma transferência", done: transfers > 0, href: "/app/entries?novo=transfer" },
     { key: "sale", label: "Registrar uma venda", done: sales > 0, href: "/app/sales" },
@@ -327,21 +325,18 @@ export async function setSelfHolder(userId: string, holderId: string, isSelf: bo
 
 const accountInclude = { account: { include: { program: true, holder: true } } } as const;
 
-/** "Pontos a receber" detalhado: compras pendentes, faturas de cartão fechadas e demais créditos a receber. */
+/** "Pontos a receber" detalhado: faturas de cartão fechadas e demais créditos a receber. */
 export async function pendingBreakdown(userId: string, holderId?: string) {
   const account = holderId ? { holderId } : undefined;
-  const [purchases, entries] = await Promise.all([
-    prisma.bonusPurchase.findMany({ where: { userId, status: { in: ["PENDING", "DELIVERED"] }, account }, include: accountInclude, orderBy: { purchasedAt: "desc" } }),
-    prisma.entry.findMany({
-      where: { userId, status: "PENDING", points: { gt: 0 }, account },
-      include: { ...accountInclude, invoice: { include: { card: true } } },
-      orderBy: { occurredAt: "asc" },
-    }),
-  ]);
+  const entries = await prisma.entry.findMany({
+    where: { userId, status: "PENDING", points: { gt: 0 }, account },
+    include: { ...accountInclude, invoice: { include: { card: true } } },
+    orderBy: { occurredAt: "asc" },
+  });
   const invoices = entries.filter((e) => e.invoice);
   const others = entries.filter((e) => !e.invoice);
-  const total = purchases.reduce((s, p) => s + p.expectedPoints, 0) + entries.reduce((s, e) => s + e.points, 0);
-  return { purchases, invoices, others, total };
+  const total = entries.reduce((s, e) => s + e.points, 0);
+  return { invoices, others, total };
 }
 
 /** Painel "Visão Geral": créditos e débitos por mês (mês atual e 3 anteriores) e últimos lançamentos. */

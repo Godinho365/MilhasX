@@ -103,7 +103,6 @@ export interface NewEntryInput {
   points: number; // sempre positivo; o sinal vem do tipo
   costCents?: number;
   costs?: CostItemInput[]; // quando informado, o custo do crédito é a soma dos itens
-  storeId?: string | null;
   details?: Prisma.InputJsonValue | null;
   occurredAt: Date;
   description?: string;
@@ -132,12 +131,7 @@ export async function createEntry(userId: string, input: NewEntryInput) {
       if (cardIds.length && (await tx.creditCard.count({ where: { id: { in: cardIds }, userId } })) !== cardIds.length) {
         throw new DomainError(404, "Cartão não encontrado");
       }
-      let description = input.description?.trim() || defaultDescription(input.type, input.points);
-      if (input.storeId) {
-        const store = await tx.store.findUnique({ where: { id: input.storeId } });
-        if (!store) throw new DomainError(404, "Loja não encontrada");
-        if (!input.description?.trim()) description = `Compra em ${store.name}`;
-      }
+      const description = input.description?.trim() || defaultDescription(input.type, input.points);
       return tx.entry.create({
         data: {
           userId,
@@ -149,7 +143,6 @@ export async function createEntry(userId: string, input: NewEntryInput) {
           occurredAt: input.occurredAt,
           description,
           reference: input.reference ?? null,
-          storeId: input.storeId ?? null,
           details: input.details ?? undefined,
           idempotencyKey: input.idempotencyKey ?? null,
           costs: input.costs?.length ? { create: input.costs.map((c) => ({ type: c.type, amountCents: c.amountCents, cardId: c.cardId ?? null })) } : undefined,
@@ -605,12 +598,11 @@ export async function entryDetail(userId: string, entryId: string) {
   });
   if (!e) throw new DomainError(404, "Lançamento não encontrado");
   const recId = e.idempotencyKey?.startsWith("rec:") ? e.idempotencyKey.split(":")[1] : null;
-  const [recurrence, legs, store] = await Promise.all([
+  const [recurrence, legs] = await Promise.all([
     recId ? prisma.recurrence.findFirst({ where: { id: recId, userId }, select: { id: true, description: true, frequency: true, active: true } }) : null,
     e.groupId
       ? prisma.entry.findMany({ where: { userId, groupId: e.groupId, NOT: { id: e.id } }, include: { account: { include: { program: true, holder: true } } }, orderBy: { createdAt: "asc" } })
       : [],
-    e.storeId ? prisma.store.findUnique({ where: { id: e.storeId }, select: { name: true } }) : null,
   ]);
-  return { entry: e, recurrence, legs, store };
+  return { entry: e, recurrence, legs };
 }
