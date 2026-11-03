@@ -31,7 +31,6 @@ const isGroup = (it: NavItem): it is NavGroup => "children" in it;
 // dependem das props, por isso são montados no componente.
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: "Menu principal", items: [
-    { href: "/app", label: "Painel", icon: LayoutDashboard },
     { href: "/app/reports", label: "Relatórios", icon: LineChart },
     { href: "/app/entries", label: "Extrato", icon: FileText },
   ] },
@@ -52,6 +51,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/app/financeiro/notas", label: "Notas Fiscais" },
     ] },
     { key: "milhas", label: "Milhas", icon: WalletCards, children: [
+      { href: "/app", label: "Painel" },
       { href: "/app/programs", label: "Central de Contas" },
       { href: "/app/credit-cards", label: "Central de Cartões" },
       { href: "/app/entries?novo=transfer", label: "Transferência" },
