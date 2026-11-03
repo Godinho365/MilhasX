@@ -10,6 +10,8 @@ import * as sales from "@/app/api/sales/route";
 import * as sale from "@/app/api/sales/[id]/route";
 import * as refundRoute from "@/app/api/sales/[id]/refund/route";
 import * as receiptRoute from "@/app/api/sales/[id]/refund/receipt/route";
+import * as paymentRoute from "@/app/api/sales/[id]/payment/route";
+import * as tagsRoute from "@/app/api/sales/[id]/tags/route";
 import * as customers from "@/app/api/customers/route";
 import * as customer from "@/app/api/customers/[id]/route";
 import { prisma } from "@/server/db";
@@ -132,6 +134,35 @@ describe("filtro por período", () => {
     expect((await c.call(sales.GET, "GET", "/api/sales?from=2026-10-11&to=2026-10-31")).data.items).toHaveLength(1);
     expect((await c.call(sales.GET, "GET", "/api/sales?to=2026-10-09")).data.items).toHaveLength(1);
     expect((await c.call(sales.GET, "GET", "/api/sales")).data.items).toHaveLength(4);
+  });
+});
+
+describe("pagamento do cliente e etiquetas", () => {
+  it("marca pago, filtra a receber, guarda etiquetas e isola por usuário", async () => {
+    const a = (await newSale({ items: [flight({ points: 1000, reservation: "ABC123" })] })).data.item.id;
+    const b = (await newSale({ items: [flight({ points: 1000 })] })).data.item.id;
+    const list = async (q = "") => (await c.call(sales.GET, "GET", `/api/sales${q}`)).data.items as { id: string; paidAt: string | null; tags: string[]; reservations: string[] }[];
+
+    expect((await list()).every((x) => x.paidAt === null)).toBe(true);
+    expect((await list()).find((x) => x.id === a)!.reservations).toEqual(["ABC123"]);
+    expect((await c.call(paymentRoute.POST, "POST", "/p", { paid: true, date: "2026-10-09" }, { id: a })).status).toBe(400); // antes da venda
+    const paid = await c.call(paymentRoute.POST, "POST", "/p", { paid: true, date: "2026-10-12" }, { id: a });
+    expect(paid.status).toBe(200);
+    expect(paid.data.item.paidAt.slice(0, 10)).toBe("2026-10-12");
+    expect((await list("?pago=sim")).map((x) => x.id)).toEqual([a]);
+    expect((await list("?pago=nao")).map((x) => x.id)).toEqual([b]);
+    await c.call(paymentRoute.POST, "POST", "/p", { paid: false }, { id: a });
+    expect(await list("?pago=sim")).toHaveLength(0);
+
+    const t = await c.call(tagsRoute.PUT, "PUT", "/t", { tags: [" urgente ", "Agência  X", "URGENTE"] }, { id: b });
+    expect(t.data.item.tags).toEqual(["urgente", "Agência X"]);
+    expect((await list("?tag=urgente")).map((x) => x.id)).toEqual([b]);
+    expect((await c.call(tagsRoute.PUT, "PUT", "/t", { tags: ["x".repeat(31)] }, { id: b })).status).toBe(400);
+
+    const other = new Client();
+    await other.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-1" });
+    expect((await other.call(paymentRoute.POST, "POST", "/p", { paid: true }, { id: a })).status).toBe(404);
+    expect((await other.call(tagsRoute.PUT, "PUT", "/t", { tags: ["x"] }, { id: a })).status).toBe(404);
   });
 });
 
