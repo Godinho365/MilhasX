@@ -3,9 +3,10 @@
 import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectImage } from "./extras";
-import { resolveDesign } from "@/domain/page-design";
+import { resolveDesign, type PageDesign } from "@/domain/page-design";
 import { defaultContent, imageIdsOf, normalizeContent, type SiteContent } from "@/domain/site";
-import { SITE_THEMES } from "@/domain/site-themes";
+import { SITE_THEMES, themeById } from "@/domain/site-themes";
+import { centralLook, type CentralLook } from "@/domain/central-look";
 
 const MAX_IMAGE = 3 * 1024 * 1024;
 const MAX_IMAGES = 60;
@@ -65,6 +66,15 @@ export async function ownSiteImage(userId: string, id: string) {
 /** O site da agência está no ar? (os formulários de cotação e de milhas também valem dentro dele) */
 export async function sitePublished(userId: string) {
   return !!(await prisma.agencySite.findFirst({ where: { userId, published: true }, select: { userId: true } }));
+}
+
+/** Visual da Central de atendimento: o tema do site salvo, se a agência tem site e não desligou essa opção. */
+export async function centralLookFor(userId: string, design: PageDesign): Promise<CentralLook | null> {
+  if (!design.siteTheme) return null;
+  const s = await prisma.agencySite.findUnique({ where: { userId }, select: { theme: true, content: true } });
+  if (!s) return null;
+  const accent = (s.content as { brand?: { accent?: unknown } } | null)?.brand?.accent;
+  return centralLook(themeById(s.theme), typeof accent === "string" ? accent : null);
 }
 
 /** Dono do site publicado: endereço existe, site no ar e conta ativa (vale para páginas e fotos). */

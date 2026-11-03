@@ -19,7 +19,7 @@ export default async function SolicitarPage({ params }: P) {
   const p = await publicSalesProfile((await params).slug);
   if (!p || !p.acceptsOrders) notFound();
   return (
-    <PageShell brand={publicBrand()} appName={appName()} bgColor={p.design.bgColor} banner={bannerUrl(p.slug, p.bannerVersion)}>
+    <PageShell brand={publicBrand()} appName={appName()} bgColor={p.design.bgColor} banner={bannerUrl(p.slug, p.bannerVersion)} look={p.look}>
       <CaptacaoForm slug={p.slug} agency={p.displayName} design={p.design.captacao} whatsapp={p.whatsapp} />
     </PageShell>
   );

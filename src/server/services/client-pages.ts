@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { hasFeature } from "./plan-limits";
+import { centralLookFor } from "./site";
 import { resolveDesign } from "@/domain/page-design";
 import { resolveProposal, resolveReservation, contractText, type Proposal, type Reservation } from "@/domain/proposal";
 import type { Segment } from "@/domain/orders";
@@ -27,6 +28,7 @@ export async function ownerBranding(userId: string) {
     agency: p?.displayName ?? user?.name ?? "",
     whatsapp: p?.whatsapp ?? null,
     design,
+    look: await centralLookFor(userId, design),
     // O banner só é servido para página publicada (ver getBanner)
     bannerVersion: branded && p?.published && p.bannerUpdatedAt ? String(p.bannerUpdatedAt.getTime()) : null,
   };

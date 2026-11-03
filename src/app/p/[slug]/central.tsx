@@ -2,6 +2,7 @@
 import { Send, Star, MessageCircle, ChevronRight, ExternalLink, AtSign, Mail } from "lucide-react";
 import { ProgramLogo } from "@/components/program-logo";
 import { themeForBg, bannerUrl, type PageDesign, type PageButton } from "@/domain/page-design";
+import type { CentralLook } from "@/domain/central-look";
 
 export type CentralData = {
   slug: string;
@@ -16,6 +17,7 @@ export type CentralData = {
   programs: { id: string; name: string; color: string }[];
   design: PageDesign;
   bannerVersion: string | null;
+  look: CentralLook | null;
 };
 
 export const waLink = (phone: string | null, text?: string) => {
@@ -24,10 +26,13 @@ export const waLink = (phone: string | null, text?: string) => {
   return `https://wa.me/${d.length <= 11 ? `55${d}` : d}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 };
 
-/** Moldura das páginas do cliente: cor de fundo, selo da marca, banner e rodapé. */
-export function PageShell({ brand, appName, bgColor, banner, children, wide = false }: { brand: string; appName: string; bgColor: string | null; banner: string | null; children: React.ReactNode; wide?: boolean }) {
+/** Moldura das páginas do cliente: cor de fundo (ou o tema do site, em `look`), selo da marca, banner e rodapé. */
+export function PageShell({ brand, appName, bgColor, banner, children, wide = false, look = null }: { brand: string; appName: string; bgColor: string | null; banner: string | null; children: React.ReactNode; wide?: boolean; look?: CentralLook | null }) {
+  const frame = look
+    ? { "data-theme": look.base, "data-look": "", style: look.vars as React.CSSProperties }
+    : { "data-theme": themeForBg(bgColor), style: bgColor ? { backgroundColor: bgColor } : undefined };
   return (
-    <div data-theme={themeForBg(bgColor)} className="min-h-screen bg-bg text-zinc-100" style={bgColor ? { backgroundColor: bgColor } : undefined}>
+    <div {...frame} className="min-h-screen bg-bg text-zinc-100">
       <main className={`mx-auto px-4 pb-28 pt-6 ${wide ? "max-w-2xl" : "max-w-xl"}`}>
         <div className="mb-5 flex justify-center">
           <span className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-bold tracking-tight shadow-sm">{brand}</span>
@@ -46,7 +51,7 @@ export function PageShell({ brand, appName, bgColor, banner, children, wide = fa
 /** Página Principal (Bio): nome, frase e os cartões de ação, cada um levando à sua página. */
 export function CentralPage({ data, brand, appName, preview = false, bannerSrc }: { data: CentralData; brand: string; appName: string; preview?: boolean; bannerSrc?: string | null }) {
   return (
-    <PageShell brand={brand} appName={appName} bgColor={data.design.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
+    <PageShell brand={brand} appName={appName} bgColor={data.design.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)} look={data.look}>
       <section className="card px-6 py-7 text-center" aria-label="Apresentação">
         <h1 className="text-2xl font-bold">{data.displayName}</h1>
         <p className="mt-1.5 text-muted">{data.headline || "Sua viagem começa aqui"}</p>
@@ -91,7 +96,9 @@ function CentralActions({ data, preview }: { data: CentralData; preview: boolean
   return (
     <div className="space-y-3">
       {data.design.buttons.filter(visible).map((b, i) => {
-        const { Icon, tone } = ICONS[b.kind];
+        const { Icon, tone: own } = ICONS[b.kind];
+        // Com o tema do site, os ícones usam a cor de destaque dele (o do WhatsApp segue verde)
+        const tone = data.look && b.kind !== "whatsapp" ? "bg-accent-soft text-accent-light" : own;
         return (
           <a
             key={`${b.kind}-${i}`}

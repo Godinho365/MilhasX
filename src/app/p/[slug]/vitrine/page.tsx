@@ -26,7 +26,7 @@ export default async function VitrinePage({ params }: P) {
   const v = await publicShowcase((await params).slug);
   if (!v) notFound();
   return (
-    <PageShell brand={publicBrand()} appName={appName()} bgColor={null} banner={null} wide>
+    <PageShell brand={publicBrand()} appName={appName()} bgColor={null} banner={null} wide look={v.look}>
       <header className="mb-6 text-center">
         <p className="kicker">{v.agency}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">{v.title || "Pacotes em destaque"}</h1>

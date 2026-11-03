@@ -19,7 +19,7 @@ export async function loadOrderPage(slug: string, token: string) {
 export function OrderShell({ slug, token, what, data, children }: { slug: string; token: string; what: string; data: Awaited<ReturnType<typeof loadOrderPage>>; children: React.ReactNode }) {
   const b = data.branding;
   return (
-    <PageShell brand={publicBrand()} appName={appName()} bgColor={b.design.bgColor} banner={data.access ? bannerUrl(slug, b.bannerVersion) : null}>
+    <PageShell brand={publicBrand()} appName={appName()} bgColor={b.design.bgColor} banner={data.access ? bannerUrl(slug, b.bannerVersion) : null} look={b.look}>
       {data.access ? children : <AccessGate slug={slug} token={token} agency={b.agency} what={what} />}
     </PageShell>
   );

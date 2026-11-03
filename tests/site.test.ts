@@ -7,9 +7,17 @@ import * as salesProfile from "@/app/api/sales-profile/route";
 import * as publicOrders from "@/app/api/public/orders/[slug]/route";
 import * as publicLeads from "@/app/api/public/leads/[slug]/route";
 import { publicSite, publicSiteImage, uploadSiteImage } from "@/server/services/site";
+import { publicSalesProfile } from "@/server/services/settings";
+import { ownerBranding } from "@/server/services/client-pages";
+import { centralLook } from "@/domain/central-look";
+import { resolveDesign } from "@/domain/page-design";
 import { defaultContent, normalizeContent, imageIdsOf } from "@/domain/site";
-import { SITE_THEMES, sampleContent } from "@/domain/site-themes";
+import { SITE_THEMES, sampleContent, themeById } from "@/domain/site-themes";
 import { prisma } from "@/server/db";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SiteView, type SiteCtx } from "@/components/site/site-view";
+import type { SiteContent } from "@/domain/site";
 
 let c: Client, o: Client;
 let userId: string;
@@ -139,5 +147,74 @@ describe("site: salvar, publicar e fotos", () => {
     const r = await c.call(siteRoute.PUT, "PUT", "/x", { slug: "outro-qualquer", theme: "trilha", published: true, content: g.content });
     expect(r.data.item.slug).toBe("ana-oficial"); // o endereço já cadastrado vale
     expect(await publicSite("ocupado")).toBeNull(); // a outra agência não tem site publicado
+  });
+});
+
+describe("Central de atendimento com o tema do site", () => {
+  it("o tema vira as cores, fontes e cantos da Central (claro ou escuro) e respeita a cor de destaque", () => {
+    const light = centralLook(themeById("atlantico"));
+    expect(light).toMatchObject({ base: "client", name: "Atlântico" });
+    expect(light.vars).toMatchObject({ "--bg": "251 247 240", "--accent": "14 116 144", "--look-radius": "20px", "--look-btn-radius": "999px" });
+    const dark = centralLook(themeById("prestige"), "#ff0000");
+    expect(dark.base).toBe("dark");
+    expect(dark.vars["--accent"]).toBe("255 0 0");
+    expect(dark.vars["--look-head"]).toContain("Georgia");
+    expect(centralLook(themeById("prestige"), "javascript:x").vars["--accent"]).toBe("201 164 92"); // cor inválida: a do tema
+    expect(resolveDesign(null).siteTheme).toBe(true);
+    expect(resolveDesign({ siteTheme: false }).siteTheme).toBe(false);
+  });
+
+  it("páginas publicadas usam o tema salvo do site; desligar a opção volta à cor própria", async () => {
+    const g = (await c.call(siteRoute.GET, "GET", "/x")).data.item;
+    const content = { ...g.content, brand: { ...g.content.brand, accent: "#123456" } };
+    await c.call(siteRoute.PUT, "PUT", "/x", { slug: "ana-viagens", theme: "prestige", published: false, content });
+    const central = { slug: "ana-viagens", displayName: "Ana Viagens", published: true, programIds: [] };
+    expect((await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", central)).status).toBe(200);
+    const p = await publicSalesProfile("ana-viagens");
+    expect(p?.look).toMatchObject({ base: "dark", name: "Prestige" });
+    expect(p?.look?.vars["--accent"]).toBe("18 52 86");
+    expect((await ownerBranding(userId)).look?.name).toBe("Prestige"); // cotação, reserva e termo também
+    await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...central, design: { siteTheme: false } });
+    expect((await publicSalesProfile("ana-viagens"))?.look).toBeNull();
+    expect((await ownerBranding(userId)).look).toBeNull();
+  });
+
+  it("sem site, a Central segue com o visual próprio", async () => {
+    await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { slug: "ana-viagens", displayName: "Ana Viagens", published: true, programIds: [] });
+    expect((await publicSalesProfile("ana-viagens"))?.look).toBeNull();
+  });
+});
+
+describe("site: botões de pedir cotação", () => {
+  // conteúdo sem nenhuma seção de formulário de cotação (como os sites salvos antes dela existir)
+  const semFormulario = (whatsapp: string): SiteContent => {
+    const base = defaultContent({ name: "Ana Viagens", whatsapp });
+    const pages = Object.fromEntries(Object.entries(base.pages).map(([k, p]) => [k, { ...p, sections: p.sections.filter((x) => x.type !== "cotacao") }]));
+    return { ...base, pages } as SiteContent;
+  };
+  const html = (content: SiteContent, requestHref: string | null) => renderToStaticMarkup(createElement(SiteView, { ctx: {
+    theme: themeById("atlantico"), content, page: "inicio", packages: [], href: (p) => `/s/ana${p === "inicio" ? "" : `/${p}`}`,
+    img: () => "", pkgImg: () => null, requestHref, slug: "ana",
+  } satisfies SiteCtx }));
+  const topo = (h: string) => h.slice(h.indexOf("<header"), h.indexOf("</header>"));
+
+  it("com o formulário no site, o topo e a capa levam a ele", () => {
+    const h = html(defaultContent({ name: "Ana Viagens", whatsapp: "11999990000" }), "/p/ana/solicitar");
+    expect(topo(h)).toMatch(/href="#cotacao"[^>]*>Pedir cotação</);
+    expect(h).not.toContain("/p/ana/solicitar");
+  });
+
+  it("sem formulário no site, levam à página Pedir cotação de viagem da Central", () => {
+    const h = html(semFormulario("11999990000"), "/p/ana/solicitar");
+    const link = (label: string) => new RegExp(`href="/p/ana/solicitar"[^>]*>${label}<`);
+    expect(topo(h)).toMatch(link("Pedir cotação"));
+    expect(h).toMatch(link("Pedir minha cotação")); // botão da capa
+  });
+
+  it("sem formulário e sem a Central recebendo pedidos, o topo volta ao WhatsApp", () => {
+    const h = topo(html(semFormulario("11999990000"), null));
+    expect(h).not.toContain("Pedir cotação");
+    expect(h).toContain("Falar com a gente");
+    expect(h).toContain("https://wa.me/5511999990000");
   });
 });

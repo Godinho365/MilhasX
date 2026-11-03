@@ -5,6 +5,7 @@ import { prisma, DomainError, audit } from "../db";
 import { mpEnabled, currentSubscription } from "./billing-mp";
 import { assertFeature, hasFeature } from "./plan-limits";
 import { detectImage } from "./extras";
+import { centralLookFor } from "./site";
 import { resolveDesign, type PageDesign } from "@/domain/page-design";
 import { PLANS, effectivePlan, planPriceCents, notifyPrefs, REFERRAL_TRIAL_DAYS, TRIAL_DAYS, type PlanCode, type PlanInterval, type ValuesMode } from "@/domain/plans";
 
@@ -237,7 +238,8 @@ export async function publicSalesProfile(slug: string) {
   const branded = await hasFeature(p.userId, "pageBranding");
   if (!branded) Object.assign(design, { bgColor: null, share: { title: "", description: "" } });
   const bannerVersion = branded && p.bannerUpdatedAt ? String(p.bannerUpdatedAt.getTime()) : null;
-  return { slug: p.slug, displayName: p.displayName, bio: p.bio, whatsapp: p.whatsapp, instagram: p.instagram, email: p.email, acceptsOrders: p.acceptsOrders, acceptsLeads: p.acceptsLeads, headline: p.headline, programs, design, bannerVersion };
+  const look = await centralLookFor(p.userId, design);
+  return { slug: p.slug, displayName: p.displayName, bio: p.bio, whatsapp: p.whatsapp, instagram: p.instagram, email: p.email, acceptsOrders: p.acceptsOrders, acceptsLeads: p.acceptsLeads, headline: p.headline, programs, design, bannerVersion, look };
 }
 
 // ---------- Banner no topo da página (PRO) ----------
