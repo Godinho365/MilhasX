@@ -16,7 +16,7 @@ import * as checklist from "@/app/api/tasks/[id]/checklist/route";
 import * as comments from "@/app/api/tasks/[id]/comments/route";
 import * as boards from "@/app/api/task-boards/route";
 import { columnOf } from "@/domain/team";
-import { accountMonth, monthOrCurrent, shiftMonth } from "@/server/services/account-month";
+import { accountsPeriod, periodFromQuery } from "@/server/services/account-month";
 import { shortName } from "@/lib/format";
 import * as board from "@/app/api/task-boards/[id]/route";
 import * as partners from "@/app/api/partners/route";
@@ -169,15 +169,25 @@ describe("conta por mês", () => {
     // 10 mil (custo R$ 250) por R$ 300 em novembro; outra conta não entra
     await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: acc, occurredAt: "2026-11-05", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 30000, passengers: 1 }] });
     await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: other, occurredAt: "2026-11-06", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 90000, passengers: 1 }] });
-    const nov = await accountMonth(userId, acc, "2026-11");
+    const nov = await accountsPeriod(userId, [acc], { from: "2026-11-01", to: "2026-11-30" });
     expect(nov.sales).toMatchObject({ count: 1, profitCents: 5000, totalCents: 30000, roePct: 20 });
     expect(nov.entries.map((e) => e.points)).toEqual([-10000]);
-    expect(nov).toMatchObject({ balance: 10000, stockCents: 25000, cpmCents: 2500, club: { active: false, since: null } });
-    const out = await accountMonth(userId, acc, "2026-10");
+    expect(nov).toMatchObject({ balance: 10000, stockCents: 25000, cpmCents: 2500 });
+    expect(nov.rows[0]!.club).toMatchObject({ active: false, since: null });
+    const out = await accountsPeriod(userId, [acc], { from: "2026-10-01", to: "2026-10-31" });
     expect(out.sales.count).toBe(0);
     expect(out.entries.map((e) => e.points)).toEqual([20000]);
-    expect(monthOrCurrent("2026-13", new Date("2026-11-03T12:00:00Z"))).toBe("2026-11");
-    expect([shiftMonth("2026-01", -1), shiftMonth("2026-12", 1)]).toEqual(["2025-12", "2027-01"]);
+    // todo o período e as duas contas juntas (visão do programa com todos os titulares)
+    const all = await accountsPeriod(userId, [acc, other], null);
+    expect(all.sales).toMatchObject({ count: 2, totalCents: 120000 });
+    expect(all.rows).toHaveLength(2);
+    expect(all.balance).toBe(20000);
+    // outro usuário não vê as contas
+    const otherId = (await prisma.user.findFirstOrThrow({ where: { email: "o@x.test" } })).id;
+    expect((await accountsPeriod(otherId, [acc], null)).rows).toHaveLength(0);
+    expect(periodFromQuery({}, new Date("2026-11-03T12:00:00Z"))).toEqual({ from: "2026-11-01", to: "2026-11-30" });
+    expect(periodFromQuery({ de: "2026-11-10", ate: "2026-11-02" })).toEqual({ from: "2026-11-02", to: "2026-11-10" });
+    expect(periodFromQuery({ periodo: "tudo" })).toBeNull();
     expect(shortName("Ana Maria da Silva")).toBe("Ana Silva");
   });
 });

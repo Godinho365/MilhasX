@@ -318,7 +318,7 @@ export function Shell(props: {
     ? topAccounts.map((a) => ({ key: a.id, href: `/app/programs/${a.id}`, programId: a.programId ?? a.id, program: a.program, color: a.color, logo: a.logo, balance: a.balance, title: `${a.holder} - ${a.program}`, accounts: 1 }))
     : [...visibleAccounts.reduce((m, a) => {
         const k = a.programId ?? a.program;
-        const r = m.get(k) ?? { key: k, href: "/app/programs", programId: a.programId ?? a.id, program: a.program, color: a.color, logo: a.logo, balance: 0, title: a.program, accounts: 0 };
+        const r = m.get(k) ?? { key: k, href: `/app/programs/programa/${a.programId}`, programId: a.programId ?? a.id, program: a.program, color: a.color, logo: a.logo, balance: 0, title: a.program, accounts: 0 };
         r.balance += a.balance;
         r.accounts += 1;
         return m.set(k, r);
@@ -332,7 +332,7 @@ export function Shell(props: {
       </div>
       <div className="space-y-px">
         {shownRows.map((a) => {
-          const here = chosenHolder ? path === a.href : false;
+          const here = path === a.href;
           return (
             <Link key={a.key} href={a.href} aria-current={here ? "page" : undefined} title={a.accounts > 1 ? `${a.program}: ${a.accounts} contas` : a.title}
               className={`flex items-center gap-2.5 rounded-lg px-2.5 py-[5px] text-[13px] font-medium transition-colors ${here ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}>
