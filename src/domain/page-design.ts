@@ -7,6 +7,8 @@ export type ButtonKind = "cotacao" | "gestao" | "whatsapp" | "link";
 export type PageButton = { kind: ButtonKind; label: string; description: string; url?: string };
 
 export type PageDesign = {
+  /** Com site da agência, as páginas usam as cores e fontes do tema do site (no lugar de bgColor). */
+  siteTheme: boolean;
   bgColor: string | null;
   buttons: PageButton[];
   captacao: { title: string; text: string; submit: string; thanksTitle: string; thanks: string; askBudget: boolean; askBaggage: boolean; askDirect: boolean; askFlexible: boolean };
@@ -38,6 +40,7 @@ export const BUILTIN_BUTTONS: Record<Exclude<ButtonKind, "link">, { label: strin
 };
 
 export const DEFAULT_DESIGN: PageDesign = {
+  siteTheme: true,
   bgColor: null,
   buttons: (["cotacao", "gestao", "whatsapp"] as const).map((kind) => ({ kind, ...BUILTIN_BUTTONS[kind] })),
   captacao: { title: "Solicite sua cotação", text: "Conte para onde quer ir. Cotamos com milhas e respondemos pelo WhatsApp.", submit: "Enviar solicitação", thanksTitle: "Solicitação enviada!", thanks: "Recebemos seu pedido e vamos falar com você pelo WhatsApp em breve.", askBudget: false, askBaggage: true, askDirect: true, askFlexible: true },
@@ -102,6 +105,7 @@ export function resolveDesign(raw: unknown): PageDesign {
   for (const b of DEFAULT_DESIGN.buttons) if (!seen.has(b.kind)) buttons.push({ ...b });
   const share = (o.share && typeof o.share === "object" ? o.share : {}) as Record<string, unknown>;
   return {
+    siteTheme: typeof o.siteTheme === "boolean" ? o.siteTheme : true,
     bgColor: typeof o.bgColor === "string" && HEX.test(o.bgColor) ? o.bgColor.toLowerCase() : null,
     buttons,
     captacao: sect("captacao"),

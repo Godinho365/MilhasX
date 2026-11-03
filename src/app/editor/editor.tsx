@@ -10,6 +10,7 @@ import { Field, Alert } from "@/components/ui";
 import { Switch } from "@/components/form-parts";
 import { toast, confirmDialog } from "@/components/feedback";
 import { BG_PRESETS, DEFAULT_DESIGN, DESIGN_PAGES, MAX_LINK_BUTTONS, resolveDesign, type DesignPage, type PageButton, type PageDesign } from "@/domain/page-design";
+import type { CentralLook } from "@/domain/central-look";
 import type { PreviewMessage } from "@/app/preview/central/client";
 
 export type EditorProfile = {
@@ -65,7 +66,11 @@ function Panel({ title, pro, locked = false, open, aside, children }: { title: s
   );
 }
 
-export function PageEditor({ profile, defaultName, programs, brand, appName, canBrand, planNote, signatures }: { profile: EditorProfile; defaultName: string; programs: { id: string; name: string }[]; brand: string; appName: string; canBrand: boolean; planNote: string | null; signatures: Signature[] }) {
+export type PageEditorProps = { profile: EditorProfile; defaultName: string; programs: { id: string; name: string }[]; brand: string; appName: string; canBrand: boolean; planNote: string | null; signatures: Signature[] };
+
+/** `embedded`: dentro de Marketing › Site, ao lado do editor do site. `siteLook` é o tema do site como está
+ *  no editor (null sem tema escolhido); `siteSaved` diz se o site já foi salvo (só então vale nas páginas). */
+export function PageEditor({ profile, defaultName, programs, brand, appName, canBrand, planNote, signatures, embedded = false, siteLook = null, siteSaved = false }: PageEditorProps & { embedded?: boolean; siteLook?: CentralLook | null; siteSaved?: boolean }) {
   const router = useRouter();
   const initial = useMemo(() => ({
     slug: profile?.slug ?? slugify(defaultName),
@@ -134,21 +139,28 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
       type: "central-preview",
       view: page,
       bannerSrc: canBrand ? bannerSrc : null,
+      look: f.design.siteTheme ? siteLook : null,
       draft: { slug: f.slug, displayName: f.displayName || defaultName, headline: f.headline || null, bio: f.bio || null, whatsapp: f.whatsapp.replace(/\D/g, "") || null, instagram: f.instagram.replace(/^@/, "") || null, email: f.email || null, acceptsOrders: f.acceptsOrders, acceptsLeads: f.acceptsLeads, programIds: f.programIds, design: canBrand ? f.design : { ...f.design, bgColor: null } },
     };
     frame.current?.contentWindow?.postMessage(msg, window.location.origin);
-  }, [f, page, ready, bannerSrc, canBrand, defaultName]);
+  }, [f, page, ready, bannerSrc, canBrand, defaultName, siteLook]);
   const dev = DEVICES.find((d) => d.key === device)!;
-  const scale = Math.min(1, boxWidth / dev.width);
+  // Com a aba escondida (Marketing › Site), a caixa mede 0: mantém a escala até ela aparecer
+  const scale = boxWidth > 0 ? Math.min(1, boxWidth / dev.width) : 1;
 
-  async function save() {
+  async function save(next = f) {
     setBusy(true);
-    const r = await api("/api/sales-profile", "PUT", f);
+    const r = await api("/api/sales-profile", "PUT", next);
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
     setErro("");
-    toast("Página salva");
+    setF(next);
+    toast(next.published === f.published ? "Central salva" : next.published ? "Central publicada" : "Central fora do ar");
     refreshSafe(router);
+  }
+  async function togglePublished() {
+    if (f.published && !(await confirmDialog({ title: "Tirar a Central do ar?", body: "O endereço passa a responder “não encontrado” até você publicar de novo. Os links de cotação, reserva e termo já enviados continuam abrindo.", confirmLabel: "Tirar do ar" }))) return;
+    save({ ...f, published: !f.published });
   }
 
   async function uploadBanner(file: File) {
@@ -199,6 +211,18 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
     </Panel>
   );
 
+  const usingSite = !!siteLook && f.design.siteTheme;
+  const lookPanel = embedded && (
+    <Panel title="Visual" open aside={<span className="ml-3 text-sm font-normal text-muted">{usingSite ? `Tema ${siteLook!.name}` : "Cor própria"}</span>}>
+      {siteLook ? (
+        <div className="space-y-2">
+          <Switch label={`Usar o tema do site (${siteLook.name})`} hint="Cores, fontes e cantos iguais aos do site em todas as páginas da Central, inclusive cotação, reserva e termo" checked={f.design.siteTheme} onChange={(v) => setD({ siteTheme: v })} />
+          {usingSite && !siteSaved && <p className="text-xs text-amber-300">Salve o site (aba Site) para o tema valer nas páginas publicadas. A prévia já mostra como fica.</p>}
+        </div>
+      ) : <p className="text-sm text-muted">Escolha um tema na aba Site para a Central ficar com o mesmo visual do site.</p>}
+    </Panel>
+  );
+
   const textPanel = (k: "captacao" | "gestao" | "cotacao" | "reserva" | "gestaoMilhas" | "contrato", fields: [string, string, "input" | "textarea", number][]) => (
     <Panel title="Introdução" open>
       <div className="space-y-4">
@@ -218,10 +242,26 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
   );
 
   return (
-    <main className="min-h-screen pb-24">
-      <div className="mx-auto max-w-7xl px-4 pt-4">
-        <Link href="/app/settings?tab=sales-profile" className="btn-ghost h-9 rounded-full"><ArrowLeft className="h-4 w-4" />Voltar para o {appName}</Link>
-        <h1 className="mt-4 text-center text-lg font-semibold">{f.displayName || defaultName}</h1>
+    <main className={embedded ? "" : "min-h-screen pb-24"}>
+      <div className={embedded ? "" : "mx-auto max-w-7xl px-4 pt-4"}>
+        {embedded ? (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-panel2 text-muted"><MessageCircle className="h-5 w-5" /></span>
+            <div className="mr-auto">
+              <h1 className="text-2xl font-semibold tracking-tight">Central de atendimento</h1>
+              <p className="text-sm text-muted">Bio, pedido de cotação, interesse em gestão e as páginas de cada pedido.{dirty && " · alterações não salvas"}</p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${profile?.published ? "bg-emerald-500/15 text-emerald-300" : "bg-panel2 text-muted"}`}><span className={`h-1.5 w-1.5 rounded-full ${profile?.published ? "bg-emerald-400" : "bg-zinc-500"}`} />{profile?.published ? "No ar" : "Fora do ar"}</span>
+            {profile?.published && savedSlug && <a href={`/p/${savedSlug}`} target="_blank" rel="noopener" className="btn-ghost h-9 border border-line"><ExternalLink className="h-4 w-4" />Ver Central</a>}
+            <button type="button" className="btn-ghost h-9 border border-line" disabled={busy || (!dirty && !!profile)} onClick={() => save()}>{busy ? "Salvando…" : dirty || !profile ? "Salvar" : "Salvo"}</button>
+            <button type="button" className="btn-primary h-9" disabled={busy} onClick={togglePublished}>{f.published && profile?.published ? "Tirar do ar" : "Publicar"}</button>
+          </div>
+        ) : (
+          <>
+            <Link href="/app/settings?tab=sales-profile" className="btn-ghost h-9 rounded-full"><ArrowLeft className="h-4 w-4" />Voltar para o {appName}</Link>
+            <h1 className="mt-4 text-center text-lg font-semibold">{f.displayName || defaultName}</h1>
+          </>
+        )}
 
         <nav className="mt-6 flex items-center gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Personalizar">
           <span className="shrink-0 text-sm font-medium text-muted">Personalizar:</span>
@@ -237,11 +277,11 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
         </nav>
 
         {planNote && <div className="mt-3 rounded-xl border border-green-400/40 bg-green-400/10 px-4 py-3 text-sm text-green-300">{planNote} <Link href="/app/upgrade" className="font-semibold underline">Ver planos</Link></div>}
-        {!profile?.published && <div className="mt-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">Sua página ainda não está no ar. Ative em <Link href="/app/settings?tab=sales-profile" className="font-semibold underline">Configurações › Sua {brand}</Link>.</div>}
+        {!profile?.published && <div className="mt-3 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">{embedded ? "A Central ainda não está no ar. Clique em Publicar quando estiver pronta." : <>Sua página ainda não está no ar. Ative em <Link href="/app/settings?tab=sales-profile" className="font-semibold underline">Configurações › Sua {brand}</Link>.</>}</div>}
         {erro && <div className="mt-3"><Alert>{erro}</Alert></div>}
 
-        <div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-          <section aria-label="Prévia" className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+        <div className={`mt-5 grid gap-6 ${embedded ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" : "lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"}`}>
+          <section aria-label="Prévia" className={`min-w-0 lg:sticky lg:top-4 lg:self-start ${embedded ? "lg:order-2" : ""}`}>
             <div className="mb-3 flex items-center gap-3">
               <p className="kicker">Prévia · {DESIGN_PAGES.find((p) => p.key === page)!.label}</p>
               <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">{dev.label} ({dev.width}px)</span>
@@ -294,7 +334,8 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
             )}
             {PAGE_HELP[page] && !PER_ORDER.includes(page) && page !== "gestaoMilhas" && <p className="px-1 text-sm text-muted">{PAGE_HELP[page]}</p>}
 
-            {bgPanel}
+            {lookPanel}
+            {!usingSite && bgPanel}
 
             {page === "home" && (
               <>
@@ -468,12 +509,12 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-bg/90 backdrop-blur">
+      {!embedded && <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-end gap-3 px-4 py-3">
           {dirty ? <span className="text-xs text-amber-300">Alterações não salvas</span> : <span className="text-xs text-muted">Tudo salvo</span>}
-          <button type="button" className="btn-primary" disabled={busy || (!dirty && !!profile)} onClick={save}>{busy ? "Salvando…" : "Salvar alterações"}</button>
+          <button type="button" className="btn-primary" disabled={busy || (!dirty && !!profile)} onClick={() => save()}>{busy ? "Salvando…" : "Salvar alterações"}</button>
         </div>
-      </div>
+      </div>}
     </main>
   );
 }

@@ -43,7 +43,7 @@ export function ClientPages({ id, segments }: { id: string; segments: Segment[] 
     <section aria-label="Para o cliente" className="rounded-xl border border-line p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h3 className="kicker flex-1">Para o cliente</h3>
-        <Link href="/editor" className="btn-subtle h-8 text-xs">Personalizar páginas</Link>
+        <Link href="/app/marketing/site?aba=central" className="btn-subtle h-8 text-xs">Personalizar páginas</Link>
       </div>
       <ul className="space-y-2 text-sm">
         <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2">

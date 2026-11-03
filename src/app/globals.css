@@ -40,6 +40,19 @@
 [data-theme="client"] .btn-primary:hover { filter: brightness(0.95); }
 [data-theme="client"] .card { box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
 
+/* Central de atendimento com o tema do site (domain/central-look.ts): as cores vêm das variáveis
+   na moldura; aqui ficam as fontes, os cantos e os botões do tema. */
+[data-look] { font-family: var(--look-font); }
+[data-look] h1, [data-look] h2, [data-look] h3 {
+  font-family: var(--look-head); font-weight: var(--look-head-weight); font-style: var(--look-head-style);
+  text-transform: var(--look-head-case); letter-spacing: var(--look-head-tracking);
+}
+[data-look] .card, [data-look] .rounded-2xl, [data-look] .rounded-3xl { border-radius: var(--look-radius); }
+[data-look] .input { border-radius: var(--look-field-radius); }
+[data-look] .btn-primary { background-color: rgb(var(--lime)); color: rgb(var(--lime-ink)); border-radius: var(--look-btn-radius); }
+[data-look] .btn-primary:hover { filter: brightness(0.95); }
+[data-look] .btn-ghost { border-radius: var(--look-btn-radius); }
+
 /* Claro: escala zinc invertida (texto escuro sobre fundo claro) e tons fortes para manter o contraste */
 [data-theme="light"] {
   color-scheme: light;

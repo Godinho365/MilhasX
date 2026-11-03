@@ -2,6 +2,7 @@ import { requirePageUser, appName, publicBrand } from "@/server/session";
 import { getSalesProfile } from "@/server/services/settings";
 import { listPrograms } from "@/server/services/admin";
 import { resolveDesign } from "@/domain/page-design";
+import { centralLookFor } from "@/server/services/site";
 import { PreviewClient } from "./client";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export default async function CentralPreview() {
   const user = await requirePageUser();
   const p = await getSalesProfile(user.id);
   const programs = (await listPrograms(false)).map((x) => ({ id: x.id, name: x.name, color: x.color }));
+  const design = resolveDesign(p?.design);
   const initial = {
     slug: p?.slug ?? "sua-pagina",
     displayName: p?.displayName ?? user.name,
@@ -24,8 +26,9 @@ export default async function CentralPreview() {
     acceptsOrders: p?.acceptsOrders ?? true,
     acceptsLeads: p?.acceptsLeads ?? true,
     programs: programs.filter((x) => p?.programIds.includes(x.id)),
-    design: resolveDesign(p?.design),
+    design,
     bannerVersion: p?.bannerUpdatedAt ? String(p.bannerUpdatedAt.getTime()) : null,
+    look: await centralLookFor(user.id, design),
   };
   return <PreviewClient initial={initial} programs={programs} brand={publicBrand()} appName={appName()} />;
 }

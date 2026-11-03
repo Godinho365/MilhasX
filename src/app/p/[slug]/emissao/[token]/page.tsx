@@ -18,7 +18,7 @@ export default async function EmissaoPage({ params }: P) {
   if (!r) notFound();
   const b = await ownerBranding(r.userId);
   return (
-    <PageShell brand={publicBrand()} appName={appName()} bgColor={b.design.bgColor} banner={bannerUrl(slug, b.bannerVersion)}>
+    <PageShell brand={publicBrand()} appName={appName()} bgColor={b.design.bgColor} banner={bannerUrl(slug, b.bannerVersion)} look={b.look}>
       <EmissaoView slug={slug} token={token} agency={b.agency} whatsapp={b.whatsapp} deal={r.deal} />
     </PageShell>
   );

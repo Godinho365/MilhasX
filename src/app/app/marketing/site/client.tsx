@@ -190,7 +190,8 @@ function SectionFields({ s, onChange }: { s: Section; onChange: (s: Section) => 
 
 // ---------------- Editor ----------------
 
-export function SiteBuilder({ initial, packages }: { initial: Site; packages: Pkg[] }) {
+/** `onLook`: avisa o tema e a cor de destaque atuais (mesmo sem salvar), para a Central de atendimento usar o mesmo visual. */
+export function SiteBuilder({ initial, packages, onLook }: { initial: Site; packages: Pkg[]; onLook?: (theme: string | null, accent: string | null, saved: boolean) => void }) {
   const router = useRouter();
   const [theme, setTheme] = useState(initial.theme);
   const [content, setContent] = useState(initial.content);
@@ -209,6 +210,9 @@ export function SiteBuilder({ initial, packages }: { initial: Site; packages: Pk
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+
+  const savedTheme = (JSON.parse(saved.current) as { theme: string | null }).theme;
+  useEffect(() => { onLook?.(theme, content.brand.accent, !!savedTheme); }, [theme, content.brand.accent, savedTheme, onLook]);
 
   const page: SitePage = tab === "marca" ? "inicio" : tab;
   const t = themeById(theme);
@@ -245,7 +249,7 @@ export function SiteBuilder({ initial, packages }: { initial: Site; packages: Pk
         <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-panel2 text-muted"><Globe className="h-5 w-5" /></span>
         <div className="mr-auto">
           <h1 className="text-2xl font-semibold tracking-tight">Site</h1>
-          <p className="text-sm text-muted">Tema {t.name} · {t.category}. <Link href="/editor" className="text-accent-light hover:underline">Central de atendimento</Link> (cotação e reserva) continua à parte.</p>
+          <p className="text-sm text-muted">Tema {t.name} · {t.category}. A Central de atendimento pode usar o mesmo visual.</p>
         </div>
         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${published ? "bg-emerald-500/15 text-emerald-300" : "bg-panel2 text-muted"}`}><span className={`h-1.5 w-1.5 rounded-full ${published ? "bg-emerald-400" : "bg-zinc-500"}`} />{published ? "No ar" : "Rascunho"}</span>
         {publicUrl && published && <a href={publicUrl} target="_blank" rel="noreferrer" className="btn-ghost h-9 border border-line"><ExternalLink className="h-4 w-4" />Ver site</a>}

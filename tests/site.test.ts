@@ -7,8 +7,12 @@ import * as salesProfile from "@/app/api/sales-profile/route";
 import * as publicOrders from "@/app/api/public/orders/[slug]/route";
 import * as publicLeads from "@/app/api/public/leads/[slug]/route";
 import { publicSite, publicSiteImage, uploadSiteImage } from "@/server/services/site";
+import { publicSalesProfile } from "@/server/services/settings";
+import { ownerBranding } from "@/server/services/client-pages";
+import { centralLook } from "@/domain/central-look";
+import { resolveDesign } from "@/domain/page-design";
 import { defaultContent, normalizeContent, imageIdsOf } from "@/domain/site";
-import { SITE_THEMES, sampleContent } from "@/domain/site-themes";
+import { SITE_THEMES, sampleContent, themeById } from "@/domain/site-themes";
 import { prisma } from "@/server/db";
 
 let c: Client, o: Client;
@@ -139,5 +143,40 @@ describe("site: salvar, publicar e fotos", () => {
     const r = await c.call(siteRoute.PUT, "PUT", "/x", { slug: "outro-qualquer", theme: "trilha", published: true, content: g.content });
     expect(r.data.item.slug).toBe("ana-oficial"); // o endereço já cadastrado vale
     expect(await publicSite("ocupado")).toBeNull(); // a outra agência não tem site publicado
+  });
+});
+
+describe("Central de atendimento com o tema do site", () => {
+  it("o tema vira as cores, fontes e cantos da Central (claro ou escuro) e respeita a cor de destaque", () => {
+    const light = centralLook(themeById("atlantico"));
+    expect(light).toMatchObject({ base: "client", name: "Atlântico" });
+    expect(light.vars).toMatchObject({ "--bg": "251 247 240", "--accent": "14 116 144", "--look-radius": "20px", "--look-btn-radius": "999px" });
+    const dark = centralLook(themeById("prestige"), "#ff0000");
+    expect(dark.base).toBe("dark");
+    expect(dark.vars["--accent"]).toBe("255 0 0");
+    expect(dark.vars["--look-head"]).toContain("Georgia");
+    expect(centralLook(themeById("prestige"), "javascript:x").vars["--accent"]).toBe("201 164 92"); // cor inválida: a do tema
+    expect(resolveDesign(null).siteTheme).toBe(true);
+    expect(resolveDesign({ siteTheme: false }).siteTheme).toBe(false);
+  });
+
+  it("páginas publicadas usam o tema salvo do site; desligar a opção volta à cor própria", async () => {
+    const g = (await c.call(siteRoute.GET, "GET", "/x")).data.item;
+    const content = { ...g.content, brand: { ...g.content.brand, accent: "#123456" } };
+    await c.call(siteRoute.PUT, "PUT", "/x", { slug: "ana-viagens", theme: "prestige", published: false, content });
+    const central = { slug: "ana-viagens", displayName: "Ana Viagens", published: true, programIds: [] };
+    expect((await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", central)).status).toBe(200);
+    const p = await publicSalesProfile("ana-viagens");
+    expect(p?.look).toMatchObject({ base: "dark", name: "Prestige" });
+    expect(p?.look?.vars["--accent"]).toBe("18 52 86");
+    expect((await ownerBranding(userId)).look?.name).toBe("Prestige"); // cotação, reserva e termo também
+    await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...central, design: { siteTheme: false } });
+    expect((await publicSalesProfile("ana-viagens"))?.look).toBeNull();
+    expect((await ownerBranding(userId)).look).toBeNull();
+  });
+
+  it("sem site, a Central segue com o visual próprio", async () => {
+    await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { slug: "ana-viagens", displayName: "Ana Viagens", published: true, programIds: [] });
+    expect((await publicSalesProfile("ana-viagens"))?.look).toBeNull();
   });
 });

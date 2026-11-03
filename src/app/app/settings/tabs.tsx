@@ -143,7 +143,7 @@ export function ReferralsTab({ state }: { state: { code: string; referred: { nam
 const slugify = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
-/** Só a ativação da página e o endereço; textos, cores e botões ficam no editor (/editor). */
+/** Só a ativação da página e o endereço; textos, cores e botões ficam em Marketing › Site, aba Central de atendimento. */
 export function SalesProfileTab({ profile, defaultName, brand }: { profile: { slug: string; published: boolean } | null; defaultName: string; brand: string }) {
   const router = useRouter();
   const [slug, setSlug] = useState(profile?.slug ?? slugify(defaultName));
@@ -165,7 +165,7 @@ export function SalesProfileTab({ profile, defaultName, brand }: { profile: { sl
   }
   return (
     <form onSubmit={save}>
-      <p className="mb-6 text-sm text-muted">Sua página na {brand}: a Central de Atendimento onde clientes pedem cotação, mostram interesse em gestão de milhas e falam com você no WhatsApp. Textos, cores, botões e as páginas de cotação, reserva, saldo e contrato você edita no editor.</p>
+      <p className="mb-6 text-sm text-muted">Sua página na {brand}: a Central de Atendimento onde clientes pedem cotação, mostram interesse em gestão de milhas e falam com você no WhatsApp. Textos, visual, botões e as páginas de cotação, reserva, saldo e contrato você edita em Marketing › Site, na aba Central de atendimento.</p>
       {erro && <div className="mb-4"><Alert>{erro}</Alert></div>}
       <Section title="Página">
         <div className="space-y-4">
@@ -182,7 +182,7 @@ export function SalesProfileTab({ profile, defaultName, brand }: { profile: { sl
       </Section>
       <div className="flex flex-wrap gap-3">
         <button className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</button>
-        <Link href="/editor" className="btn-ghost"><Palette className="h-4 w-4" />Personalizar página</Link>
+        <Link href="/app/marketing/site?aba=central" className="btn-ghost"><Palette className="h-4 w-4" />Personalizar página</Link>
       </div>
     </form>
   );

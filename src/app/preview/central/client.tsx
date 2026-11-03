@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { resolveDesign, bannerUrl, type DesignPage } from "@/domain/page-design";
+import type { CentralLook } from "@/domain/central-look";
 import { contractText } from "@/domain/proposal";
 import { CentralPage, PageShell, type CentralData } from "@/app/p/[slug]/central";
 import { CaptacaoForm, GestaoForm } from "@/app/p/[slug]/forms";
@@ -9,9 +10,11 @@ import { PainelView, SAMPLE_PAINEL } from "@/app/p/[slug]/painel";
 
 export type PreviewMessage = {
   type: "central-preview";
-  draft: Omit<CentralData, "programs" | "design" | "bannerVersion"> & { programIds: string[]; design: unknown };
+  draft: Omit<CentralData, "programs" | "design" | "bannerVersion" | "look"> & { programIds: string[]; design: unknown };
   view: DesignPage;
   bannerSrc: string | null;
+  /** Tema do site como está no editor (mesmo sem salvar); null: sem tema, vale a cor de fundo. */
+  look: CentralLook | null;
 };
 
 export function PreviewClient({ initial, programs, brand, appName }: { initial: CentralData; programs: CentralData["programs"]; brand: string; appName: string }) {
@@ -24,7 +27,7 @@ export function PreviewClient({ initial, programs, brand, appName }: { initial: 
       if (e.origin !== window.location.origin || e.data?.type !== "central-preview") return;
       const m = e.data as PreviewMessage;
       const { programIds, design, ...rest } = m.draft;
-      setData((d) => ({ ...d, ...rest, programs: programs.filter((p) => programIds.includes(p.id)), design: resolveDesign(design) }));
+      setData((d) => ({ ...d, ...rest, programs: programs.filter((p) => programIds.includes(p.id)), design: resolveDesign(design), look: m.look }));
       setView(m.view);
       setBannerSrc(m.bannerSrc);
     }
@@ -40,7 +43,7 @@ export function PreviewClient({ initial, programs, brand, appName }: { initial: 
   const agency = data.displayName;
   return (
     // key: cada página começa do zero ao trocar de aba (formulários voltam à primeira etapa)
-    <PageShell key={view} brand={brand} appName={appName} bgColor={d.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)}>
+    <PageShell key={view} brand={brand} appName={appName} bgColor={d.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)} look={data.look}>
       {view === "captacao" && <CaptacaoForm slug={data.slug} agency={agency} design={d.captacao} whatsapp={data.whatsapp} preview />}
       {view === "gestao" && <GestaoForm slug={data.slug} agency={agency} design={d.gestao} whatsapp={data.whatsapp} preview />}
       {view === "cotacao" && <CotacaoView agency={agency} whatsapp={data.whatsapp ?? "11900000000"} design={d.cotacao} order={SAMPLE_ORDER} />}
