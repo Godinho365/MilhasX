@@ -19,6 +19,10 @@ export function parseBRLToCents(v: string): number | null {
   return Math.round(parseFloat(normalized) * 100);
 }
 
+const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+/** "2026-11" → "Novembro 2026". */
+export const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+
 /** Nome curto para listas: primeiro e último nome ("Raphael Eduardo Godinho Rezende" → "Raphael Rezende"). */
 export function shortName(name: string) {
   const w = name.trim().split(/\s+/).filter(Boolean);

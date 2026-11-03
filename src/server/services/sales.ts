@@ -385,7 +385,7 @@ function present(s: SaleRow) {
 }
 export type SaleView = ReturnType<typeof present>;
 
-export type SaleFilter = { q?: string; from?: Date; to?: Date; programId?: string; customerId?: string; pago?: "sim" | "nao"; tag?: string; sort?: "occurredAt" | "points" | "totalCents"; order?: "asc" | "desc"; holderId?: string };
+export type SaleFilter = { q?: string; from?: Date; to?: Date; programId?: string; customerId?: string; pago?: "sim" | "nao"; tag?: string; sort?: "occurredAt" | "points" | "totalCents"; order?: "asc" | "desc"; holderId?: string; accountId?: string };
 
 /** Dia da venda (AAAA-MM-DD): a venda só com data fica à meia-noite UTC; a do CRM tem hora e vale o dia em Brasília. */
 export const saleDay = (at: Date) => (at.getTime() % 86_400_000 === 0 ? at.toISOString().slice(0, 10) : brDay(at));
@@ -396,6 +396,7 @@ export async function listSales(userId: string, f: SaleFilter = {}) {
   const toDay = f.to?.toISOString().slice(0, 10);
   const where: Prisma.SaleWhereInput = {
     userId,
+    accountId: f.accountId,
     // janela um pouco maior no banco; o corte exato pelo dia da venda é feito abaixo
     occurredAt: f.from || f.to ? { gte: f.from && new Date(`${fromDay}T00:00:00Z`), lt: f.to && new Date(new Date(`${toDay}T00:00:00Z`).getTime() + 86_400_000 + BR_OFFSET_MS) } : undefined,
     items: f.customerId ? { some: { customers: { some: { id: f.customerId } } } } : undefined,

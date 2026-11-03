@@ -16,6 +16,8 @@ import * as checklist from "@/app/api/tasks/[id]/checklist/route";
 import * as comments from "@/app/api/tasks/[id]/comments/route";
 import * as boards from "@/app/api/task-boards/route";
 import { columnOf } from "@/domain/team";
+import { accountMonth, monthOrCurrent, shiftMonth } from "@/server/services/account-month";
+import { shortName } from "@/lib/format";
 import * as board from "@/app/api/task-boards/[id]/route";
 import * as partners from "@/app/api/partners/route";
 import * as salePartner from "@/app/api/sales/[id]/partner/route";
@@ -153,6 +155,30 @@ describe("novo quadro: colunas e acesso", () => {
     expect((await c.call(board.PUT, "PUT", "/x", { name: "Emissões", columns: [{ id: rec, name: "Entrada" }, { id: cot, name: "Em cotação" }, { id: ent, name: "Entregue" }] }, { id: custom })).status).toBe(200);
     expect((await listTasks(userId, { boardId: custom }))[0]!.columnId).toBe(cot);
     expect((await o.call(board.PUT, "PUT", "/x", { name: "hack" }, { id: custom })).status).toBe(404);
+  });
+});
+
+describe("conta por mês", () => {
+  it("lucro, total vendido e rendimento só das vendas da conta no mês; histórico do mês", async () => {
+    const p = await prisma.program.findFirstOrThrow({ where: { code: "LATAM" } });
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana Maria da Silva" })).data.item.id;
+    const acc = (await c.call(accounts.POST, "POST", "/a", { holderId: h, programId: p.id })).data.item.id;
+    const other = (await c.call(accounts.POST, "POST", "/a", { holderId: h, programId: (await prisma.program.findFirstOrThrow({ where: { code: { not: "LATAM" } } })).id })).data.item.id;
+    await c.call(entries.POST, "POST", "/e", { accountId: acc, type: "PURCHASE", points: 20000, occurredAt: "2026-10-01", costs: [{ type: "PONTOS", amountCents: 50000 }] });
+    await c.call(entries.POST, "POST", "/e", { accountId: other, type: "PURCHASE", points: 20000, occurredAt: "2026-11-01", costs: [{ type: "PONTOS", amountCents: 50000 }] });
+    // 10 mil (custo R$ 250) por R$ 300 em novembro; outra conta não entra
+    await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: acc, occurredAt: "2026-11-05", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 30000, passengers: 1 }] });
+    await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: other, occurredAt: "2026-11-06", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 90000, passengers: 1 }] });
+    const nov = await accountMonth(userId, acc, "2026-11");
+    expect(nov.sales).toMatchObject({ count: 1, profitCents: 5000, totalCents: 30000, roePct: 20 });
+    expect(nov.entries.map((e) => e.points)).toEqual([-10000]);
+    expect(nov).toMatchObject({ balance: 10000, stockCents: 25000, cpmCents: 2500, club: { active: false, since: null } });
+    const out = await accountMonth(userId, acc, "2026-10");
+    expect(out.sales.count).toBe(0);
+    expect(out.entries.map((e) => e.points)).toEqual([20000]);
+    expect(monthOrCurrent("2026-13", new Date("2026-11-03T12:00:00Z"))).toBe("2026-11");
+    expect([shiftMonth("2026-01", -1), shiftMonth("2026-12", 1)]).toEqual(["2025-12", "2027-01"]);
+    expect(shortName("Ana Maria da Silva")).toBe("Ana Silva");
   });
 });
 
