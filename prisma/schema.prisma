@@ -118,6 +118,7 @@ model User {
   subscriptions       Subscription[]
   travelOrders        TravelOrder[]
   orderPipelines      OrderPipeline[]
+  viajeFacil          ViajeFacil[]
   milesDeals          MilesDeal[]
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
@@ -1007,4 +1008,26 @@ model MilesDealTicket {
   size      Int
   data      Bytes
   createdAt DateTime  @default(now())
+}
+
+// ViajeFácil (Smiles): a reserva é feita agora e paga em milhas até a data limite. O radar mostra o que vence.
+model ViajeFacil {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerName   String
+  deadline       DateTime // data limite para quitar com milhas
+  miles          Int
+  roundTrip      Boolean   @default(false)
+  origin         String?
+  destination    String?
+  cabin          String? // ECONOMY | PREMIUM | BUSINESS | FIRST
+  passengers     String[]  @default([])
+  milesInAccount Boolean   @default(false) // o cliente já tem o saldo para quitar
+  notes          String?
+  paidAt         DateTime? // quitada com milhas
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, deadline])
 }

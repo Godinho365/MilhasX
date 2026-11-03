@@ -512,3 +512,18 @@ export const saleRefundReceiptSchema = z.object({
   kind: z.enum(["miles", "tax"]),
   date: dateStr,
 });
+
+// ViajeFácil (Smiles): reserva com prazo para quitar em milhas
+export const viajeFacilSchema = z.object({
+  customerName: z.string().trim().min(1, "Informe o cliente").max(120),
+  deadline: dateStr,
+  miles: z.number().int().positive("Informe as milhas").max(10_000_000),
+  roundTrip: z.boolean().optional(),
+  origin: z.string().trim().max(3).regex(/^[A-Za-z]{0,3}$/, "Use o código do aeroporto (ex.: GRU)").nullable().optional(),
+  destination: z.string().trim().max(3).regex(/^[A-Za-z]{0,3}$/, "Use o código do aeroporto (ex.: GRU)").nullable().optional(),
+  cabin: z.enum(["ECONOMY", "PREMIUM", "BUSINESS", "FIRST"]).nullable().optional(),
+  passengers: z.array(z.string().trim().min(1).max(120)).max(9, "No máximo 9 passageiros").optional(),
+  milesInAccount: z.boolean().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+export const viajeFacilPaidSchema = z.object({ paid: z.boolean() });

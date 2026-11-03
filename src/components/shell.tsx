@@ -47,7 +47,16 @@ const NAV: { group: string; items: NavItem[] }[] = [
     ] },
   ] },
   { group: "Recursos", items: [
-    { href: "/app/credit-cards", label: "Cartões de Crédito", icon: CreditCard },
+    { key: "milhas", label: "Milhas", icon: WalletCards, children: [
+      { href: "/app/programs", label: "Central de Contas" },
+      { href: "/app/credit-cards", label: "Central de Cartões" },
+      { href: "/app/entries?novo=transfer", label: "Transferência" },
+      { href: "/app/entries?status=PENDING", label: "Agendamentos" },
+      { href: "/app/milhas/clubes", label: "Clubes" },
+      { href: "/app/milhas/sugerir", label: "Sugerir Conta" },
+      { href: "/app/milhas/sugestor-compra", label: "Sugestor de Compra" },
+      { href: "/app/milhas/viaje-facil", label: "ViajeFácil" },
+    ] },
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
   ] },
@@ -64,11 +73,12 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
 ];
 const NAV_OPEN_KEY = (key: string) => `mm:nav-${key}`;
+const NAV_HREFS = NAV.flatMap((g) => g.items.flatMap((it) => (isGroup(it) ? it.children.map((c) => c.href) : [it.href])));
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const SIM_LABELS: Record<string, string> = { "purchase/bonificada": "Compra Bonificada", purchase: "Compra Bonificada", "purchase/store-comparison": "Pontos vs Cashback", "purchase/pontos": "Compra de Pontos", transfer: "Transferência", flight: "Passagem Aérea", hotel: "Hospedagem", sale: "Venda", "supplier-ranking": "Melhor fornecedor" };
 const TITLES: [string, string][] = [
-  ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"],
+  ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
   ["/app/credit-cards", "Cartões de Crédito"], ["/app/simulators", "Simuladores"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
   ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
@@ -144,12 +154,14 @@ export function Shell(props: {
   const userRef = useRef<HTMLDivElement>(null);
   // "/app/crm" não pode marcar "/app/crm-milhas": a seção vale para o próprio endereço e o que vem depois de "/"
   const under = (p: string) => path === p || path.startsWith(`${p}/`);
-  const active = (href: string) => {
+  // Item com parâmetros (ex.: Extrato "a receber", aba Clientes) só vale com eles; o item sem parâmetros
+  // da mesma página fica marcado quando nenhum desses bate.
+  const matches = (href: string) => {
     const [p, query] = href.split("?");
-    const tab = new URLSearchParams(query ?? "").get("tab");
-    if (p === "/app/sales") return under(p) && (search.get("tab") ?? null) === tab;
-    return p === "/app" ? path === "/app" : under(p!);
+    if (!(p === "/app" ? path === "/app" : under(p!))) return false;
+    return [...new URLSearchParams(query ?? "")].every(([k, v]) => search.get(k) === v);
   };
+  const active = (href: string) => matches(href) && (href.includes("?") || !NAV_HREFS.some((h) => h.startsWith(`${href}?`) && matches(h)));
   const title = TITLES.find(([p]) => under(p))?.[1];
   const tutorialTag = path === "/app" ? "Painel" : TUTORIAL_TAGS.find(([p]) => under(p))?.[1];
   const tutorial = props.prefs.hideTutorials || !tutorialTag
