@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Check, ChevronDown, Copy, ExternalLink, Eye, Globe, ImagePlus, LayoutTemplate, Monitor, Palette, Plus, Smartphone, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Copy, ExternalLink, Eye, Globe, ImagePlus, LayoutTemplate, Monitor, Palette, Plus, Send, Smartphone, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
 import { Modal, Field, Alert } from "@/components/ui";
@@ -23,7 +23,7 @@ const ownPkgImg = (p: SitePackage) => (p.imageVersion ? `/api/showcase/${p.id}/i
 const slugify = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
 /** Prévia do site num tamanho de tela (computador ou celular), reduzida para caber no espaço. */
-function Preview({ theme, content, page, packages, device, onNav, height }: { theme: SiteTheme; content: SiteContent; page: SitePage; packages: SitePackage[]; device: "desktop" | "phone"; onNav?: (p: SitePage) => void; height: number }) {
+function Preview({ theme, content, page, packages, device, onNav, height, requestHref = null }: { theme: SiteTheme; content: SiteContent; page: SitePage; packages: SitePackage[]; device: "desktop" | "phone"; onNav?: (p: SitePage) => void; height: number; requestHref?: string | null }) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(900);
   useEffect(() => {
@@ -40,7 +40,7 @@ function Preview({ theme, content, page, packages, device, onNav, height }: { th
     <div ref={box} className="overflow-hidden rounded-xl border border-line" style={{ height, backgroundColor: "#e5e5e5" }}>
       <div style={{ width: width * zoom, height, margin: "0 auto", overflowY: "auto", overflowX: "hidden" }}>
         <div style={{ width, zoom } as React.CSSProperties}>
-          <SiteView ctx={{ theme, content, page, packages, href: () => "#", img: ownImg, pkgImg: ownPkgImg, requestHref: null, onNav, slug: null, embedded: true }} />
+          <SiteView ctx={{ theme, content, page, packages, href: () => "#", img: ownImg, pkgImg: ownPkgImg, requestHref, onNav, slug: null, embedded: true }} />
         </div>
       </div>
     </div>
@@ -166,7 +166,7 @@ function SectionFields({ s, onChange }: { s: Section; onChange: (s: Section) => 
       : <input className="input h-9 text-sm" value={(s as Record<string, unknown>)[k] as string} onChange={(e) => set({ [k]: e.target.value } as Partial<Section>)} />}</Field>
   );
   switch (s.type) {
-    case "hero": return <div className="space-y-3">{text("eyebrow", "Linha de cima (opcional)")}{text("title", "Título: a promessa principal")}{text("text", "Frase de apoio", true)}{text("button", "Botão principal (leva ao formulário de cotação)")}{text("button2", "Botão do WhatsApp (vazio: sem botão)")}{text("note", "Frase de garantia embaixo dos botões")}<ImageField label="Foto da capa" id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
+    case "hero": return <div className="space-y-3">{text("eyebrow", "Linha de cima (opcional)")}{text("title", "Título: a promessa principal")}{text("text", "Frase de apoio", true)}{text("button", "Botão principal (leva ao pedido de cotação)")}{text("button2", "Botão do WhatsApp (vazio: sem botão)")}{text("note", "Frase de garantia embaixo dos botões")}<ImageField label="Foto da capa" id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
     case "selos": return <div className="space-y-3"><p className="text-xs text-muted">Cadastur, CNPJ e tempo de resposta da aba Marca entram sozinhos aqui. Abaixo, garantias extras.</p><ListField items={s.items} max={6} blank={{ title: "", text: "" }} fields={[{ key: "title", label: "Selo (ex.: Atendimento humano)" }, { key: "text", label: "Detalhe" }]} onChange={(items) => set({ items })} addLabel="Adicionar selo" /></div>;
     case "cotacao": return <div className="space-y-3">{text("title", "Título")}{text("text", "Frase de apoio", true)}{text("button", "Texto do botão de enviar")}<p className="text-xs text-muted">Cada envio vira um pedido em CRM Passagens, com origem “Página pública”, e você recebe uma notificação.</p></div>;
     case "milhas": return <div className="space-y-3">{text("title", "Título")}{text("text", "Frase de apoio", true)}{text("button", "Texto do botão de enviar")}<p className="text-xs text-muted">Cada envio vira um interessado em CRM › Lista › Interessados.</p></div>;
@@ -217,6 +217,10 @@ export function SiteBuilder({ initial, packages, onLook }: { initial: Site; pack
   const page: SitePage = tab === "marca" ? "inicio" : tab;
   const t = themeById(theme);
   const publicUrl = initial.slug ? `/s/${initial.slug}` : null;
+  // Página "Pedir cotação de viagem" da Central: destino dos botões de cotação quando o site não tem o formulário
+  const requestHref = initial.canRequest && initial.slug ? `/p/${initial.slug}/solicitar` : null;
+  const hasQuoteForm = SITE_PAGES.some((p) => content.pages[p].on && content.pages[p].sections.some((x) => x.type === "cotacao" && x.on));
+  const addQuoteForm = () => { setOpen(content.pages[page].sections.length); setSections((ss) => [...ss, blankSection("cotacao")]); };
 
   async function save(nextPublished = published) {
     if (!theme) return;
@@ -304,6 +308,16 @@ export function SiteBuilder({ initial, packages, onLook }: { initial: Site; pack
           ) : (
             <div className="space-y-2">
               {tab !== "inicio" && <div className="card card-pad"><Switch checked={content.pages[tab].on} onChange={(v) => setPage(tab, (pc) => ({ ...pc, on: v }))} label={`Mostrar a página ${PAGE_LABELS[tab]} no menu`} /></div>}
+              {!hasQuoteForm && (
+                <div className="card card-pad space-y-2 text-xs text-muted">
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-zinc-100"><Send className="h-4 w-4 text-accent-light" />Botões “Pedir cotação”</p>
+                  <p>{requestHref
+                    ? "O site não tem o formulário de cotação, então o botão do topo e o da capa abrem a página “Pedir cotação de viagem” da sua Central de atendimento, com o mesmo tema do site."
+                    : "O site não tem o formulário de cotação e a Central de atendimento não está recebendo pedidos, então esses botões abrem o WhatsApp."}</p>
+                  <p>Para o cliente pedir sem sair do site, ponha o formulário numa página.</p>
+                  <button type="button" className="btn-ghost h-8 border border-line text-xs" onClick={addQuoteForm}><Plus className="h-3.5 w-3.5" />Pôr o formulário nesta página</button>
+                </div>
+              )}
               {sections.map((s, i) => (
                 <div key={i} className={`card overflow-hidden ${s.on ? "" : "opacity-60"}`}>
                   <div className="flex items-center gap-1 px-3 py-2">
@@ -338,7 +352,7 @@ export function SiteBuilder({ initial, packages, onLook }: { initial: Site; pack
             <span className="flex-1" />
             <div className="inline-flex gap-0.5 rounded-lg border border-line bg-panel p-0.5"><button type="button" aria-pressed={device === "desktop"} onClick={() => setDevice("desktop")} className={`rounded-md p-1.5 ${device === "desktop" ? "bg-panel2 text-white" : "text-muted"}`} aria-label="Computador"><Monitor className="h-4 w-4" /></button><button type="button" aria-pressed={device === "phone"} onClick={() => setDevice("phone")} className={`rounded-md p-1.5 ${device === "phone" ? "bg-panel2 text-white" : "text-muted"}`} aria-label="Celular"><Smartphone className="h-4 w-4" /></button></div>
           </div>
-          <Preview theme={t} content={content} page={page} packages={packages} device={device} onNav={(p) => setTab(p)} height={760} />
+          <Preview theme={t} content={content} page={page} packages={packages} device={device} onNav={(p) => setTab(p)} height={760} requestHref={requestHref} />
         </section>
       </div>
     </div>

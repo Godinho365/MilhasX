@@ -59,12 +59,26 @@ function quoteTarget(ctx: SiteCtx): SitePage | null {
   return SITE_PAGES.find((p) => hasQuote(ctx, p)) ?? null;
 }
 
-/** Botão para o formulário de cotação (rola até ele ou abre a página dele). */
-function QuoteButton({ ctx, label, kind = "primary" }: { ctx: SiteCtx; label: string; kind?: "primary" | "light" | "ghost" }) {
+type QuoteLink = { href: string; onClick?: (e: React.MouseEvent) => void };
+
+/**
+ * Para onde vai "Pedir cotação": o formulário do site (nesta página ou na que tiver) e, sem formulário
+ * no site, a página "Pedir cotação de viagem" da Central de atendimento (com o mesmo tema do site).
+ */
+function quoteLink(ctx: SiteCtx): QuoteLink | null {
   const to = quoteTarget(ctx);
-  if (!to) return <MainButton ctx={ctx} label={label} kind={kind} />;
-  if (to === ctx.page) return <a href="#cotacao" style={btnStyle(ctx.theme, kind)}>{label}</a>;
-  return <a href={`${ctx.href(to)}#cotacao`} style={btnStyle(ctx.theme, kind)} onClick={ctx.onNav ? (e) => { e.preventDefault(); ctx.onNav!(to); } : undefined}>{label}</a>;
+  if (to === ctx.page) return { href: "#cotacao" };
+  if (to) return { href: `${ctx.href(to)}#cotacao`, onClick: ctx.onNav ? (e) => { e.preventDefault(); ctx.onNav!(to); } : undefined };
+  // na prévia do editor o botão aparece, mas não sai da tela
+  if (ctx.requestHref) return { href: ctx.requestHref, onClick: ctx.embedded ? (e) => e.preventDefault() : undefined };
+  return null;
+}
+
+/** Botão de cotação; sem formulário no site nem Central recebendo pedidos, vira o botão do WhatsApp. */
+function QuoteButton({ ctx, label, kind = "primary" }: { ctx: SiteCtx; label: string; kind?: "primary" | "light" | "ghost" }) {
+  const l = quoteLink(ctx);
+  if (!l) return <MainButton ctx={ctx} label={label} kind={kind} />;
+  return <a href={l.href} onClick={l.onClick} style={btnStyle(ctx.theme, kind)}>{label}</a>;
 }
 
 /** Botões da capa: cotação (principal) e WhatsApp (secundário), com a frase de garantia embaixo. */
@@ -485,7 +499,11 @@ function Header({ ctx }: { ctx: SiteCtx }) {
           {pages.map((p) => <PageLink key={p} ctx={ctx} to={p} style={{ color: p === ctx.page ? "var(--s-accent)" : "inherit", textDecoration: "none" }}>{PAGE_LABELS[p]}</PageLink>)}
         </nav>
         <Socials ctx={ctx} size={18} />
-        {b.whatsapp && <MainButton ctx={ctx} label="Falar com a gente" />}
+        {/* principal ação do topo: pedir cotação (o WhatsApp segue no ícone ao lado e no botão flutuante).
+            No celular ele fica só na barra fixa de baixo, sem repetir no topo. */}
+        <span className="hidden md:inline-flex">
+          {quoteLink(ctx) ? <QuoteButton ctx={ctx} label="Pedir cotação" /> : b.whatsapp && <MainButton ctx={ctx} label="Falar com a gente" />}
+        </span>
       </div>
     </header>
   );
@@ -537,7 +555,7 @@ function Socials({ ctx, size }: { ctx: SiteCtx; size: number }) {
 function Floating({ ctx }: { ctx: SiteCtx }) {
   const t = ctx.theme;
   const wa = whatsHref(ctx, greeting(ctx));
-  const quote = quoteTarget(ctx);
+  const quote = !!quoteLink(ctx);
   if (!wa && !quote) return null;
   const pos: React.CSSProperties = ctx.embedded ? { position: "sticky", bottom: 0 } : { position: "fixed", left: 0, right: 0, bottom: 0 };
   return (

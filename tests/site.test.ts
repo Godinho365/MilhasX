@@ -14,6 +14,10 @@ import { resolveDesign } from "@/domain/page-design";
 import { defaultContent, normalizeContent, imageIdsOf } from "@/domain/site";
 import { SITE_THEMES, sampleContent, themeById } from "@/domain/site-themes";
 import { prisma } from "@/server/db";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SiteView, type SiteCtx } from "@/components/site/site-view";
+import type { SiteContent } from "@/domain/site";
 
 let c: Client, o: Client;
 let userId: string;
@@ -178,5 +182,39 @@ describe("Central de atendimento com o tema do site", () => {
   it("sem site, a Central segue com o visual próprio", async () => {
     await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { slug: "ana-viagens", displayName: "Ana Viagens", published: true, programIds: [] });
     expect((await publicSalesProfile("ana-viagens"))?.look).toBeNull();
+  });
+});
+
+describe("site: botões de pedir cotação", () => {
+  // conteúdo sem nenhuma seção de formulário de cotação (como os sites salvos antes dela existir)
+  const semFormulario = (whatsapp: string): SiteContent => {
+    const base = defaultContent({ name: "Ana Viagens", whatsapp });
+    const pages = Object.fromEntries(Object.entries(base.pages).map(([k, p]) => [k, { ...p, sections: p.sections.filter((x) => x.type !== "cotacao") }]));
+    return { ...base, pages } as SiteContent;
+  };
+  const html = (content: SiteContent, requestHref: string | null) => renderToStaticMarkup(createElement(SiteView, { ctx: {
+    theme: themeById("atlantico"), content, page: "inicio", packages: [], href: (p) => `/s/ana${p === "inicio" ? "" : `/${p}`}`,
+    img: () => "", pkgImg: () => null, requestHref, slug: "ana",
+  } satisfies SiteCtx }));
+  const topo = (h: string) => h.slice(h.indexOf("<header"), h.indexOf("</header>"));
+
+  it("com o formulário no site, o topo e a capa levam a ele", () => {
+    const h = html(defaultContent({ name: "Ana Viagens", whatsapp: "11999990000" }), "/p/ana/solicitar");
+    expect(topo(h)).toMatch(/href="#cotacao"[^>]*>Pedir cotação</);
+    expect(h).not.toContain("/p/ana/solicitar");
+  });
+
+  it("sem formulário no site, levam à página Pedir cotação de viagem da Central", () => {
+    const h = html(semFormulario("11999990000"), "/p/ana/solicitar");
+    const link = (label: string) => new RegExp(`href="/p/ana/solicitar"[^>]*>${label}<`);
+    expect(topo(h)).toMatch(link("Pedir cotação"));
+    expect(h).toMatch(link("Pedir minha cotação")); // botão da capa
+  });
+
+  it("sem formulário e sem a Central recebendo pedidos, o topo volta ao WhatsApp", () => {
+    const h = topo(html(semFormulario("11999990000"), null));
+    expect(h).not.toContain("Pedir cotação");
+    expect(h).toContain("Falar com a gente");
+    expect(h).toContain("https://wa.me/5511999990000");
   });
 });
