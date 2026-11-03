@@ -19,6 +19,12 @@ export function parseBRLToCents(v: string): number | null {
   return Math.round(parseFloat(normalized) * 100);
 }
 
+/** Nome curto para listas: primeiro e último nome ("Raphael Eduardo Godinho Rezende" → "Raphael Rezende"). */
+export function shortName(name: string) {
+  const w = name.trim().split(/\s+/).filter(Boolean);
+  return w.length <= 2 ? w.join(" ") : `${w[0]} ${w[w.length - 1]}`;
+}
+
 export const initials = (name: string) =>
   name
     .split(/\s+/)
