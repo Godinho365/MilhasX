@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
+import { fmtPts } from "@/lib/format";
 import { UserAvatar } from "./user-avatar";
 import { HolderPicker, type HolderOpt } from "./holder-picker";
 import { ThemeMenuItem } from "./theme-switch";
@@ -304,26 +305,31 @@ export function Shell(props: {
     );
   };
   const badgeOf = (b?: NavLeaf["badge"]) => (b === "unread" ? props.unread : b === "news" ? props.unreadNews : undefined);
-  const programsBlock = (
+  // Com "Todos os titulares" o bloco some (seriam logos repetidos de titulares diferentes);
+  // com um titular escolhido, as contas dele em lista: logo, programa e saldo
+  const programsBlock = chosenHolder ? (
     <div key="programas">
-      <div className="mb-1.5 flex items-center px-2.5">
+      <div className="mb-1 flex items-center px-2.5">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Programas</p>
         <Link href="/app/programs" className="ml-auto text-xs font-medium text-muted hover:text-white">Ver todos ({visibleAccounts.length})</Link>
       </div>
-      {/* Atalhos das contas (titular × programa), maiores saldos primeiro, como na referência */}
-      <div className="flex flex-wrap gap-1.5 px-2.5">
-        {topAccounts.map((a) => (
-          <Link key={a.id} href={`/app/programs/${a.id}`} title={`${a.holder} - ${a.program}`} aria-label={`${a.holder} - ${a.program}`} className="rounded-full transition-transform hover:scale-110">
-            <ProgramLogo programId={a.programId ?? a.id} name={a.program} color={a.color} version={a.logo} size={32} />
-          </Link>
-        ))}
-        {visibleAccounts.length > 5 && (
-          <Link href="/app/programs" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-line text-[11px] text-muted" aria-label={`Ver mais ${visibleAccounts.length - 5} programas`}>+{visibleAccounts.length - 5}</Link>
-        )}
-        {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
+      <div className="space-y-px">
+        {topAccounts.map((a) => {
+          const here = path === `/app/programs/${a.id}`;
+          return (
+            <Link key={a.id} href={`/app/programs/${a.id}`} aria-current={here ? "page" : undefined} title={`${a.holder} - ${a.program}`}
+              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-[5px] text-[13px] font-medium transition-colors ${here ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}>
+              <ProgramLogo programId={a.programId ?? a.id} name={a.program} color={a.color} version={a.logo} size={22} />
+              <span className="min-w-0 flex-1 truncate">{a.program}</span>
+              <span className="text-xs tabular-nums text-muted">{fmtPts(a.balance)}</span>
+            </Link>
+          );
+        })}
+        {visibleAccounts.length > 5 && <Link href="/app/programs" className="block rounded-lg px-2.5 py-[5px] pl-[42px] text-xs text-muted hover:bg-panel2/70 hover:text-white">+{visibleAccounts.length - 5} programas</Link>}
+        {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 px-2.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
       </div>
     </div>
-  );
+  ) : null;
   // "Sua <marca>" entra em Gestão e o suporte em Conta (dependem das props)
   const extra: Record<string, NavLeaf[]> = {
     "Gestão": [{ href: "/editor", label: `Sua ${props.brand}`, icon: Palette }],
