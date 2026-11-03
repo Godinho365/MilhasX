@@ -8,7 +8,7 @@ import * as item from "@/app/api/showcase/[id]/route";
 import * as move from "@/app/api/showcase/[id]/move/route";
 import * as settings from "@/app/api/showcase/settings/route";
 import * as suggest from "@/app/api/showcase/suggest/route";
-import { publicShowcase } from "@/server/services/showcase";
+import { publicShowcase, setShowcaseImage, showcaseImage } from "@/server/services/showcase";
 import { prisma } from "@/server/db";
 import { entryStage } from "@/server/services/pipelines";
 
@@ -65,7 +65,17 @@ describe("vitrine", () => {
     const pub = await publicShowcase("ana-viagens");
     expect(pub).toMatchObject({ title: "Pacotes de março", items: [{ id, title: "Lisboa", priceCents: 400000 }] });
     expect(pub!.items).toHaveLength(1);
+    // foto do card: pública só com a vitrine ligada e a conta do dono ativa
+    const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
+    const owner = (await prisma.user.findFirstOrThrow({ where: { email: "ana@x.test" } })).id;
+    await setShowcaseImage(owner, id, png);
+    expect(await showcaseImage("ana-viagens", id)).toMatchObject({ mime: "image/png" });
+    await prisma.user.update({ where: { id: owner }, data: { status: "DISABLED" } });
+    expect(await publicShowcase("ana-viagens")).toBeNull();
+    expect(await showcaseImage("ana-viagens", id)).toBeNull();
+    await prisma.user.update({ where: { id: owner }, data: { status: "ACTIVE" } });
     await c.call(settings.PUT, "PUT", "/x", { active: false });
     expect(await publicShowcase("ana-viagens")).toBeNull();
+    expect(await showcaseImage("ana-viagens", id)).toBeNull();
   });
 });

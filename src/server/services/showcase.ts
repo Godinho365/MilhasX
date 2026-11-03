@@ -115,19 +115,25 @@ export async function suggestFromOrder(userId: string, orderId: string): Promise
   };
 }
 
-/** Página pública: só com a vitrine ligada e a conta ativa; só os cards ativos. */
-export async function publicShowcase(slug: string) {
-  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, slug: true, displayName: true, whatsapp: true, instagram: true, showcaseActive: true, showcaseTitle: true, acceptsOrders: true, published: true, design: true, bannerUpdatedAt: true } });
+/** Dono da vitrine pública: só com a vitrine ligada e a conta ativa (vale para a página e para as fotos). */
+async function publicShowcaseOwner(slug: string) {
+  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, slug: true, displayName: true, whatsapp: true, instagram: true, showcaseActive: true, showcaseTitle: true, acceptsOrders: true, published: true } });
   if (!p || !p.showcaseActive) return null;
   const owner = await prisma.user.findUnique({ where: { id: p.userId }, select: { status: true } });
-  if (owner?.status !== "ACTIVE") return null;
+  return owner?.status === "ACTIVE" ? p : null;
+}
+
+/** Página pública: só com a vitrine ligada e a conta ativa; só os cards ativos. */
+export async function publicShowcase(slug: string) {
+  const p = await publicShowcaseOwner(slug);
+  if (!p) return null;
   const items = await prisma.showcaseItem.findMany({ where: { userId: p.userId, active: true }, omit, orderBy: [{ position: "asc" }, { createdAt: "desc" }] });
   return { slug: p.slug, agency: p.displayName, whatsapp: p.whatsapp, instagram: p.instagram, title: p.showcaseTitle, canRequest: p.published && p.acceptsOrders, items: items.map(view) };
 }
 
 export async function showcaseImage(slug: string, id: string) {
-  const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, showcaseActive: true } });
-  if (!p?.showcaseActive) return null;
+  const p = await publicShowcaseOwner(slug);
+  if (!p) return null;
   const i = await prisma.showcaseItem.findFirst({ where: { id, userId: p.userId, active: true }, select: { image: true, imageMime: true } });
   return i?.image && i.imageMime ? { data: Buffer.from(i.image), mime: i.imageMime } : null;
 }
