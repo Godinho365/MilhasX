@@ -419,10 +419,17 @@ export const orderSchema = z.object({
   priority: z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
   budgetCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
+  stageId: z.string().max(40).nullable().optional(), // coluna onde o pedido novo entra
 });
 // "website" é um campo-armadilha: pessoas não veem, robôs preenchem
-export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true }).extend({ website: z.string().max(0).optional() });
-export const orderMoveSchema = z.object({ stage: z.enum(["NEW", "QUOTING", "QUOTE_SENT", "NEGOTIATION", "ISSUED", "TRAVELING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() });
+export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, stageId: true }).extend({ website: z.string().max(0).optional() });
+export const orderMoveSchema = z.object({ stageId: z.string().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() });
+// Funis e colunas do CRM Passagens
+const pipelineName = z.string().trim().min(1, "Dê um nome").max(40, "Nome com mais de 40 letras");
+const stageColor = z.string().regex(/^#[0-9a-f]{6}$/i, "Cor inválida");
+export const pipelineSchema = z.object({ name: pipelineName });
+export const stageCreateSchema = z.object({ name: pipelineName, color: stageColor });
+export const stageUpdateSchema = z.object({ name: pipelineName.optional(), color: stageColor.optional(), position: z.number().int().min(0).max(100).optional() });
 
 // CRM Milhas
 export const dealSchema = z.object({

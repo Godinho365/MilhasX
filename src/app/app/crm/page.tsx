@@ -5,17 +5,19 @@ import { listOrders, ordersDashboard } from "@/server/services/orders";
 import { PageHeader, Stat } from "@/components/stat";
 import { Segmented } from "@/components/ui";
 import { fmtBRL } from "@/lib/format";
-import { STAGE_LABELS } from "@/domain/orders";
+import { listPipelines } from "@/server/services/pipelines";
 import { Kanban, OrdersList, LeadsList } from "./client";
 import { listLeads } from "@/server/services/leads";
 
 const PERIODS = [["7", "Últimos 7 dias"], ["30", "Últimos 30 dias"], ["90", "Últimos 90 dias"], ["365", "Últimos 12 meses"], ["all", "Tudo"]] as const;
 
-export default async function CrmPage({ searchParams }: { searchParams: Promise<{ view?: string; periodo?: string }> }) {
+export default async function CrmPage({ searchParams }: { searchParams: Promise<{ view?: string; periodo?: string; funil?: string }> }) {
   const user = await requirePageUser();
   const sp = await searchParams;
   const view = sp.view === "lista" ? "lista" : sp.view === "dashboard" ? "dashboard" : "kanban";
   const customers = (await prisma.customer.findMany({ where: { userId: user.id }, select: { id: true, name: true, phone: true, email: true }, orderBy: { name: "asc" } }));
+  const pipelines = await listPipelines(user.id);
+  const pipeline = pipelines.find((p) => p.id === sp.funil) ?? pipelines[0]!;
   const subtitle = { kanban: "Arraste os cartões entre as colunas para atualizar o andamento de cada pedido.", lista: "Todos os pedidos em formato de lista, ativos e arquivados.", dashboard: "Os principais indicadores da sua operação de pedidos." }[view];
   return (
     <>
@@ -25,10 +27,10 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
         { key: "kanban", label: "Kanban", href: "/app/crm" },
         { key: "lista", label: "Lista", href: "/app/crm?view=lista" },
       ]} />
-      {view === "kanban" && <Kanban orders={await listOrders(user.id)} customers={customers} />}
+      {view === "kanban" && <Kanban orders={await listOrders(user.id)} customers={customers} pipelines={pipelines} pipeline={pipeline} />}
       {view === "lista" && (
         <>
-          <OrdersList active={await listOrders(user.id)} archived={await listOrders(user.id, { archived: true })} customers={customers} />
+          <OrdersList active={await listOrders(user.id)} archived={await listOrders(user.id, { archived: true })} customers={customers} pipelines={pipelines} />
           <LeadsList leads={await listLeads(user.id)} />
         </>
       )}
@@ -107,15 +109,22 @@ async function Dashboard({ userId, periodo }: { userId: string; periodo: string 
       </section>
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card card-pad" aria-label="Pipeline atual">
-          <h2 className="font-semibold">Pipeline atual</h2>
+          <h2 className="font-semibold">Funis agora</h2>
           <p className="mb-3 text-sm text-muted">Pedidos ativos por coluna (não considera o período).</p>
-          <ul className="space-y-1.5 text-sm">{d.pipeline.map((p) => <li key={p.stage} className="flex justify-between"><span>{STAGE_LABELS[p.stage]}</span><span className="tabular-nums text-muted">{p.count} {p.count === 1 ? "pedido" : "pedidos"}</span></li>)}</ul>
+          <div className="space-y-4">
+            {d.pipelines.map((p) => (
+              <div key={p.id}>
+                <h3 className="kicker mb-1.5">{p.name}</h3>
+                <ul className="space-y-1.5 text-sm">{p.stages.map((s) => <li key={s.id} className="flex justify-between"><span>{s.name}</span><span className="tabular-nums text-muted">{s.count} {s.count === 1 ? "pedido" : "pedidos"}</span></li>)}</ul>
+              </div>
+            ))}
+          </div>
         </section>
         <section className="card card-pad" aria-label="Alertas da operação">
           <h2 className="font-semibold">Alertas da operação</h2>
           <p className="mb-3 text-sm text-muted">Pedidos novos ou em cotação parados há mais de 2 dias.</p>
           {d.alerts.length === 0 ? <p className="text-sm text-muted">Nenhum alerta pendente no momento.</p> : (
-            <ul className="space-y-1.5 text-sm">{d.alerts.map((a) => <li key={a.id}>#{a.number} {a.customerName} · {STAGE_LABELS[a.stage]} há {a.days} dias</li>)}</ul>
+            <ul className="space-y-1.5 text-sm">{d.alerts.map((a) => <li key={a.id}>#{a.number} {a.customerName} · {a.stage} há {a.days} dias</li>)}</ul>
           )}
           <h3 className="kicker mb-2 mt-5">Motivos de arquivamento</h3>
           {d.archiveReasons.length === 0 ? <p className="text-sm text-muted">Nenhum pedido arquivado no período.</p> : <ul className="space-y-1 text-sm">{d.archiveReasons.map((r) => <li key={r.name} className="flex justify-between"><span>{r.name}</span><span className="text-muted">{r.value}</span></li>)}</ul>}

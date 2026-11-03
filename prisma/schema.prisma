@@ -129,6 +129,7 @@ model User {
   salesProfile        SalesProfile?
   subscriptions       Subscription[]
   travelOrders        TravelOrder[]
+  orderPipelines      OrderPipeline[]
   milesDeals          MilesDeal[]
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
@@ -346,27 +347,27 @@ model Customer {
 // Custo dos pontos próprios vem do lançamento "Venda" de cada item (custo médio no momento);
 // pontos de fornecedor custam o preço combinado da conta do fornecedor.
 model Sale {
-  id                String           @id @default(cuid())
-  userId            String
-  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  origin            String           @default("OWN") // OWN (meus pontos) | SUPPLIER (fornecedor)
-  accountId         String?
-  account           Account?         @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  supplierAccountId String?
-  supplierAccount   SupplierAccount? @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
-  customerId        String? // primeiro cliente (para listas)
-  customer          Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  groupId           String?          @unique // agrupa os lançamentos "Venda" dos itens
-  points            Int // soma dos pontos dos itens
-  totalCents        Int // total da venda: valor dos itens + custos repassados ao cliente
-  occurredAt        DateTime
-  refundedAt        DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
-  refundFeeCents    Int              @default(0) // taxa de administração cobrada do cliente no reembolso
+  id                    String           @id @default(cuid())
+  userId                String
+  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  origin                String           @default("OWN") // OWN (meus pontos) | SUPPLIER (fornecedor)
+  accountId             String?
+  account               Account?         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  supplierAccountId     String?
+  supplierAccount       SupplierAccount? @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
+  customerId            String? // primeiro cliente (para listas)
+  customer              Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  groupId               String?          @unique // agrupa os lançamentos "Venda" dos itens
+  points                Int // soma dos pontos dos itens
+  totalCents            Int // total da venda: valor dos itens + custos repassados ao cliente
+  occurredAt            DateTime
+  refundedAt            DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
+  refundFeeCents        Int              @default(0) // taxa de administração cobrada do cliente no reembolso
   refundMilesReceivedAt DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
   refundTaxReceivedAt   DateTime? // estorno da taxa de embarque e dos repasses pela companhia
-  paidAt            DateTime? // cliente pagou (vazio = a receber)
-  tags              String[]         @default([]) // etiquetas livres para filtrar
-  createdAt         DateTime         @default(now())
+  paidAt                DateTime? // cliente pagou (vazio = a receber)
+  tags                  String[]         @default([]) // etiquetas livres para filtrar
+  createdAt             DateTime         @default(now())
 
   items         SaleItem[]
   milesDeal     MilesDeal?
@@ -862,50 +863,66 @@ model ParityDay {
   @@index([programId, day])
 }
 
-// CRM de pedidos de emissão (como o Quero Milhas): Kanban por etapa, captação pela página pública.
-enum OrderStage {
-  NEW // Novos pedidos
-  QUOTING // Pesquisa e cotação
-  QUOTE_SENT // Cotação enviada
-  NEGOTIATION // Negociação e emissão
-  ISSUED // Emitido
-  TRAVELING // Viagem em curso
-  DONE // Viagem concluída
+// CRM de pedidos de emissão: funis (Funil Comercial, Pós-Venda...) com colunas editáveis, captação pela página pública.
+model OrderPipeline {
+  id        String               @id @default(cuid())
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int                  @default(0)
+  createdAt DateTime             @default(now())
+  stages    OrderPipelineStage[]
+
+  @@index([userId, position])
+}
+
+model OrderPipelineStage {
+  id         String        @id @default(cuid())
+  pipelineId String
+  pipeline   OrderPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name       String
+  color      String        @default("#60a5fa")
+  position   Int           @default(0)
+  createdAt  DateTime      @default(now())
+  orders     TravelOrder[]
+
+  @@index([pipelineId, position])
 }
 
 model TravelOrder {
-  id            String     @id @default(cuid())
+  id            String             @id @default(cuid())
   userId        String
-  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   number        Int // sequencial por usuário (Pedido 1, 2, ...)
   customerId    String?
-  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer      Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerName  String
   customerPhone String?
   customerEmail String?
-  stage         OrderStage @default(NEW)
-  position      Int        @default(0) // ordem dentro da coluna
-  tripType      String     @default("ONE_WAY") // ONE_WAY | ROUND_TRIP | MULTI
-  cabin         String     @default("ECONOMY") // ECONOMY | PREMIUM | BUSINESS | FIRST
+  stageId       String // coluna do funil
+  stage         OrderPipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  position      Int                @default(0) // ordem dentro da coluna
+  tripType      String             @default("ONE_WAY") // ONE_WAY | ROUND_TRIP | MULTI
+  cabin         String             @default("ECONOMY") // ECONOMY | PREMIUM | BUSINESS | FIRST
   segments      Json // [{ origin, destination, date }]
-  adults        Int        @default(1)
-  children      Int        @default(0)
-  infants       Int        @default(0)
-  flexibleDates Boolean    @default(false)
-  checkedBag    Boolean    @default(false)
-  priority      String     @default("MEDIUM") // LOW | MEDIUM | HIGH
+  adults        Int                @default(1)
+  children      Int                @default(0)
+  infants       Int                @default(0)
+  flexibleDates Boolean            @default(false)
+  checkedBag    Boolean            @default(false)
+  priority      String             @default("MEDIUM") // LOW | MEDIUM | HIGH
   budgetCents   Int?
   notes         String?
-  source        String     @default("MANUAL") // MANUAL | PUBLIC
+  source        String             @default("MANUAL") // MANUAL | PUBLIC
   archivedAt    DateTime?
   archiveReason String?
-  shareToken    String?    @unique // link das páginas "Cotação" e "Reserva confirmada" para o cliente
+  shareToken    String?            @unique // link das páginas "Cotação" e "Reserva confirmada" para o cliente
   locator       String? // localizador da reserva emitida
   clientNotes   String? // recado para o cliente na página da reserva
   proposal      Json? // cotação para o cliente: voos, bagagem, valores, condições (domain/proposal.ts)
   reservation   Json? // reserva emitida: programa, companhia, sobrenome, passageiros
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
   attachments OrderAttachment[]
   events      OrderEvent[]
@@ -914,7 +931,7 @@ model TravelOrder {
   accesses    OrderAccess[]
 
   @@unique([userId, number])
-  @@index([userId, stage])
+  @@index([userId, stageId])
 }
 
 model OrderAttachment {
@@ -1135,40 +1152,40 @@ enum MilesDealStage {
 }
 
 model MilesDeal {
-  id             String         @id @default(cuid())
-  userId         String
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  number         Int // sequencial por usuário
-  buyerType      String         @default("FINAL") // AGENCY | BALCAO | FINAL
-  customerId     String?
-  customer       Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName   String
-  customerPhone  String?
-  stage          MilesDealStage @default(NEW)
-  position       Int            @default(0) // ordem dentro da coluna
-  accountId      String? // conta de onde saem as milhas
-  account        Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  points         Int?
-  saleCpmCents   Int? // preço do milheiro na venda
-  profitCents    Int? // lucro informado à mão; vazio = estimado pelo CPM da conta
-  passengers     Int?
-  notes          String?
-  taxesCents     Int? // taxas da emissão, pagas por mim e cobradas do comprador
-  orderLink      String? // link do pedido no programa (ex.: passageiros da LATAM)
-  shareToken     String?        @unique // link da página do comprador
-  passengersData Json? // [{ name, cpf, birthDate, email, phone }] preenchido pelo comprador
-  passengersAt   DateTime? // quando o comprador enviou os passageiros
-  locator        String? // localizador da emissão (aparece na página do comprador)
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  number          Int // sequencial por usuário
+  buyerType       String            @default("FINAL") // AGENCY | BALCAO | FINAL
+  customerId      String?
+  customer        Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName    String
+  customerPhone   String?
+  stage           MilesDealStage    @default(NEW)
+  position        Int               @default(0) // ordem dentro da coluna
+  accountId       String? // conta de onde saem as milhas
+  account         Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  points          Int?
+  saleCpmCents    Int? // preço do milheiro na venda
+  profitCents     Int? // lucro informado à mão; vazio = estimado pelo CPM da conta
+  passengers      Int?
+  notes           String?
+  taxesCents      Int? // taxas da emissão, pagas por mim e cobradas do comprador
+  orderLink       String? // link do pedido no programa (ex.: passageiros da LATAM)
+  shareToken      String?           @unique // link da página do comprador
+  passengersData  Json? // [{ name, cpf, birthDate, email, phone }] preenchido pelo comprador
+  passengersAt    DateTime? // quando o comprador enviou os passageiros
+  locator         String? // localizador da emissão (aparece na página do comprador)
   faceCheckUrl    String? // verificação antes da emissão: link da validação facial (formato novo)
   faceCheckStatus String? // PENDING | DONE | NOT_NEEDED; o bilhete só entra com DONE ou NOT_NEEDED
   faceCheckAt     DateTime?
-  saleId         String?        @unique // venda criada ao chegar em "Pago"
-  sale           Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  ticket         MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
-  receipt        MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
-  archivedAt     DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  saleId          String?           @unique // venda criada ao chegar em "Pago"
+  sale            Sale?             @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  ticket          MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
+  receipt         MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
+  archivedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   @@unique([userId, number])
   @@index([userId, stage])

@@ -11,6 +11,7 @@ import * as orderFile from "@/app/api/public/order-file/[token]/[fid]/route";
 import { publicOrder, hasOrderAccess, listSignatures } from "@/server/services/client-pages";
 import { resolveProposal } from "@/domain/proposal";
 import { prisma } from "@/server/db";
+import { entryStage } from "@/server/services/pipelines";
 
 let c: Client;
 let userId: string;
@@ -21,7 +22,7 @@ beforeEach(async () => {
   const r = await c.call(register.POST, "POST", "/r", { name: "Ana Souza", email: "ana@x.test", password: "senha-forte-1" });
   userId = r.data.user.id;
   const o = await prisma.travelOrder.create({
-    data: { userId, number: 7, customerName: "Maria Cliente", customerPhone: "(11) 99999-1234", segments: [{ origin: "GRU", destination: "LIS", date: "2027-03-10" }], notes: "anotação interna", budgetCents: 900000 },
+    data: { userId, stageId: (await entryStage(userId)).id, number: 7, customerName: "Maria Cliente", customerPhone: "(11) 99999-1234", segments: [{ origin: "GRU", destination: "LIS", date: "2027-03-10" }], notes: "anotação interna", budgetCents: 900000 },
   });
   orderId = o.id;
   await prisma.flightQuote.create({ data: { userId, orderId, program: "smiles", origin: "GRU", destination: "LIS", departDate: new Date("2027-03-10"), miles: 120000, taxesCents: 50000, cashCents: 450000 } });
