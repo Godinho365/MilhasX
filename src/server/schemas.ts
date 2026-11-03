@@ -170,6 +170,8 @@ export const saleQuerySchema = z.object({
   to: dateStr.optional(),
   programId: id.optional(),
   customerId: id.optional(),
+  pago: z.enum(["sim", "nao"]).optional(),
+  tag: z.string().trim().min(1).max(30).optional(),
   sort: z.enum(["occurredAt", "points", "totalCents"]).optional(),
   order: z.enum(["asc", "desc"]).optional(),
 });
@@ -531,6 +533,13 @@ export const saleRefundSchema = z.object({
   date: dateStr,
 });
 
+export const salePaymentSchema = z.object({
+  paid: z.boolean(),
+  date: dateStr.optional(),
+});
+export const saleTagsSchema = z.object({
+  tags: z.array(z.string().trim().min(1, "Etiqueta vazia").max(30, "Etiqueta com mais de 30 letras")).max(10, "No máximo 10 etiquetas"),
+});
 export const saleRefundReceiptSchema = z.object({
   kind: z.enum(["miles", "tax"]),
   date: dateStr,

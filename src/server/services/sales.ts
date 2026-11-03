@@ -325,6 +325,9 @@ function present(s: SaleRow) {
     programName: (own ? s.account?.program.name : s.supplierAccount?.program.name) ?? "Programa excluído",
     description: s.items.map(itemSummary).join(" + "),
     customers: [...new Map(s.items.flatMap((i) => i.customers).map((c) => [c.id, c.name])).values()],
+    reservations: [...new Set(s.items.map((i) => i.reservation?.trim()).filter((r): r is string => !!r))],
+    paidAt: s.paidAt?.toISOString() ?? null,
+    tags: s.tags,
     // reembolsada: as milhas voltaram, então não contam como vendidas (os números da venda ficam em refund);
     // os CPFs continuam gastos na conta e são a base da taxa de administração
     points: refunded ? 0 : s.points,
@@ -370,7 +373,7 @@ function present(s: SaleRow) {
 }
 export type SaleView = ReturnType<typeof present>;
 
-export type SaleFilter = { q?: string; from?: Date; to?: Date; programId?: string; customerId?: string; sort?: "occurredAt" | "points" | "totalCents"; order?: "asc" | "desc"; holderId?: string };
+export type SaleFilter = { q?: string; from?: Date; to?: Date; programId?: string; customerId?: string; pago?: "sim" | "nao"; tag?: string; sort?: "occurredAt" | "points" | "totalCents"; order?: "asc" | "desc"; holderId?: string };
 
 /** Dia da venda (AAAA-MM-DD): a venda só com data fica à meia-noite UTC; a do CRM tem hora e vale o dia em Brasília. */
 export const saleDay = (at: Date) => (at.getTime() % 86_400_000 === 0 ? at.toISOString().slice(0, 10) : brDay(at));
@@ -384,6 +387,8 @@ export async function listSales(userId: string, f: SaleFilter = {}) {
     // janela um pouco maior no banco; o corte exato pelo dia da venda é feito abaixo
     occurredAt: f.from || f.to ? { gte: f.from && new Date(`${fromDay}T00:00:00Z`), lt: f.to && new Date(new Date(`${toDay}T00:00:00Z`).getTime() + 86_400_000 + BR_OFFSET_MS) } : undefined,
     items: f.customerId ? { some: { customers: { some: { id: f.customerId } } } } : undefined,
+    paidAt: f.pago === "sim" ? { not: null } : f.pago === "nao" ? null : undefined,
+    tags: f.tag ? { has: f.tag } : undefined,
     OR: f.programId || f.holderId
       ? [
           { account: { programId: f.programId, holderId: f.holderId } },
@@ -533,4 +538,30 @@ export async function getSaleAttachment(userId: string, saleId: string, id: stri
 export async function deleteSaleAttachment(userId: string, saleId: string, id: string) {
   const { count } = await prisma.saleAttachment.deleteMany({ where: { id, saleId, userId } });
   if (!count) throw new DomainError(404, "Anexo não encontrado");
+}
+
+/** Cliente pagou (com a data) ou volta para "a receber". */
+export async function setSalePaid(userId: string, id: string, input: { paid: boolean; date?: Date }) {
+  const s = await prisma.sale.findFirst({ where: { id, userId }, select: { id: true, occurredAt: true } });
+  if (!s) throw new DomainError(404, "Venda não encontrada");
+  const date = input.date ?? new Date(`${brDay()}T00:00:00Z`);
+  if (input.paid && date.toISOString().slice(0, 10) < saleDay(s.occurredAt)) throw new DomainError(400, "O pagamento não pode ser antes da venda");
+  await prisma.sale.update({ where: { id: s.id }, data: { paidAt: input.paid ? date : null } });
+  return getSale(userId, s.id);
+}
+
+/** Troca as etiquetas da venda (sem repetir, na ordem digitada). */
+export async function setSaleTags(userId: string, id: string, tags: string[]) {
+  const s = await prisma.sale.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!s) throw new DomainError(404, "Venda não encontrada");
+  const seen = new Set<string>();
+  const clean = tags.map((t) => t.trim().replace(/\s+/g, " ")).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  await prisma.sale.update({ where: { id: s.id }, data: { tags: clean } });
+  return getSale(userId, s.id);
+}
+
+/** Todas as etiquetas já usadas, para sugerir e filtrar. */
+export async function saleTags(userId: string) {
+  const rows = await prisma.sale.findMany({ where: { userId, NOT: { tags: { isEmpty: true } } }, select: { tags: true } });
+  return [...new Set(rows.flatMap((r) => r.tags))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }

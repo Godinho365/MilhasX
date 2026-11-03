@@ -364,6 +364,8 @@ model Sale {
   refundFeeCents    Int              @default(0) // taxa de administração cobrada do cliente no reembolso
   refundMilesReceivedAt DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
   refundTaxReceivedAt   DateTime? // estorno da taxa de embarque e dos repasses pela companhia
+  paidAt            DateTime? // cliente pagou (vazio = a receber)
+  tags              String[]         @default([]) // etiquetas livres para filtrar
   createdAt         DateTime         @default(now())
 
   items         SaleItem[]

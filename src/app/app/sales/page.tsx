@@ -1,6 +1,6 @@
 import { requirePageUser, selectedHolderId } from "@/server/session";
 import { listCustomers } from "@/server/services/market";
-import { listSales, getSale } from "@/server/services/sales";
+import { listSales, getSale, saleTags } from "@/server/services/sales";
 import { listAccounts } from "@/server/services/wallet";
 import { listSupplierAccounts } from "@/server/services/extras";
 import { saleQuerySchema } from "@/server/schemas";
@@ -23,12 +23,13 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const period = sp.from || sp.to || sp.periodo === "tudo" ? sp : { ...sp, ...month };
   const parsed = saleQuerySchema.safeParse(Object.fromEntries(Object.entries(period).filter(([k, v]) => v && k !== "tab" && k !== "periodo")));
   const range = parsed.success && (parsed.data.from || parsed.data.to) ? { from: period.from ?? period.to!, to: period.to ?? period.from! } : null;
-  const [sales, customers, accounts, suppliers, cards] = await Promise.all([
+  const [sales, customers, accounts, suppliers, cards, tags] = await Promise.all([
     listSales(user.id, { ...(parsed.success ? parsed.data : {}), holderId }),
     listCustomers(user.id),
     listAccounts(user.id, holderId),
     listSupplierAccounts(user.id),
     prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    saleTags(user.id),
   ]);
   const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, groupId: sp.edit }, select: { id: true } }) : null;
   const editSale = toEdit ? await getSale(user.id, toEdit.id) : null;
@@ -42,6 +43,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const soldCpfs = sales.filter((x) => !x.refund).reduce((s, x) => s + x.cpfs, 0);
   const cost = sales.reduce((s, x) => s + x.costCents, 0);
   const milesCost = sales.reduce((s, x) => s + x.milesCostCents, 0);
+  const toReceive = sales.filter((x) => !x.paidAt).reduce((s, x) => s + x.totalCents, 0);
   const pctFmt = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
   return (
     <>
@@ -52,7 +54,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
           {sales.length > 0 && (
             <div className="mb-4 grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               <Stat icon={<Target className="h-4 w-4" />} label="Lucro total" value={fmtBRL(result)} accent={result >= 0} negative={result < 0} hint={total > 0 ? `${pctFmt((result / total) * 100)} do total vendido` : undefined} />
-              <Stat icon={<TrendingUp className="h-4 w-4" />} label="Total de vendas" value={fmtBRL(total)} hint={`${count} ${count === 1 ? "venda" : "vendas"}${count > 0 ? ` · ticket médio ${fmtBRL(Math.round(total / count))}` : ""}`} />
+              <Stat icon={<TrendingUp className="h-4 w-4" />} label="Total de vendas" value={fmtBRL(total)} hint={`${count} ${count === 1 ? "venda" : "vendas"}${count > 0 ? ` · ticket médio ${fmtBRL(Math.round(total / count))}` : ""}${toReceive > 0 ? ` · a receber ${fmtBRL(toReceive)}` : ""}`} />
               <Stat icon={<DollarSign className="h-4 w-4" />} label="Custo total" value={fmtBRL(cost)} hint="milhas, emissões pagas e taxas repassadas" />
               <Stat icon={<Receipt className="h-4 w-4" />} label="Custo das milhas" value={fmtBRL(milesCost)} hint={pts > 0 && milesCost > 0 ? `milheiro médio ${fmtBRL(Math.round((milesCost * 1000) / pts))}` : "custo dos pontos usados"} />
               <Stat icon={<Plane className="h-4 w-4" />} label="Total de milhas" value={fmtPts(pts)} hint={soldCpfs > 0 ? `média por emissão: ${fmtPts(Math.round(pts / soldCpfs))}` : undefined} />
@@ -62,6 +64,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
           <SalesClient
             sp={sp}
             range={range}
+            tags={tags}
             sales={sales}
             editSale={editSale}
             accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} ${a.holder.name}`, balance: a.balance, costCents: a.costCents }))}
