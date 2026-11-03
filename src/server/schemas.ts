@@ -667,3 +667,18 @@ export const interestSchema = z.object({
   notes: z.string().trim().max(1000).nullable().optional(),
 }).refine((v) => !!v.customerId || v.customerName.length > 0, { message: "Informe o cliente", path: ["customerName"] });
 export const interestStatusSchema = z.object({ status: interestStatus });
+
+export const showcaseSchema = z.object({
+  title: z.string().trim().min(1, "Dê um título ao pacote").max(120),
+  destination: z.string().trim().min(1, "Informe o destino").max(80),
+  period: optText(80),
+  includes: z.array(z.string().trim().max(60)).max(12).optional(), // vazios e repetidos saem no serviço (até 8)
+  description: optText(1000),
+  priceCents: cents.nullable().optional(),
+  priceNote: optText(60),
+  installments: optText(60),
+  active: z.boolean().optional(),
+  orderId: id.nullable().optional(),
+});
+export const showcaseSettingsSchema = z.object({ active: z.boolean(), title: optText(80) });
+export const showcaseMoveSchema = z.object({ dir: z.union([z.literal(-1), z.literal(1)]) });

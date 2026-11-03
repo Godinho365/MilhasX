@@ -21,7 +21,7 @@ export function CardFace({ c, small }: { c: { name: string; bank?: string | null
   const off = c.status && c.status !== "ACTIVE";
   return (
     <div className={`relative flex aspect-[1.586] w-full flex-col justify-between overflow-hidden rounded-2xl text-white shadow-lg ${small ? "p-4" : "p-6"} ${off ? "grayscale" : ""}`}
-      style={{ background: `linear-gradient(135deg, ${c.color} 0%, ${c.color}cc 45%, #0b0b12 120%)` }}>
+      style={{ background: `linear-gradient(135deg, ${c.color} 0%, ${c.color}cc 45%, #0b0b12 120%)`, color: "#fff" }}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-widest opacity-75">{c.bank || "Banco"}</p>
