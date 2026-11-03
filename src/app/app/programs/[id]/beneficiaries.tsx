@@ -19,7 +19,8 @@ const cpfMask = (d: string | null) => (d && d.length === 11 ? `${d.slice(0, 3)}.
 /** Abre a Gestão de CPFs da conta (botão "Gerir CPFs" da barra da conta). */
 export const openCpfManager = () => window.dispatchEvent(new Event("mm:cpfs"));
 
-export function BeneficiaryLimit({ accountId, title }: { accountId: string; title: string }) {
+/** card=false: só as janelas (Gestão de CPFs e editar limite), abertas pelo botão "Gerir CPFs" da barra. */
+export function BeneficiaryLimit({ accountId, title, card = true }: { accountId: string; title: string; card?: boolean }) {
   const [s, setS] = useState<State | null>(null);
   const [dlg, setDlg] = useState<"history" | "edit" | null>(null);
   useEffect(() => {
@@ -35,6 +36,13 @@ export function BeneficiaryLimit({ accountId, title }: { accountId: string; titl
     load();
   }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!s) return null;
+  const dialogs = (
+    <>
+      {dlg === "history" && <CpfManager accountId={accountId} title={title} s={s} onClose={() => setDlg(null)} onChange={load} onEditLimit={() => setDlg("edit")} />}
+      {dlg === "edit" && <EditDialog accountId={accountId} s={s} onClose={() => setDlg("history")} onSaved={() => { setDlg("history"); load(); }} />}
+    </>
+  );
+  if (!card) return dialogs;
   const pct = s.limit ? Math.min(100, Math.round((s.used / s.limit) * 100)) : 0;
   const full = s.limit != null && s.used >= s.limit;
   return (
@@ -62,8 +70,7 @@ export function BeneficiaryLimit({ accountId, title }: { accountId: string; titl
           </p>
         );
       })()}
-      {dlg === "history" && <CpfManager accountId={accountId} title={title} s={s} onClose={() => setDlg(null)} onChange={load} onEditLimit={() => setDlg("edit")} />}
-      {dlg === "edit" && <EditDialog accountId={accountId} s={s} onClose={() => setDlg(null)} onSaved={() => { setDlg(null); load(); }} />}
+      {dialogs}
     </section>
   );
 }

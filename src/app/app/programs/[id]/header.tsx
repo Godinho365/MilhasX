@@ -1,6 +1,6 @@
 "use client";
 // Cabeçalho da conta como na referência: conta ativa, nome, programa e as ações (editar, contato, organizar, excluir).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Phone, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -26,13 +26,22 @@ export function AccountHeader({ account: a, title, program, phone }: Props) {
   const router = useRouter();
   const nav = useNav();
   const [editing, setEditing] = useState(false);
-
-  async function patch(body: Record<string, unknown>, ok: string) {
-    const r = await api(`/api/accounts/${a.id}`, "PATCH", body);
-    if (!r.ok) return toast(r.erro, "error");
-    toast(ok);
+  // muda na hora do clique; a página recarregada depois confirma o valor do servidor
+  const [archived, setArchived] = useState(a.archived);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (!saving) setArchived(a.archived); }, [a.archived]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function toggleActive() {
+    if (saving) return;
+    const next = !archived;
+    setArchived(next);
+    setSaving(true);
+    const r = await api(`/api/accounts/${a.id}`, "PATCH", { archived: next });
+    setSaving(false);
+    if (!r.ok) { setArchived(!next); return toast(r.erro, "error"); }
+    toast(next ? "Conta desativada (arquivada)" : "Conta ativada");
     refreshSafe(router);
   }
+
   async function remove() {
     if (!(await confirmDialog({ title: `Excluir a conta ${a.programName}?`, body: `Titular: ${a.holderName}. Só é possível excluir contas sem lançamentos; se ela tiver histórico, desative a conta.`, confirmLabel: "Excluir", danger: true }))) return;
     const r = await api(`/api/accounts/${a.id}`, "DELETE");
@@ -50,11 +59,11 @@ export function AccountHeader({ account: a, title, program, phone }: Props) {
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           <span className="inline-flex items-center gap-1.5 font-medium"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: program.color }} aria-hidden />{a.programName}</span>
           <span className="inline-flex items-center gap-1.5">
-            <button type="button" role="switch" aria-checked={!a.archived} aria-label="Conta ativa" onClick={() => patch({ archived: !a.archived }, a.archived ? "Conta ativada" : "Conta desativada (arquivada)")}
-              className={`relative h-4 w-7 rounded-full transition-colors ${a.archived ? "bg-line" : "bg-accent"}`}>
-              <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-all ${a.archived ? "left-0.5" : "left-[14px]"}`} style={{ backgroundColor: "#fff" }} />
+            <button type="button" role="switch" aria-checked={!archived} aria-label="Conta ativa" aria-busy={saving} disabled={saving} onClick={toggleActive}
+              className={`relative h-4 w-7 rounded-full transition-colors ${archived ? "bg-line" : "bg-accent"}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full shadow transition-all ${archived ? "left-0.5" : "left-[14px]"}`} style={{ backgroundColor: "#fff" }} />
             </button>
-            {a.archived ? "Inativa" : "Ativa"}
+            {archived ? "Inativa" : "Ativa"}
           </span>
         </div>
       </div>

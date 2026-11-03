@@ -44,7 +44,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
       <PeriodCards m={m} showValues={showValues} marketValueCents={stats.marketValueCents} />
 
       {/* Programas de milhas limitam quantos CPFs diferentes podem receber emissões */}
-      {hasCpfs && <div id="cpfs" className="mt-4 scroll-mt-20"><BeneficiaryLimit accountId={a.id} title={`${a.program.name} ${shortName(a.holder.name)}`} /></div>}
+      {hasCpfs && <BeneficiaryLimit accountId={a.id} title={`${a.program.name} ${shortName(a.holder.name)}`} card={false} />}
       {bonus && <div className="mt-4"><BonusCapCard b={bonus} /></div>}
 
       <Recurrences
