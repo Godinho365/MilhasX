@@ -8,7 +8,9 @@ import { deadlineStatus } from "@/domain/viaje-facil";
 /** Pontos por mês de cada frequência (o clube anual vira 1/12 por mês, o trimestral 1/3). */
 const PER_MONTH: Record<string, number> = { DAILY: 30, WEEKLY: 52 / 12, MONTHLY: 1, QUARTERLY: 1 / 3, YEARLY: 1 / 12 };
 
-/** Clubes = lançamentos recorrentes de clube das contas, com o custo do milheiro e o bônus de transferência da conta. */
+/** Clubes = lançamentos recorrentes de clube das contas, com o custo do milheiro e o bônus de transferência da conta.
+ *  Conta sem recorrência mas com bônus de clube ou pontos de clube lançados no extrato também entra ("pelo extrato"):
+ *  mostra o último crédito, sem frequência, e fica fora da soma por mês. */
 export async function listClubs(userId: string, holderId?: string) {
   const recs = await prisma.recurrence.findMany({
     where: { userId, type: "CLUB", account: holderId ? { holderId } : undefined },
@@ -19,12 +21,14 @@ export async function listClubs(userId: string, holderId?: string) {
     const perMonth = (PER_MONTH[r.frequency] ?? 1) / Math.max(1, r.interval);
     return {
       id: r.id,
+      source: "recurrence" as "recurrence" | "entries",
+      lastDate: null as string | null,
       accountId: r.accountId,
       label: r.account.nickname || `${r.account.program.name} · ${r.account.holder.name}`,
       color: r.account.program.color,
       description: r.description,
       active: r.active && (!r.endDate || r.endDate >= new Date()),
-      frequency: r.frequency,
+      frequency: r.frequency as string,
       interval: r.interval,
       points: r.points,
       costCents: r.costCents,
@@ -38,12 +42,45 @@ export async function listClubs(userId: string, holderId?: string) {
       bonusCap: r.account.transferBonusCap,
     };
   });
-  const on = rows.filter((r) => r.active);
+  // clubes que só aparecem pelo bônus da conta ou pelos pontos de clube no extrato
+  const withRec = new Set(recs.map((r) => r.accountId));
+  const accounts = await prisma.account.findMany({
+    where: { userId, archived: false, holderId, id: { notIn: [...withRec] }, OR: [{ transferBonusPct: { not: null } }, { entries: { some: { type: "CLUB" } } }] },
+    include: { program: true, holder: true, entries: { where: { type: "CLUB" }, orderBy: { occurredAt: "desc" }, take: 1 } },
+    orderBy: [{ program: { name: "asc" } }, { holder: { name: "asc" } }],
+  });
+  const recent = Date.now() - 35 * 86_400_000;
+  for (const a of accounts) {
+    const last = a.entries[0];
+    rows.push({
+      id: `acc:${a.id}`,
+      source: "entries",
+      lastDate: last?.occurredAt.toISOString() ?? null,
+      accountId: a.id,
+      label: a.nickname || `${a.program.name} · ${a.holder.name}`,
+      color: a.program.color,
+      description: last ? last.description : "Bônus de clube na conta",
+      active: a.transferBonusPct != null || (!!last && last.occurredAt.getTime() >= recent),
+      frequency: "",
+      interval: 1,
+      points: last?.points ?? 0,
+      costCents: last?.inputCostCents ?? 0,
+      monthlyPoints: 0,
+      monthlyCents: 0,
+      cpmCents: last && last.points > 0 && last.inputCostCents > 0 ? Math.round((last.inputCostCents * 1000) / last.points) : null,
+      nextDate: "",
+      endDate: null,
+      notify: false,
+      bonusPct: a.transferBonusPct,
+      bonusCap: a.transferBonusCap,
+    });
+  }
+  const on = rows.filter((r) => r.active && r.source === "recurrence");
   const monthlyPoints = on.reduce((t, r) => t + r.monthlyPoints, 0);
   const monthlyCents = on.reduce((t, r) => t + r.monthlyCents, 0);
   return {
     rows,
-    totals: { active: on.length, monthlyPoints, monthlyCents, cpmCents: monthlyPoints > 0 && monthlyCents > 0 ? Math.round((monthlyCents * 1000) / monthlyPoints) : null },
+    totals: { active: rows.filter((r) => r.active).length, withoutRecurrence: rows.filter((r) => r.source === "entries").length, monthlyPoints, monthlyCents, cpmCents: monthlyPoints > 0 && monthlyCents > 0 ? Math.round((monthlyCents * 1000) / monthlyPoints) : null },
   };
 }
 

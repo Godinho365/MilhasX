@@ -5,6 +5,7 @@ import * as register from "@/app/api/auth/register/route";
 import * as holders from "@/app/api/holders/route";
 import * as accounts from "@/app/api/accounts/route";
 import * as recurrences from "@/app/api/recurrences/route";
+import * as entries from "@/app/api/entries/route";
 import * as vf from "@/app/api/viaje-facil/route";
 import * as vfOne from "@/app/api/viaje-facil/[id]/route";
 import * as vfPaid from "@/app/api/viaje-facil/[id]/paid/route";
@@ -51,7 +52,16 @@ describe("clubes", () => {
     await c.call(recurrences.POST, "POST", "/r", { accountId: latam, type: "CLUB", description: "Clube anual", points: 12000, costCents: 12000, frequency: "YEARLY", nextDate: "2027-01-10", notify: false });
     const { rows, totals } = await listClubs(userId);
     expect(rows.map((r) => [r.description, r.monthlyPoints, r.monthlyCents, r.cpmCents])).toEqual([["Clube LATAM", 3000, 7500, 2500], ["Clube anual", 1000, 1000, 1000]]);
-    expect(totals).toEqual({ active: 2, monthlyPoints: 4000, monthlyCents: 8500, cpmCents: 2125 });
+    expect(totals).toEqual({ active: 2, withoutRecurrence: 0, monthlyPoints: 4000, monthlyCents: 8500, cpmCents: 2125 });
+  });
+
+  it("conta sem recorrência entra pelo bônus de clube ou pelos pontos de clube no extrato, fora da soma por mês", async () => {
+    await prisma.account.update({ where: { id: latam }, data: { transferBonusPct: 30, transferBonusCap: 30000 } });
+    await c.call(entries.POST, "POST", "/e", { accountId: latam, type: "CLUB", points: 10000, occurredAt: new Date().toISOString().slice(0, 10), costs: [{ type: "MENSALIDADE", amountCents: 35680 }] });
+    const { rows, totals } = await listClubs(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source: "entries", active: true, points: 10000, costCents: 35680, cpmCents: 3568, bonusPct: 30, bonusCap: 30000, monthlyPoints: 0 });
+    expect(totals).toMatchObject({ active: 1, withoutRecurrence: 1, monthlyPoints: 0 });
   });
 });
 
