@@ -91,7 +91,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: "/app/news", label: "Novidades", icon: Megaphone, badge: "news" },
   ] },
 ];
-const NAV_OPEN_KEY = (key: string) => `mm:nav-${key}`;
 const NAV_HREFS = NAV.flatMap((g) => g.items.flatMap((it) => (isGroup(it) ? it.children.map((c) => c.href) : [it.href])));
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
@@ -219,24 +218,16 @@ export function Shell(props: {
     window.location.href = "/login";
   }
 
-  const [closed, setClosed] = useState<string[]>([]);
-  useEffect(() => {
-    try {
-      setClosed(NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => window.localStorage.getItem(NAV_OPEN_KEY(g.key)) === "0").map((g) => g.key));
-    } catch {}
-  }, []);
-  // Ao entrar numa página de um grupo recolhido, ele abre; depois o usuário pode recolher de novo
+  // Ao abrir o app os grupos vêm fechados; só o da página atual abre (para mostrar onde você está).
+  // Entrar numa página de outro grupo abre esse grupo; recolher e expandir vale até recarregar.
+  const groupsHere = () => NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => g.children.some((c) => active(c.href))).map((g) => g.key);
+  const [opened, setOpened] = useState<string[]>(groupsHere);
   const searchKey = search.toString();
   useEffect(() => {
-    const here = NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => g.children.some((c) => active(c.href))).map((g) => g.key);
-    if (here.length) setClosed((c) => (c.some((k) => here.includes(k)) ? c.filter((k) => !here.includes(k)) : c));
+    const here = groupsHere();
+    if (here.length) setOpened((o) => (here.every((k) => o.includes(k)) ? o : [...new Set([...o, ...here])]));
   }, [path, searchKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toggleGroup = (key: string, open: boolean) => {
-    setClosed((c) => (open ? c.filter((k) => k !== key) : [...c, key]));
-    try {
-      window.localStorage.setItem(NAV_OPEN_KEY(key), open ? "1" : "0");
-    } catch {}
-  };
+  const toggleGroup = (key: string, open: boolean) => setOpened((o) => (open ? [...new Set([...o, key])] : o.filter((k) => k !== key)));
 
   const navLink = (href: string, label: string, Icon: Icon, badge?: number, external?: boolean) => {
     const cls = `relative flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${!external && active(href) ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`;
@@ -276,7 +267,7 @@ export function Shell(props: {
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
   const navGroup = (g: NavGroup) => {
     const here = g.children.some((c) => active(c.href));
-    const open = !closed.includes(g.key);
+    const open = opened.includes(g.key);
     return (
       <div key={g.key} className="space-y-px">
         <button
