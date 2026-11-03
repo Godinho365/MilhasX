@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { ANONYMOUS } from "@/domain/beneficiaries";
 import { brDay } from "@/domain/brasilia";
+import { partnerCommission } from "@/domain/team";
 import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { assertFeature } from "./plan-limits";
@@ -245,6 +246,12 @@ export async function createSale(userId: string, input: SaleInput) {
 /** Edita a venda inteira: desfaz os lançamentos, o saldo do fornecedor e os beneficiários dela e grava de novo.
  *  A venda (id e anexos) continua a mesma; tudo numa transação só, então ou muda tudo ou nada. */
 export async function updateSale(userId: string, id: string, input: SaleInput) {
+  const sale = await updateSaleRows(userId, id, input);
+  if (sale.partnerId) await refreshPartnerCommission(userId, sale.id);
+  return sale;
+}
+
+async function updateSaleRows(userId: string, id: string, input: SaleInput) {
   validate(input);
   if (input.origin === "SUPPLIER") await assertFeature(userId, "suppliers");
   return withLedger(userId, async (tx) => {
@@ -283,6 +290,7 @@ const saleInclude = {
   supplierAccount: { include: { program: { select: { name: true, color: true } }, supplier: { select: { name: true } } } },
   items: { include: { entry: { select: { costCents: true } }, customers: { select: { id: true, name: true } } }, orderBy: { position: "asc" as const } },
   _count: { select: { attachments: true } },
+  partner: { select: { id: true, name: true } },
 } satisfies Prisma.SaleInclude;
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
@@ -313,6 +321,7 @@ function present(s: SaleRow) {
   const sold = saleFinancials(s);
   const refunded = !!s.refundedAt;
   const f = refunded ? refundedFinancials(s.refundFeeCents) : sold;
+  const commission = refunded || !s.partnerId ? 0 : s.partnerCommissionCents;
   const own = s.origin === "OWN";
   return {
     id: s.id,
@@ -333,6 +342,9 @@ function present(s: SaleRow) {
     points: refunded ? 0 : s.points,
     cpfs: saleCpfs(s.items),
     ...f,
+    // comissão do parceiro (guardada quando o parceiro foi escolhido ou a venda editada) sai do lucro
+    ...(commission ? { resultCents: f.resultCents - commission, marginPct: pct(f.resultCents - commission, f.pricedCents), roePct: pct(f.resultCents - commission, f.investedCents) } : {}),
+    partner: s.partner ? { id: s.partner.id, name: s.partner.name, commissionCents: commission } : null,
     refundUntil: refunded ? null : refundDeadline(s).toISOString(),
     refund: refunded
       ? {
@@ -564,4 +576,24 @@ export async function setSaleTags(userId: string, id: string, tags: string[]) {
 export async function saleTags(userId: string) {
   const rows = await prisma.sale.findMany({ where: { userId, NOT: { tags: { isEmpty: true } } }, select: { tags: true } });
   return [...new Set(rows.flatMap((r) => r.tags))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+/* ---------------- Parceiro (comissão) ---------------- */
+
+/** Recalcula e guarda a comissão do parceiro da venda pelos números atuais dela. */
+async function refreshPartnerCommission(userId: string, saleId: string) {
+  const row = await prisma.sale.findFirst({ where: { id: saleId, userId }, include: { ...saleInclude, partner: { select: { id: true, name: true, mode: true, value: true } } } });
+  if (!row) return;
+  const cents = row.partner ? partnerCommission(row.partner.mode, row.partner.value, saleFinancials(row)) : 0;
+  await prisma.sale.update({ where: { id: saleId }, data: { partnerCommissionCents: cents } });
+}
+
+/** Liga (ou tira, com null) o parceiro da venda e guarda a comissão pela regra dele. */
+export async function setSalePartner(userId: string, saleId: string, partnerId: string | null) {
+  const sale = await prisma.sale.findFirst({ where: { id: saleId, userId }, select: { id: true } });
+  if (!sale) throw new DomainError(404, "Venda não encontrada");
+  if (partnerId && !(await prisma.partner.findFirst({ where: { id: partnerId, userId, active: true }, select: { id: true } }))) throw new DomainError(404, "Parceiro não encontrado");
+  await prisma.sale.update({ where: { id: saleId }, data: { partnerId, partnerCommissionCents: 0 } });
+  if (partnerId) await refreshPartnerCommission(userId, saleId);
+  return getSale(userId, saleId);
 }

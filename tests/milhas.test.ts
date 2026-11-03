@@ -62,6 +62,13 @@ describe("clubes", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ source: "entries", active: true, points: 10000, costCents: 35680, cpmCents: 3568, bonusPct: 30, bonusCap: 30000, monthlyPoints: 0 });
     expect(totals).toMatchObject({ active: 1, withoutRecurrence: 1, monthlyPoints: 0 });
+
+    // só o bônus configurado, sem pontos de clube lançados: aparece, mas como inativo
+    const other = (await c.call(accounts.POST, "POST", "/a", { holderId: (await prisma.holder.findFirstOrThrow({ where: { userId } })).id, programId: (await prisma.program.findFirstOrThrow({ where: { code: "LIVELO" } })).id })).data.item.id;
+    await prisma.account.update({ where: { id: other }, data: { transferBonusPct: 30 } });
+    const again = await listClubs(userId);
+    expect(again.rows.find((r) => r.accountId === other)).toMatchObject({ source: "entries", active: false, points: 0 });
+    expect(again.totals.active).toBe(1);
   });
 });
 

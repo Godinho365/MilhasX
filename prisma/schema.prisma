@@ -121,6 +121,14 @@ model User {
   viajeFacil          ViajeFacil[]
   finAccounts         FinAccount[]
   finTransactions     FinTransaction[]
+  teamMembers         TeamMember[]
+  taskBoards          TaskBoard[]
+  partners            Partner[]
+  tasks               Task[]
+  goals               Goal[]
+  processes           Process[]
+  passengers          Passenger[]
+  travelInterests     TravelInterest[]
   milesDeals          MilesDeal[]
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
@@ -319,10 +327,12 @@ model Customer {
   documents Json? // documentos adicionais: [{ type, number }]
   createdAt DateTime @default(now())
 
-  sales      Sale[]
-  saleItems  SaleItem[]    @relation("SaleItemCustomers")
-  orders     TravelOrder[]
-  milesDeals MilesDeal[]
+  sales           Sale[]
+  passengers      Passenger[]
+  travelInterests TravelInterest[]
+  saleItems       SaleItem[]       @relation("SaleItemCustomers")
+  orders          TravelOrder[]
+  milesDeals      MilesDeal[]
 
   @@index([userId])
 }
@@ -331,29 +341,32 @@ model Customer {
 // Custo dos pontos próprios vem do lançamento "Venda" de cada item (custo médio no momento);
 // pontos de fornecedor custam o preço combinado da conta do fornecedor.
 model Sale {
-  id                    String           @id @default(cuid())
-  userId                String
-  user                  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  origin                String           @default("OWN") // OWN (meus pontos) | SUPPLIER (fornecedor)
-  accountId             String?
-  account               Account?         @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  supplierAccountId     String?
-  supplierAccount       SupplierAccount? @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
-  customerId            String? // primeiro cliente (para listas)
-  customer              Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  groupId               String?          @unique // agrupa os lançamentos "Venda" dos itens
-  points                Int // soma dos pontos dos itens
-  totalCents            Int // total da venda: valor dos itens + custos repassados ao cliente
-  occurredAt            DateTime
-  refundedAt            DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
-  refundFeeCents        Int              @default(0) // taxa de administração cobrada do cliente no reembolso
-  refundMilesReceivedAt DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
-  refundTaxReceivedAt   DateTime? // estorno da taxa de embarque e dos repasses pela companhia
-  paidAt                DateTime? // cliente pagou (vazio = a receber)
-  tags                  String[]         @default([]) // etiquetas livres para filtrar
-  nfNumber              String? // nota fiscal de serviço emitida para a venda
-  nfIssuedAt            DateTime?
-  createdAt             DateTime         @default(now())
+  id                     String           @id @default(cuid())
+  userId                 String
+  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  origin                 String           @default("OWN") // OWN (meus pontos) | SUPPLIER (fornecedor)
+  accountId              String?
+  account                Account?         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  supplierAccountId      String?
+  supplierAccount        SupplierAccount? @relation(fields: [supplierAccountId], references: [id], onDelete: SetNull)
+  customerId             String? // primeiro cliente (para listas)
+  customer               Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  groupId                String?          @unique // agrupa os lançamentos "Venda" dos itens
+  points                 Int // soma dos pontos dos itens
+  totalCents             Int // total da venda: valor dos itens + custos repassados ao cliente
+  occurredAt             DateTime
+  refundedAt             DateTime? // reembolsada: milhas e taxas voltam; só a taxa de administração fica no faturamento
+  refundFeeCents         Int              @default(0) // taxa de administração cobrada do cliente no reembolso
+  refundMilesReceivedAt  DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
+  refundTaxReceivedAt    DateTime? // estorno da taxa de embarque e dos repasses pela companhia
+  paidAt                 DateTime? // cliente pagou (vazio = a receber)
+  tags                   String[]         @default([]) // etiquetas livres para filtrar
+  nfNumber               String? // nota fiscal de serviço emitida para a venda
+  nfIssuedAt             DateTime?
+  partnerId              String? // parceiro que trouxe a venda (comissão)
+  partner                Partner?         @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  partnerCommissionCents Int              @default(0) // comissão calculada na venda (sai do lucro)
+  createdAt              DateTime         @default(now())
 
   items         SaleItem[]
   milesDeal     MilesDeal?
@@ -1074,4 +1087,188 @@ model FinTransaction {
 
   @@index([userId, dueDate])
   @@index([userId, competence])
+}
+
+// Equipe: pessoas da operação (responsáveis por tarefas e metas). O login de membros vem depois.
+model TeamMember {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  role      String? // cargo
+  email     String?
+  phone     String?
+  color     String   @default("#60a5fa")
+  active    Boolean  @default(true)
+  issuer    Boolean  @default(false) // emite passagens
+  createdAt DateTime @default(now())
+  goals     Goal[]
+
+  @@index([userId])
+}
+
+// Tarefas em quadro (A fazer, Fazendo, Feito)
+// Tarefas em quadros (colunas por pessoa ou por situação), com checklist, anexos, comentários e recorrência
+model TaskBoard {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  columns     Json     @default("[]") // [{ id, name }]: a primeira é "pendente", a última "concluída"
+  restricted  Boolean  @default(false) // só o dono e os membros escolhidos
+  memberIds   String[] @default([])
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  tasks       Task[]
+
+  @@index([userId])
+}
+
+model Task {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boardId     String?
+  board       TaskBoard?       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  columnId    String? // coluna do quadro; vazia = a coluna que corresponde à situação
+  status      String           @default("TODO") // TODO (Pendente) | DOING (Em progresso) | DONE (Concluída)
+  priority    String           @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  memberIds   String[]         @default([]) // membros (TeamMember); vazio = o dono da conta
+  dueDate     DateTime?
+  dueTime     String? // HH:MM
+  checklist   Json             @default("[]") // [{ text, done }]
+  recurrence  String           @default("NONE") // NONE | DAILY | WEEKLY | BIWEEKLY | MONTHLY | QUARTERLY | SEMIANNUAL | YEARLY
+  position    Int              @default(0)
+  doneAt      DateTime?
+  createdAt   DateTime         @default(now())
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+
+  @@index([userId, status])
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  kind      String   @default("COMMENT") // COMMENT | ACTIVITY
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+model TaskAttachment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+// Metas: objetivo do período com resultados-chave (alguns medidos sozinhos pelas vendas)
+model Goal {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  period     String // MONTH | QUARTER | YEAR
+  start      DateTime // primeiro dia do período
+  memberId   String? // responsável (vazio = empresa)
+  member     TeamMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  createdAt  DateTime    @default(now())
+  keyResults KeyResult[]
+
+  @@index([userId, start])
+}
+
+model KeyResult {
+  id        String   @id @default(cuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  title     String
+  metric    String   @default("MANUAL") // MANUAL | REVENUE | PROFIT | SALES | MILES | CUSTOMERS
+  target    Int // centavos (REVENUE/PROFIT) ou quantidade
+  current   Int      @default(0) // só para MANUAL
+  position  Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// Processos: passo a passo da operação, reaproveitável (vira tarefas quando usado)
+model Process {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  steps       Json // [{ title, detail? }]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Passageiros: quem viaja (CPF, nascimento), ligado ao cliente que comprou
+model Passenger {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  cpf        String? // só dígitos
+  birthDate  DateTime?
+  email      String?
+  phone      String?
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, cpf])
+  @@index([userId, name])
+}
+
+// Interesses de viagem dos clientes: destino, quando, prioridade e o andamento
+model TravelInterest {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  origin       String?
+  destination  String
+  month        String? // AAAA-MM (vazio = qualquer época)
+  priority     String    @default("MEDIUM") // LOW | MEDIUM | HIGH
+  status       String    @default("NEW") // NEW | SEARCHING | OFFER_SENT | BOOKED | LOST
+  programs     String[]  @default([])
+  notes        String?
+  offerSentAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status])
+}
+
+// Parceiros externos: regra de comissão aplicada nas vendas em que aparecem
+model Partner {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  mode      String   @default("PROFIT_PCT") // PROFIT_PCT (% do lucro) | SALE_PCT (% da venda) | FIXED (R$ por venda)
+  value     Int // % × 100 (ex.: 10% = 1000) ou centavos no valor fixo
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  sales     Sale[]
+
+  @@index([userId])
 }

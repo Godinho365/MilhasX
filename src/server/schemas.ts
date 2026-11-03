@@ -550,3 +550,94 @@ export const finTxSchema = z.object({
 });
 export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
 export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });
+
+// Equipe, tarefas, metas e processos
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida");
+const priority = z.enum(["LOW", "MEDIUM", "HIGH"]);
+export const memberSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  role: z.string().trim().max(80).nullable().optional(),
+  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  color: hexColor.optional(),
+  active: z.boolean().optional(),
+  issuer: z.boolean().optional(),
+});
+export const taskSchema = z.object({
+  boardId: id.nullable().optional(),
+  title: z.string().trim().min(1, "Informe a tarefa").max(200),
+  description: z.string().trim().max(5000).nullable().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
+  memberIds: z.array(id).max(20).optional(),
+  dueDate: dateStr.nullable().optional(),
+  dueTime: z.string().trim().max(5).nullable().optional(),
+  status: z.enum(["TODO", "DOING", "DONE"]).optional(),
+  columnId: z.string().trim().max(40).nullable().optional(),
+  recurrence: z.enum(["NONE", "DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "SEMIANNUAL", "YEARLY"]).optional(),
+  checklist: z.array(z.object({ text: z.string().trim().max(200), done: z.boolean() })).max(50).optional(),
+});
+export const boardSchema = z.object({
+  name: z.string().trim().min(1, "Dê um nome ao quadro").max(40),
+  description: z.string().trim().max(500).nullable().optional(),
+  columns: z.array(z.object({ id: z.string().trim().max(40).optional(), name: z.string().trim().min(1, "Dê um nome à coluna").max(30) })).max(12, "No máximo 12 colunas").optional(),
+  restricted: z.boolean().optional(),
+  memberIds: z.array(id).max(50).optional(),
+});
+export const taskAssignSchema = z.object({ memberId: id.nullable() });
+export const checklistToggleSchema = z.object({ index: z.number().int().min(0).max(49), done: z.boolean() });
+export const taskCommentSchema = z.object({ text: z.string().trim().min(1, "Escreva o comentário").max(2000) });
+export const salesPartnerSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  mode: z.enum(["PROFIT_PCT", "SALE_PCT", "FIXED"]),
+  value: z.number().int().min(0).max(100_000_00),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  active: z.boolean().optional(),
+});
+export const salePartnerSchema = z.object({ partnerId: id.nullable() });
+export const taskMoveSchema = z.union([
+  z.object({ status: z.enum(["TODO", "DOING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() }),
+  z.object({ columnId: z.string().trim().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() }),
+]);
+export const goalSchema = z.object({
+  title: z.string().trim().min(1, "Informe o objetivo").max(200),
+  period: z.enum(["MONTH", "QUARTER", "YEAR"]),
+  start: dateStr,
+  memberId: id.nullable().optional(),
+  keyResults: z.array(z.object({
+    title: z.string().trim().min(1, "Dê um nome ao resultado-chave").max(200),
+    metric: z.enum(["MANUAL", "REVENUE", "PROFIT", "SALES", "MILES", "CUSTOMERS"]),
+    target: z.number().int().positive("A meta precisa ser maior que zero").max(10_000_000_000),
+    current: z.number().int().min(0).max(10_000_000_000).optional(),
+  })).min(1, "Inclua ao menos um resultado-chave").max(10),
+});
+export const checkInSchema = z.object({ current: z.number().int().min(0).max(10_000_000_000) });
+export const processSchema = z.object({
+  title: z.string().trim().min(1, "Dê um nome ao processo").max(120),
+  description: z.string().trim().max(1000).nullable().optional(),
+  steps: z.array(z.object({ title: z.string().trim().max(200), detail: z.string().trim().max(1000).nullable().optional() })).min(1).max(50),
+});
+export const processRunSchema = z.object({ label: z.string().trim().max(80).nullable().optional(), memberId: id.nullable().optional(), dueDate: dateStr.nullable().optional() });
+
+// Contatos: passageiros e interesses de viagem
+export const passengerSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  cpf: z.string().trim().max(20).nullable().optional(),
+  birthDate: dateStr.nullable().optional(),
+  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  customerId: id.nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+const interestStatus = z.enum(["NEW", "SEARCHING", "OFFER_SENT", "BOOKED", "LOST"]);
+export const interestSchema = z.object({
+  customerId: id.nullable().optional(),
+  customerName: z.string().trim().max(120).default(""),
+  origin: z.string().trim().max(3).nullable().optional(),
+  destination: z.string().trim().min(1, "Informe o destino").max(80),
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Mês inválido").nullable().optional(),
+  priority,
+  status: interestStatus,
+  programs: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+}).refine((v) => !!v.customerId || v.customerName.length > 0, { message: "Informe o cliente", path: ["customerName"] });
+export const interestStatusSchema = z.object({ status: interestStatus });

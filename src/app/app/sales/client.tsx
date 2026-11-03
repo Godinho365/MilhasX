@@ -2,7 +2,7 @@
 // Vendas: lista (Data, Programa, Descrição, Pontos, Valor, Resultado, Ações), detalhes e a aba Clientes.
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2, CircleCheck, Tag, Wallet, Columns3 } from "lucide-react";
+import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2, CircleCheck, Tag, Wallet, Columns3, Handshake } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
@@ -12,12 +12,13 @@ import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { maskDoc } from "../programs/holder-dialog";
 import { DateRangePicker, rangeLabel, type DayRange } from "@/components/date-range";
+import { describePartner } from "@/domain/team";
 import { SaleDialog, type SaleAccount, type SaleSupplier, type SaleCustomer, type SaleCard } from "./sale-dialog";
 import type { SaleView } from "@/server/services/sales";
 
 const COST_LABELS: Record<string, string> = { TAXA_EMBARQUE: "Taxa de embarque", IOF: "IOF", BAGAGEM: "Bagagem", ASSENTO: "Assento", COMPLETAR_PONTOS: "Completar pontos", OUTROS: "Outros" };
 
-export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, editSale }: { sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
+export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, partners, editSale }: { partners: { id: string; name: string; mode: string; value: number }[]; sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
@@ -27,6 +28,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   const [menu, setMenu] = useState<{ s: SaleView; top: number; right: number } | null>(null);
   const [refunding, setRefunding] = useState<SaleView | null>(null);
   const [tagging, setTagging] = useState<SaleView | null>(null);
+  const [partnering, setPartnering] = useState<SaleView | null>(null);
   const [cols, setCols] = useColumns();
   const on = (k: ColKey) => cols.includes(k);
   // prazo de reembolso (24h depois da emissão): o relógio da tela anda sozinho a cada minuto
@@ -174,7 +176,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
                     <td className="text-right tabular-nums" title={s.refund ? "Taxa de administração do reembolso" : undefined}>{fmtBRL(s.totalCents)}</td>
                     {on("custo") && <td className="text-right tabular-nums">{fmtBRL(s.costCents)}</td>}
                     {on("custoMilhas") && <td className="text-right tabular-nums">{s.milesCostCents ? fmtBRL(s.milesCostCents) : "-"}</td>}
-                    <td className={`text-right font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}</td>
+                    <td className={`text-right font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}{s.partner && <span className="block text-[11px] font-normal text-muted" title={`Comissão de ${s.partner.name} já descontada`}>− {fmtBRL(s.partner.commissionCents)} {s.partner.name}</span>}</td>
                     {on("margem") && <td className="text-right tabular-nums">{s.marginPct == null ? "-" : `${s.marginPct.toLocaleString("pt-BR")}%`}</td>}
                     {on("roe") && <td className="text-right tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</td>}
                     {on("lucroCpf") && <td className="text-right tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}</td>}
@@ -197,6 +199,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>}
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); setPaid(s, !s.paidAt); }}><Wallet className="h-4 w-4 shrink-0" />{menu.s.paidAt ? "Voltar para a receber" : "Cliente pagou"}</button>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setTagging(menu.s); setMenu(null); }}><Tag className="h-4 w-4" />Etiquetas</button>
+          {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setPartnering(menu.s); setMenu(null); }}><Handshake className="h-4 w-4" />Parceiro</button>}
           {menu.s.refund && !menu.s.refund.milesReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "miles"); }}><CircleCheck className="h-4 w-4 shrink-0" />Milhas estornadas</button>}
           {menu.s.refund && !menu.s.refund.taxReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "tax"); }}><CircleCheck className="h-4 w-4 shrink-0" />Taxa estornada</button>}
           {menu.s.refund
@@ -212,6 +215,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {viewing && <SaleDetails sale={viewing} onClose={() => setViewing(null)} />}
       {refunding && <RefundDialog sale={refunding} onClose={() => setRefunding(null)} />}
       {tagging && <TagsDialog sale={tagging} known={tags} onClose={() => setTagging(null)} />}
+      {partnering && <PartnerDialog sale={partnering} partners={partners} onClose={() => setPartnering(null)} />}
     </>
   );
 }
@@ -557,6 +561,38 @@ function TagsDialog({ sale: s, known, onClose }: { sale: SaleView; known: string
           </div>
         )}
         {erro && <Alert kind="error">{erro}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Parceiro que trouxe a venda: a comissão pela regra dele sai do lucro. */
+function PartnerDialog({ sale: s, partners, onClose }: { sale: SaleView; partners: { id: string; name: string; mode: string; value: number }[]; onClose: () => void }) {
+  const router = useRouter();
+  const [partnerId, setPartnerId] = useState(s.partner?.id ?? "");
+  const [erro, setErro] = useState("");
+  async function save() {
+    const r = await api(`/api/sales/${s.id}/partner`, "POST", { partnerId: partnerId || null });
+    if (!r.ok) return setErro(r.erro);
+    toast(partnerId ? "Parceiro ligado à venda" : "Parceiro tirado da venda");
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title="Parceiro da venda" size="sm" icon={<Handshake className="h-5 w-5" />}
+      footer={<><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={save}>Salvar</button></>}>
+      <div className="space-y-3">
+        <p className="truncate text-sm text-muted">{s.description}</p>
+        {erro && <Alert kind="error">{erro}</Alert>}
+        {partners.length === 0 ? <p className="text-sm text-muted">Nenhum parceiro ativo. Cadastre em Gestão › Equipe.</p> : (
+          <Field label="Parceiro">
+            <select className="input" value={partnerId} onChange={(e) => setPartnerId(e.target.value)} aria-label="Parceiro">
+              <option value="">Nenhum</option>
+              {partners.map((p) => <option key={p.id} value={p.id}>{p.name} · {describePartner(p.mode, p.value)}</option>)}
+            </select>
+          </Field>
+        )}
+        <p className="text-xs text-muted">A comissão é calculada agora e sai do lucro, da margem e do ROE da venda. Se a venda for editada, ela é recalculada.</p>
       </div>
     </Modal>
   );
