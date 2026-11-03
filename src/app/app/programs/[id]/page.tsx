@@ -142,7 +142,9 @@ function BonusCapCard({ b }: { b: Awaited<ReturnType<typeof bonusUsage>>[number]
         <div className={`h-full rounded-full ${full ? "bg-amber-400" : "bg-accent"}`} style={{ width: `${b.pctUsed}%` }} />
       </div>
       <p className="mt-2 text-xs text-muted">
-        {full
+        {!b.clubActive
+          ? `Sem clube ativo nesta conta: transferências entram sem o bônus de ${b.bonusPct}%.`
+          : full
           ? "Limite do mês atingido: novas transferências entram sem bônus até a renovação."
           : `Ainda cabem ${fmtPts(b.left)} milhas de bônus${b.transferable ? `: transfira até ${fmtPts(b.transferable)} pontos com ${b.bonusPct}% de bônus` : ""}.`}
       </p>

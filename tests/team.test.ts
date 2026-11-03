@@ -11,6 +11,14 @@ import * as member from "@/app/api/team/members/[id]/route";
 import * as tasks from "@/app/api/tasks/route";
 import * as task from "@/app/api/tasks/[id]/route";
 import * as taskMove from "@/app/api/tasks/[id]/move/route";
+import * as assign from "@/app/api/tasks/[id]/assign/route";
+import * as checklist from "@/app/api/tasks/[id]/checklist/route";
+import * as comments from "@/app/api/tasks/[id]/comments/route";
+import * as boards from "@/app/api/task-boards/route";
+import { columnOf } from "@/domain/team";
+import * as board from "@/app/api/task-boards/[id]/route";
+import * as partners from "@/app/api/partners/route";
+import * as salePartner from "@/app/api/sales/[id]/partner/route";
 import * as goals from "@/app/api/goals/route";
 import * as keyResult from "@/app/api/key-results/[id]/route";
 import * as processes from "@/app/api/processes/route";
@@ -50,20 +58,20 @@ describe("equipe e tarefas", () => {
   it("membro como responsável; tarefa muda de coluna e marca quando terminou; isolado", async () => {
     const m = (await c.call(members.POST, "POST", "/x", { name: "Bia", role: "Emissora", email: "Bia@X.test" })).data.id;
     expect((await c.call(members.GET, "GET", "/x")).data.items[0]).toMatchObject({ name: "Bia", email: "bia@x.test", openTasks: 0 });
-    const t = (await c.call(tasks.POST, "POST", "/x", { title: "Emitir pedido 12", priority: "HIGH", memberId: m, dueDate: "2026-11-10" })).data.id;
+    const t = (await c.call(tasks.POST, "POST", "/x", { title: "Emitir pedido 12", priority: "HIGH", memberIds: [m], dueDate: "2026-11-10" })).data.id;
     expect((await c.call(members.GET, "GET", "/x")).data.items[0].openTasks).toBe(1);
     expect((await c.call(taskMove.POST, "POST", "/x", { status: "DONE" }, { id: t })).status).toBe(200);
     const [done] = await listTasks(userId);
-    expect(done).toMatchObject({ status: "DONE", member: "Bia" });
+    expect(done).toMatchObject({ status: "DONE", members: [{ name: "Bia" }] });
     expect(done!.doneAt).not.toBeNull();
     // outro usuário não vê, não usa o membro, não mexe na tarefa
     expect((await o.call(tasks.GET, "GET", "/x")).data.items).toHaveLength(0);
-    expect((await o.call(tasks.POST, "POST", "/x", { title: "x", priority: "LOW", memberId: m })).status).toBe(404);
+    expect((await o.call(tasks.POST, "POST", "/x", { title: "x", priority: "LOW", memberIds: [m] })).status).toBe(404);
     expect((await o.call(task.DELETE, "DELETE", "/x", undefined, { id: t })).status).toBe(404);
     expect((await o.call(member.DELETE, "DELETE", "/x", undefined, { id: m })).status).toBe(404);
-    // tirar o membro deixa a tarefa sem responsável
+    // tirar o membro tira ele das tarefas
     await c.call(member.DELETE, "DELETE", "/x", undefined, { id: m });
-    expect((await listTasks(userId))[0]!.memberId).toBeNull();
+    expect((await listTasks(userId))[0]!.memberIds).toEqual([]);
   });
 
   it("processo usado vira uma tarefa por etapa", async () => {
@@ -72,6 +80,102 @@ describe("equipe e tarefas", () => {
     expect([r.status, r.data.created]).toEqual([201, 2]);
     expect((await listTasks(userId)).map((t) => t.title)).toEqual(["Pedido 7 · Conferir prazo", "Pedido 7 · Cancelar na companhia"]);
     expect((await o.call(processRun.POST, "POST", "/x", {}, { id: p })).status).toBe(404);
+  });
+});
+
+describe("quadro de tarefas como no Volly", () => {
+  it("quadros, vários membros, checklist, comentários, horário e a próxima recorrência ao concluir", async () => {
+    const [equipe] = (await c.call(boards.GET, "GET", "/x")).data.items;
+    expect(equipe.name).toBe("Equipe");
+    const outro = (await c.call(boards.POST, "POST", "/x", { name: "Financeiro" })).data.id;
+    const a = (await c.call(members.POST, "POST", "/x", { name: "Ana" })).data.id;
+    const b = (await c.call(members.POST, "POST", "/x", { name: "Bruno", issuer: true })).data.id;
+    expect((await c.call(tasks.POST, "POST", "/x", { title: "x", priority: "LOW", dueDate: "2026-11-10", dueTime: "25:00" })).status).toBe(400);
+    const id = (await c.call(tasks.POST, "POST", "/x", { boardId: outro, title: "Pagar ISS", priority: "URGENT", memberIds: [a, b], dueDate: "2026-01-31", dueTime: "09:30", recurrence: "MONTHLY", checklist: [{ text: "Gerar guia", done: false }, { text: " ", done: false }] })).data.id;
+    let [t] = await listTasks(userId, { boardId: outro });
+    expect(t).toMatchObject({ title: "Pagar ISS", dueTime: "09:30", recurrence: "MONTHLY", checklist: [{ text: "Gerar guia", done: false }] });
+    expect(t!.members.map((m) => m.name)).toEqual(["Ana", "Bruno"]);
+    expect(await listTasks(userId, { boardId: equipe.id })).toHaveLength(0);
+    expect(await listTasks(userId, { memberId: b })).toHaveLength(1);
+
+    expect((await c.call(checklist.POST, "POST", "/x", { index: 0, done: true }, { id })).status).toBe(200);
+    expect((await c.call(comments.POST, "POST", "/x", { text: "Guia gerada" }, { id })).status).toBe(201);
+    // concluir a recorrente cria a próxima no mês seguinte (31/01 → 28/02), com o checklist desmarcado
+    await c.call(taskMove.POST, "POST", "/x", { status: "DONE" }, { id });
+    const all = await listTasks(userId, { boardId: outro });
+    const next = all.find((x) => x.id !== id)!;
+    expect(next).toMatchObject({ status: "TODO", dueDate: "2026-02-28", dueTime: "09:30", checklist: [{ text: "Gerar guia", done: false }] });
+    const d = (await c.call(task.GET, "GET", "/x", undefined, { id })).data;
+    expect(d.comments.map((x: { kind: string; text: string }) => [x.kind, x.text])).toEqual(expect.arrayContaining([["COMMENT", "Guia gerada"], ["ACTIVITY", "Pendente → Concluída"], ["ACTIVITY", "Tarefa criada"]]));
+    // arrastar para a coluna de outra pessoa passa a tarefa para ela
+    expect((await c.call(assign.POST, "POST", "/x", { memberId: a }, { id: next.id })).status).toBe(200);
+    expect((await listTasks(userId, { memberId: b })).map((x) => x.id)).toEqual([id]);
+    // isolado
+    expect((await o.call(task.GET, "GET", "/x", undefined, { id })).status).toBe(404);
+    expect((await o.call(comments.POST, "POST", "/x", { text: "oi" }, { id })).status).toBe(404);
+    expect((await o.call(board.DELETE, "DELETE", "/x", undefined, { id: outro })).status).toBe(404);
+    // quadro excluído leva as tarefas; o último quadro não sai
+    expect((await c.call(board.DELETE, "DELETE", "/x", undefined, { id: outro })).status).toBe(200);
+    expect(await prisma.task.count({ where: { userId } })).toBe(0);
+    expect((await c.call(board.DELETE, "DELETE", "/x", undefined, { id: equipe.id })).status).toBe(409);
+  });
+});
+
+describe("novo quadro: colunas e acesso", () => {
+  it("modelo básico, customizado e em branco; arrastar entre colunas muda a situação; restrito guarda os membros", async () => {
+    const ana = (await c.call(members.POST, "POST", "/x", { name: "Ana" })).data.id;
+    const basico = (await c.call(boards.POST, "POST", "/x", { name: "Básico" })).data.id;
+    const custom = (await c.call(boards.POST, "POST", "/x", { name: "Emissões", description: "Fluxo de emissão", columns: [{ name: "Recebido" }, { name: "Cotando" }, { name: "Emitindo" }, { name: "Entregue" }], restricted: true, memberIds: [ana] })).data.id;
+    const vazio = (await c.call(boards.POST, "POST", "/x", { name: "Vazio", columns: [] })).data.id;
+    const list = (await c.call(boards.GET, "GET", "/x")).data.items as { id: string; columns: { id: string; name: string }[]; restricted: boolean; memberIds: string[]; description: string | null }[];
+    expect(list.find((b) => b.id === basico)!.columns.map((x) => x.name)).toEqual(["A fazer", "Em andamento", "Concluído"]);
+    const cb = list.find((b) => b.id === custom)!;
+    expect(cb).toMatchObject({ description: "Fluxo de emissão", restricted: true, memberIds: [ana] });
+    expect(cb.columns.map((x) => x.name)).toEqual(["Recebido", "Cotando", "Emitindo", "Entregue"]);
+    expect(list.find((b) => b.id === vazio)!.columns).toEqual([]);
+    expect((await c.call(boards.POST, "POST", "/x", { name: "X", restricted: true, memberIds: ["naoexiste"] })).status).toBe(404);
+
+    const [rec, cot, emi, ent] = cb.columns.map((x) => x.id);
+    const id = (await c.call(tasks.POST, "POST", "/x", { boardId: custom, title: "Emitir GRU", priority: "LOW", columnId: cot })).data.id;
+    expect((await listTasks(userId, { boardId: custom }))[0]).toMatchObject({ status: "DOING", columnId: cot });
+    await c.call(taskMove.POST, "POST", "/x", { columnId: emi }, { id });
+    expect((await listTasks(userId, { boardId: custom }))[0]).toMatchObject({ status: "DOING", columnId: emi });
+    await c.call(taskMove.POST, "POST", "/x", { columnId: ent }, { id });
+    expect((await listTasks(userId, { boardId: custom }))[0]).toMatchObject({ status: "DONE", columnId: ent });
+    // reabrir pelo círculo volta para a primeira coluna (pela situação)
+    await c.call(taskMove.POST, "POST", "/x", { status: "TODO" }, { id });
+    expect((await listTasks(userId, { boardId: custom }))[0]).toMatchObject({ status: "TODO", columnId: null });
+    expect(columnOf(cb.columns, { status: "TODO", columnId: null })).toBe(rec);
+    // coluna de outro quadro não vale
+    expect((await c.call(taskMove.POST, "POST", "/x", { columnId: "done" }, { id })).status).toBe(400);
+    // editar o quadro: renomear coluna mantém a tarefa nela; quadro de outro usuário não
+    await c.call(taskMove.POST, "POST", "/x", { columnId: cot }, { id });
+    expect((await c.call(board.PUT, "PUT", "/x", { name: "Emissões", columns: [{ id: rec, name: "Entrada" }, { id: cot, name: "Em cotação" }, { id: ent, name: "Entregue" }] }, { id: custom })).status).toBe(200);
+    expect((await listTasks(userId, { boardId: custom }))[0]!.columnId).toBe(cot);
+    expect((await o.call(board.PUT, "PUT", "/x", { name: "hack" }, { id: custom })).status).toBe(404);
+  });
+});
+
+describe("parceiros e comissão na venda", () => {
+  it("comissão pela regra do parceiro sai do lucro e é recalculada ao trocar o parceiro", async () => {
+    const p = await prisma.program.findFirstOrThrow({ where: { code: "LATAM" } });
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana" })).data.item.id;
+    const acc = (await c.call(accounts.POST, "POST", "/a", { holderId: h, programId: p.id })).data.item.id;
+    await c.call(entries.POST, "POST", "/e", { accountId: acc, type: "PURCHASE", points: 20000, occurredAt: "2026-11-01", costs: [{ type: "PONTOS", amountCents: 50000 }] });
+    // 10 mil pontos (custo R$ 250) vendidos por R$ 300 → lucro R$ 50
+    const sale = (await c.call(sales.POST, "POST", "/s", { origin: "OWN", accountId: acc, occurredAt: "2026-11-05", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10000, salePriceCents: 30000, passengers: 1 }] })).data.item.id;
+    const pct = (await c.call(partners.POST, "POST", "/x", { name: "Agência X", mode: "PROFIT_PCT", value: 1000 })).data.id; // 10% do lucro
+    const fixed = (await c.call(partners.POST, "POST", "/x", { name: "Indicador", mode: "FIXED", value: 2000 })).data.id; // R$ 20
+    expect((await c.call(partners.POST, "POST", "/x", { name: "Errado", mode: "SALE_PCT", value: 15000 })).status).toBe(400);
+    let r = await c.call(salePartner.POST, "POST", "/x", { partnerId: pct }, { id: sale });
+    expect(r.data.item).toMatchObject({ resultCents: 4500, partner: { name: "Agência X", commissionCents: 500 } });
+    r = await c.call(salePartner.POST, "POST", "/x", { partnerId: fixed }, { id: sale });
+    expect(r.data.item).toMatchObject({ resultCents: 3000, partner: { commissionCents: 2000 } });
+    expect((await c.call(partners.GET, "GET", "/x")).data.items.find((x: { id: string }) => x.id === fixed)).toMatchObject({ sales: 1, commissionCents: 2000 });
+    r = await c.call(salePartner.POST, "POST", "/x", { partnerId: null }, { id: sale });
+    expect(r.data.item).toMatchObject({ resultCents: 5000, partner: null });
+    expect((await o.call(salePartner.POST, "POST", "/x", { partnerId: null }, { id: sale })).status).toBe(404);
+    expect((await o.call(salePartner.POST, "POST", "/x", { partnerId: pct }, { id: sale })).status).toBe(404);
   });
 });
 

@@ -59,8 +59,10 @@ export async function listClubs(userId: string, holderId?: string) {
       accountId: a.id,
       label: a.nickname || `${a.program.name} · ${a.holder.name}`,
       color: a.program.color,
-      description: last ? last.description : "Bônus de clube na conta",
-      active: a.transferBonusPct != null || (!!last && last.occurredAt.getTime() >= recent),
+      description: last ? last.description : "Bônus de clube configurado, sem pontos de clube lançados",
+      // mesma regra do resto do app (clubActiveAccounts): ativo só com pontos de clube nos últimos 35 dias;
+      // o bônus configurado na conta sozinho não diz que o clube está pago
+      active: !!last && last.occurredAt.getTime() >= recent,
       frequency: "",
       interval: 1,
       points: last?.points ?? 0,

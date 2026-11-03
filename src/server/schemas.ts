@@ -561,16 +561,43 @@ export const memberSchema = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
   color: hexColor.optional(),
   active: z.boolean().optional(),
+  issuer: z.boolean().optional(),
 });
 export const taskSchema = z.object({
+  boardId: id.nullable().optional(),
   title: z.string().trim().min(1, "Informe a tarefa").max(200),
-  description: z.string().trim().max(2000).nullable().optional(),
-  priority,
-  memberId: id.nullable().optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
+  memberIds: z.array(id).max(20).optional(),
   dueDate: dateStr.nullable().optional(),
+  dueTime: z.string().trim().max(5).nullable().optional(),
   status: z.enum(["TODO", "DOING", "DONE"]).optional(),
+  columnId: z.string().trim().max(40).nullable().optional(),
+  recurrence: z.enum(["NONE", "DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY", "SEMIANNUAL", "YEARLY"]).optional(),
+  checklist: z.array(z.object({ text: z.string().trim().max(200), done: z.boolean() })).max(50).optional(),
 });
-export const taskMoveSchema = z.object({ status: z.enum(["TODO", "DOING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() });
+export const boardSchema = z.object({
+  name: z.string().trim().min(1, "Dê um nome ao quadro").max(40),
+  description: z.string().trim().max(500).nullable().optional(),
+  columns: z.array(z.object({ id: z.string().trim().max(40).optional(), name: z.string().trim().min(1, "Dê um nome à coluna").max(30) })).max(12, "No máximo 12 colunas").optional(),
+  restricted: z.boolean().optional(),
+  memberIds: z.array(id).max(50).optional(),
+});
+export const taskAssignSchema = z.object({ memberId: id.nullable() });
+export const checklistToggleSchema = z.object({ index: z.number().int().min(0).max(49), done: z.boolean() });
+export const taskCommentSchema = z.object({ text: z.string().trim().min(1, "Escreva o comentário").max(2000) });
+export const salesPartnerSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  mode: z.enum(["PROFIT_PCT", "SALE_PCT", "FIXED"]),
+  value: z.number().int().min(0).max(100_000_00),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  active: z.boolean().optional(),
+});
+export const salePartnerSchema = z.object({ partnerId: id.nullable() });
+export const taskMoveSchema = z.union([
+  z.object({ status: z.enum(["TODO", "DOING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() }),
+  z.object({ columnId: z.string().trim().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() }),
+]);
 export const goalSchema = z.object({
   title: z.string().trim().min(1, "Informe o objetivo").max(200),
   period: z.enum(["MONTH", "QUARTER", "YEAR"]),

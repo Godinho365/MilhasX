@@ -54,7 +54,7 @@ export default async function ClubsPage() {
                       <td className="text-right tabular-nums">{r.costCents ? fmtBRL(r.costCents) : "-"}</td>
                       <td className="text-right tabular-nums">{r.cpmCents == null ? "-" : fmtBRL(r.cpmCents)}</td>
                       <td className="whitespace-nowrap tabular-nums">{r.source === "entries" ? <Link href={`/app/programs/${r.accountId}`} className="text-xs font-medium text-accent-light hover:underline">Cadastrar recorrência</Link> : r.active ? fmtDate(r.nextDate) : "-"}{r.endDate && <span className="block text-xs text-muted">até {fmtDate(r.endDate)}</span>}</td>
-                      <td className="text-right tabular-nums">{r.bonusPct ? `${r.bonusPct}%` : "-"}{r.bonusCap ? <span className="block text-xs text-muted">até {fmtPts(r.bonusCap)}/mês</span> : null}</td>
+                      <td className="text-right tabular-nums">{r.bonusPct && r.active ? `${r.bonusPct}%` : r.bonusPct ? <span className="text-muted" title={`Bônus de ${r.bonusPct}% só vale com o clube pago`}>sem bônus</span> : "-"}{r.bonusCap && r.active ? <span className="block text-xs text-muted">até {fmtPts(r.bonusCap)}/mês</span> : null}</td>
                       <td className="text-xs text-muted">{r.source === "entries" ? "-" : r.notify ? "Avisa" : "Sem aviso"}</td>
                     </tr>
                   ))}
