@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
-  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Palette, Plane, ChevronDown,
+  LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Palette, Plane, ChevronDown, Users, Gem,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -22,31 +22,50 @@ import { AssistantButton } from "./assistant";
 
 type Icon = React.ComponentType<{ className?: string }>;
 
-const NAV: { group: string; items: { href: string; label: string; icon: Icon }[] }[] = [
-  { group: "Análise", items: [
+type NavLeaf = { href: string; label: string; icon: Icon; badge?: "unread" | "news"; external?: boolean };
+type NavGroup = { key: string; label: string; icon: Icon; children: { href: string; label: string }[] };
+type NavItem = NavLeaf | NavGroup;
+const isGroup = (it: NavItem): it is NavGroup => "children" in it;
+
+// Seções do menu lateral (Menu principal, Operação, Recursos, Gestão, Conta). "Sua <marca>" e o suporte
+// dependem das props, por isso são montados no componente.
+const NAV: { group: string; items: NavItem[] }[] = [
+  { group: "Menu principal", items: [
     { href: "/app", label: "Painel", icon: LayoutDashboard },
     { href: "/app/reports", label: "Relatórios", icon: LineChart },
     { href: "/app/entries", label: "Extrato", icon: FileText },
   ] },
-  { group: "Ganhe pontos", items: [
+  { group: "Operação", items: [
+    { href: "/app/sales", label: "Vendas", icon: ReceiptText },
+    { key: "crm", label: "CRM", icon: KanbanSquare, children: [
+      { href: "/app/crm", label: "CRM Passagens" },
+      { href: "/app/crm-milhas", label: "CRM Milhas" },
+    ] },
+    { key: "voos", label: "Voos", icon: Plane, children: [
+      { href: "/app/buscador", label: "Buscador" },
+      { href: "/app/tradutor", label: "Tradutor de milhas" },
+    ] },
+  ] },
+  { group: "Recursos", items: [
     { href: "/app/purchases", label: "Compras", icon: ShoppingBag },
     { href: "/app/offers", label: "Promoções", icon: Tag },
     { href: "/app/credit-cards", label: "Cartões de Crédito", icon: CreditCard },
-  ] },
-  { group: "Ferramentas", items: [
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
-    { href: "/app/sales", label: "Vendas", icon: ReceiptText },
+  ] },
+  { group: "Gestão", items: [
     { href: "/app/management", label: "Fornecedores", icon: Contact },
+    { href: "/app/sales?tab=clientes", label: "Clientes", icon: Users },
+  ] },
+  { group: "Conta", items: [
+    { href: "/app/settings", label: "Configurações", icon: Settings },
+    { href: "/app/notifications", label: "Notificações", icon: Bell, badge: "unread" },
+    { href: "/app/upgrade", label: "Planos", icon: Gem },
+    { href: "/app/guides", label: "Guias", icon: GraduationCap },
+    { href: "/app/news", label: "Novidades", icon: Megaphone, badge: "news" },
   ] },
 ];
-
-// Grupo recolhível "Voos" (como no Quero Milhas) e o CRM logo abaixo, fora de "Ferramentas"
-const FLIGHTS = [
-  { href: "/app/buscador", label: "Buscador" },
-  { href: "/app/tradutor", label: "Tradutor de milhas" },
-];
-const FLIGHTS_KEY = "mm:nav-voos";
+const NAV_OPEN_KEY = (key: string) => `mm:nav-${key}`;
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", purchases: "Compras", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const SIM_LABELS: Record<string, string> = { "purchase/bonificada": "Compra Bonificada", purchase: "Compra Bonificada", "purchase/store-comparison": "Pontos vs Cashback", "purchase/pontos": "Compra de Pontos", transfer: "Transferência", flight: "Passagem Aérea", hotel: "Hospedagem", sale: "Venda", "supplier-ranking": "Melhor fornecedor" };
@@ -130,7 +149,12 @@ export function Shell(props: {
   const userRef = useRef<HTMLDivElement>(null);
   // "/app/crm" não pode marcar "/app/crm-milhas": a seção vale para o próprio endereço e o que vem depois de "/"
   const under = (p: string) => path === p || path.startsWith(`${p}/`);
-  const active = (href: string) => (href === "/app" ? path === "/app" : under(href));
+  const active = (href: string) => {
+    const [p, query] = href.split("?");
+    const tab = new URLSearchParams(query ?? "").get("tab");
+    if (p === "/app/sales") return under(p) && (search.get("tab") ?? null) === tab;
+    return p === "/app" ? path === "/app" : under(p!);
+  };
   const title = TITLES.find(([p]) => under(p))?.[1];
   const tutorialTag = path === "/app" ? "Painel" : TUTORIAL_TAGS.find(([p]) => under(p))?.[1];
   const tutorial = props.prefs.hideTutorials || !tutorialTag
@@ -175,18 +199,16 @@ export function Shell(props: {
     window.location.href = "/login";
   }
 
-  const inFlights = FLIGHTS.some((f) => active(f.href));
-  const [flightsOpen, setFlightsOpen] = useState(true);
+  const [closed, setClosed] = useState<string[]>([]);
   useEffect(() => {
     try {
-      if (window.localStorage.getItem(FLIGHTS_KEY) === "0" && !inFlights) setFlightsOpen(false);
+      setClosed(NAV.flatMap((g) => g.items).filter(isGroup).filter((g) => window.localStorage.getItem(NAV_OPEN_KEY(g.key)) === "0").map((g) => g.key));
     } catch {}
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const toggleFlights = () => {
-    const next = !flightsOpen;
-    setFlightsOpen(next);
+  }, []);
+  const toggleGroup = (key: string, open: boolean) => {
+    setClosed((c) => (open ? c.filter((k) => k !== key) : [...c, key]));
     try {
-      window.localStorage.setItem(FLIGHTS_KEY, next ? "1" : "0");
+      window.localStorage.setItem(NAV_OPEN_KEY(key), open ? "1" : "0");
     } catch {}
   };
 
@@ -226,38 +248,66 @@ export function Shell(props: {
   // Fixadas primeiro ("Fixar na barra lateral"); sem fixadas, as de maior saldo
   const pinnedAccounts = visibleAccounts.filter((a) => a.pinned);
   const topAccounts = (pinnedAccounts.length ? pinnedAccounts : [...visibleAccounts].sort((a, b) => b.balance - a.balance)).slice(0, 5);
-  const flightsBlock = (
-    <div key="voos" className="space-y-px">
-      <button
-        type="button"
-        onClick={toggleFlights}
-        aria-expanded={flightsOpen}
-        aria-controls="nav-voos"
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${inFlights && !flightsOpen ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}
-      >
-        <Plane className="h-[17px] w-[17px] shrink-0 text-zinc-400" />
-        <span className="truncate">Voos</span>
-        <ChevronDown className={`ml-auto h-4 w-4 text-zinc-400 transition-transform ${flightsOpen ? "rotate-180" : ""}`} aria-hidden />
-      </button>
-      {flightsOpen && (
-        <div id="nav-voos" className="space-y-px">
-          {FLIGHTS.map((f) => (
-            <Link
-              key={f.href}
-              href={f.href}
-              aria-current={active(f.href) ? "page" : undefined}
-              className={`relative block rounded-lg py-[6px] pl-[37px] pr-2.5 text-[13px] font-medium transition-colors ${active(f.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
-            >
-              {active(f.href) && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent-light" aria-hidden />}
-              {f.label}
-            </Link>
-          ))}
-        </div>
-      )}
-      {navLink("/app/crm", "CRM Passagens", KanbanSquare)}
-      {navLink("/app/crm-milhas", "CRM Milhas", Coins)}
+  const navGroup = (g: NavGroup) => {
+    const here = g.children.some((c) => active(c.href));
+    const open = here || !closed.includes(g.key);
+    return (
+      <div key={g.key} className="space-y-px">
+        <button
+          type="button"
+          onClick={() => toggleGroup(g.key, !open)}
+          aria-expanded={open}
+          aria-controls={`nav-${g.key}`}
+          className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${here && !open ? "bg-panel2 text-white" : "text-zinc-300 hover:bg-panel2/70 hover:text-white"}`}
+        >
+          <g.icon className="h-[17px] w-[17px] shrink-0 text-zinc-400" />
+          <span className="truncate">{g.label}</span>
+          <ChevronDown className={`ml-auto h-4 w-4 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+        </button>
+        {open && (
+          <div id={`nav-${g.key}`} className="space-y-px">
+            {g.children.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                aria-current={active(c.href) ? "page" : undefined}
+                className={`relative block rounded-lg py-[6px] pl-[37px] pr-2.5 text-[13px] font-medium transition-colors ${active(c.href) ? "bg-panel2 text-white" : "text-zinc-400 hover:bg-panel2/70 hover:text-white"}`}
+              >
+                {active(c.href) && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-accent-light" aria-hidden />}
+                {c.label}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+  const badgeOf = (b?: NavLeaf["badge"]) => (b === "unread" ? props.unread : b === "news" ? props.unreadNews : undefined);
+  const programsBlock = (
+    <div key="programas">
+      <div className="mb-1.5 flex items-center px-2.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Programas</p>
+        <Link href="/app/programs" className="ml-auto text-xs font-medium text-muted hover:text-white">Ver todos ({visibleAccounts.length})</Link>
+      </div>
+      {/* Atalhos das contas (titular × programa), maiores saldos primeiro, como na referência */}
+      <div className="flex flex-wrap gap-1.5 px-2.5">
+        {topAccounts.map((a) => (
+          <Link key={a.id} href={`/app/programs/${a.id}`} title={`${a.holder} - ${a.program}`} aria-label={`${a.holder} - ${a.program}`} className="rounded-full transition-transform hover:scale-110">
+            <ProgramLogo programId={a.programId ?? a.id} name={a.program} color={a.color} version={a.logo} size={32} />
+          </Link>
+        ))}
+        {visibleAccounts.length > 5 && (
+          <Link href="/app/programs" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-line text-[11px] text-muted" aria-label={`Ver mais ${visibleAccounts.length - 5} programas`}>+{visibleAccounts.length - 5}</Link>
+        )}
+        {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
+      </div>
     </div>
   );
+  // "Sua <marca>" entra em Gestão e o suporte em Conta (dependem das props)
+  const extra: Record<string, NavLeaf[]> = {
+    "Gestão": [{ href: "/editor", label: `Sua ${props.brand}`, icon: Palette }],
+    "Conta": props.supportEmail ? [{ href: `mailto:${props.supportEmail}?subject=${encodeURIComponent(`Ajuda no ${props.appName}`)}`, label: "Fale com o suporte", icon: LifeBuoy, external: true }] : [],
+  };
 
   const sidebar = (
     <div className="flex h-full flex-col">
@@ -269,36 +319,19 @@ export function Shell(props: {
       </div>
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3" aria-label="Menu principal">
         {NAV.map((g, i) => (
-          <div key={g.group}>
-            <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.group}</p>
-            <div className="space-y-px">{g.items.map((it) => navLink(it.href, it.label, it.icon))}{i === 1 && flightsBlock}</div>
+          <div key={g.group} className="space-y-4">
+            <div>
+              <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.group}</p>
+              <div className="space-y-px">
+                {[...g.items, ...(extra[g.group] ?? [])].map((it) => (isGroup(it) ? navGroup(it) : navLink(it.href, it.label, it.icon, badgeOf(it.badge), it.external)))}
+              </div>
+            </div>
+            {i === 0 && programsBlock}
           </div>
         ))}
-        <div>
-          <div className="mb-1.5 flex items-center px-2.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Programas</p>
-            <Link href="/app/programs" className="ml-auto text-xs font-medium text-muted hover:text-white">Ver todos ({visibleAccounts.length})</Link>
-          </div>
-          {/* Atalhos das contas (titular × programa), maiores saldos primeiro, como na referência */}
-          <div className="flex flex-wrap gap-1.5 px-2.5">
-            {topAccounts.map((a) => (
-              <Link key={a.id} href={`/app/programs/${a.id}`} title={`${a.holder} - ${a.program}`} aria-label={`${a.holder} - ${a.program}`} className="rounded-full transition-transform hover:scale-110">
-                <ProgramLogo programId={a.programId ?? a.id} name={a.program} color={a.color} version={a.logo} size={32} />
-              </Link>
-            ))}
-            {visibleAccounts.length > 5 && (
-              <Link href="/app/programs" className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-line text-[11px] text-muted" aria-label={`Ver mais ${visibleAccounts.length - 5} programas`}>+{visibleAccounts.length - 5}</Link>
-            )}
-            {visibleAccounts.length === 0 && <Link href="/app/programs" className="flex items-center gap-1.5 text-xs text-muted hover:text-white"><WalletCards className="h-3.5 w-3.5" />Cadastrar contas</Link>}
-          </div>
-        </div>
       </nav>
-      <div className="space-y-px border-t border-line px-3 py-2">
-        {navLink("/editor", `Sua ${props.brand}`, Palette)}
-        {navLink("/app/guides", "Guias", GraduationCap)}
-        {navLink("/app/news", "Novidades", Megaphone, props.unreadNews)}
-        {props.supportEmail && navLink(`mailto:${props.supportEmail}?subject=${encodeURIComponent(`Ajuda no ${props.appName}`)}`, "Fale com o suporte", LifeBuoy, undefined, true)}
-        <div className="relative pt-1" ref={userRef}>
+      <div className="border-t border-line px-3 py-2">
+        <div className="relative" ref={userRef}>
           <button onClick={() => setUserMenu((v) => !v)} aria-expanded={userMenu} aria-haspopup="menu" className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-panel2">
             <UserAvatar name={props.user.name} version={props.user.avatarVersion} />
             <span className="min-w-0 flex-1">
