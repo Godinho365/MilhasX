@@ -5,7 +5,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { watchLinkClicks, refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
 import {
-  LayoutDashboard, LineChart, FileText, ShoppingBag, Tag, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
+  LayoutDashboard, LineChart, FileText, CreditCard, Calculator, Percent, ReceiptText, Contact, Bell, Settings,
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Palette, Plane, ChevronDown, Users, Gem,
 } from "lucide-react";
@@ -15,7 +15,7 @@ import { UserAvatar } from "./user-avatar";
 import { HolderPicker, type HolderOpt } from "./holder-picker";
 import { ThemeMenuItem } from "./theme-switch";
 import { DashboardViewPicker, type DashboardView } from "./dashboard-view";
-import { EntryForms, type AccountOpt, type StoreOpt } from "./entry-forms";
+import { EntryForms, type AccountOpt } from "./entry-forms";
 import type { CardOpt } from "./form-parts";
 import { ProgramLogo } from "./program-logo";
 import { AssistantButton } from "./assistant";
@@ -47,8 +47,6 @@ const NAV: { group: string; items: NavItem[] }[] = [
     ] },
   ] },
   { group: "Recursos", items: [
-    { href: "/app/purchases", label: "Compras", icon: ShoppingBag },
-    { href: "/app/offers", label: "Promoções", icon: Tag },
     { href: "/app/credit-cards", label: "Cartões de Crédito", icon: CreditCard },
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
@@ -67,10 +65,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 const NAV_OPEN_KEY = (key: string) => `mm:nav-${key}`;
 
-const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", purchases: "Compras", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
+const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const SIM_LABELS: Record<string, string> = { "purchase/bonificada": "Compra Bonificada", purchase: "Compra Bonificada", "purchase/store-comparison": "Pontos vs Cashback", "purchase/pontos": "Compra de Pontos", transfer: "Transferência", flight: "Passagem Aérea", hotel: "Hospedagem", sale: "Venda", "supplier-ranking": "Melhor fornecedor" };
 const TITLES: [string, string][] = [
-  ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/purchases", "Compras"], ["/app/offers", "Promoções"],
+  ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"],
   ["/app/credit-cards", "Cartões de Crédito"], ["/app/simulators", "Simuladores"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
   ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
@@ -78,13 +76,13 @@ const TITLES: [string, string][] = [
 
 // Tag dos guias que explica cada página (botão "Tutorial" do cabeçalho)
 const TUTORIAL_TAGS: [string, string][] = [
-  ["/app/entries", "Extrato"], ["/app/credit-cards", "Cartões"], ["/app/offers", "Promoções"], ["/app/purchases", "Bônus"],
+  ["/app/entries", "Extrato"], ["/app/credit-cards", "Cartões"],
   ["/app/simulators", "Cálculos"], ["/app/reports", "Métricas"], ["/app/programs", "Programas"],
 ];
 
 const BOTTOM: { href: string; label: string; icon: Icon }[] = [
   { href: "/app", label: "Painel", icon: LayoutDashboard },
-  { href: "/app/purchases", label: "Compras", icon: ShoppingBag },
+  { href: "/app/sales", label: "Vendas", icon: ReceiptText },
   { href: "/app/entries", label: "Extrato", icon: FileText },
 ];
 
@@ -95,7 +93,6 @@ export function Shell(props: {
   programs: { id: string; name: string; color: string }[];
   accounts: AccountOpt[];
   cards?: CardOpt[];
-  stores?: StoreOpt[];
   holderId: string;
   unread: number;
   unreadNews: number;
@@ -118,8 +115,6 @@ export function Shell(props: {
       ? { label: "Novo titular", event: "mm:new-holder", icon: <UserPlus className="h-5 w-5" /> }
       : path.startsWith("/app/simulators/")
         ? { label: "Simular", event: "mm:simulate", icon: <Calculator className="h-5 w-5" /> }
-        : path === "/app/purchases" && search.get("tab") === "compras"
-          ? { label: "Criar nova compra", event: "mm:new-purchase", icon: <ShoppingBag className="h-5 w-5" /> }
         : path === "/app/crm" && search.get("view") !== "dashboard"
           ? { label: "Novo pedido", event: "mm:new-order", icon: <FilePlus2 className="h-5 w-5" /> }
         : path === "/app/crm-milhas" && !search.get("view") // só no Kanban, que é quem abre a negociação nova
@@ -429,7 +424,7 @@ export function Shell(props: {
           {(props.unreadNews > 0 || props.unread > 0) && <span className="absolute right-[30%] top-2 h-2 w-2 rounded-full bg-red-500" aria-hidden />}
         </button>
       </nav>
-      <EntryForms accounts={formAccounts} defaultAccountId={pageAccount?.id} cards={props.cards} stores={props.stores} fab={fab} />
+      <EntryForms accounts={formAccounts} defaultAccountId={pageAccount?.id} cards={props.cards} fab={fab} />
     </div>
   );
 }

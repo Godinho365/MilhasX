@@ -324,37 +324,8 @@ test("vendas e clientes", async () => {
   await page.keyboard.press("Escape");
 });
 
-test("lojas, favoritos e alertas", async () => {
-  await page.goto("/app/purchases");
-  const first = page.locator("article").first();
-  const storeName = (await first.locator("h3").textContent())!;
-  await first.getByRole("button", { name: `Favoritar ${storeName}` }).click();
-  await toastSays("nos favoritos");
-  // painel lateral da loja, como na referência: abas e alerta
-  await first.getByRole("button", { name: `Detalhes de ${storeName}` }).click();
-  const drawer = page.getByRole("dialog", { name: storeName });
-  await expect(drawer.getByRole("tab", { name: "Visão geral" })).toHaveAttribute("aria-selected", "true");
-  await expect(page).toHaveURL(/loja=/);
-  await drawer.getByRole("tab", { name: /^Pontos \(\d+\)$/ }).click();
-  await drawer.getByRole("tab", { name: "Histórico" }).click();
-  await drawer.getByRole("button", { name: "Fechar" }).click();
-  await expect(drawer).toBeHidden();
-  // filtro "Mostrar somente favoritas" no painel de filtros
-  await page.getByRole("button", { name: "Mais filtros" }).click();
-  await expect(page.getByRole("dialog")).toContainText("Filtros de lojas");
-  await page.getByRole("switch", { name: "Mostrar somente favoritas" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Aplicar" }).click();
-  await expect(page).toHaveURL(/fav=1/);
-  await expect(page.locator("article")).toHaveCount(1);
-
-  // alertas: sugestão "Ative em um clique" da loja favorita
-  await page.goto("/app/purchases?tab=alertas");
-  await expect(page.getByText("Monitore as melhores promoções")).toBeVisible();
-  await page.getByRole("button", { name: `Ativar alerta de ${storeName}` }).click();
-  await toastSays("Alerta ativado");
-  await expect(page.getByRole("button", { name: `Ativar alerta de ${storeName}` })).toHaveCount(0);
-
-  await page.getByLabel(/Tipo/).selectOption({ label: "Saldo mínimo de conta" });
+test("alerta de saldo nas notificações", async () => {
+  await page.goto("/app/notifications");
   await page.getByLabel(/Conta/).selectOption({ label: "LATAM Pass · Ana E2E" });
   await page.getByLabel(/saldo ficar abaixo/).fill("20000");
   await page.getByRole("button", { name: "Criar alerta" }).click();
@@ -428,7 +399,7 @@ test("simuladores e relatórios", async () => {
   await expect(page).toHaveURL(/periodo=all/);
   await expect(page.getByRole("heading", { name: "Acúmulo por categoria" })).toBeVisible();
   // todas as abas do submenu abrem
-  for (const [label, heading] of [["Compras", "Pontos por parceiro"], ["Cartões", "Faturas por status"], ["Economia", "Detalhamento por resgate"], ["Evolução", "Evolução do CPM"], ["Vendas", "Top beneficiários"], ["Bens e Direitos", "Posição patrimonial em 31/12 de cada ano"]] as const) {
+  for (const [label, heading] of [["Cartões", "Faturas por status"], ["Economia", "Detalhamento por resgate"], ["Evolução", "Evolução do CPM"], ["Vendas", "Top beneficiários"], ["Bens e Direitos", "Posição patrimonial em 31/12 de cada ano"]] as const) {
     await page.getByRole("navigation", { name: "Relatórios" }).getByRole("link", { name: label }).click();
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/relatorio_${label.normalize("NFD").replace(/[^A-Za-z]+/g, "_")}.png`, fullPage: true });
@@ -646,7 +617,6 @@ test("painel: três modos pelo seletor (desktop)", async () => {
     await expect(page.getByText(heading).first()).toBeVisible();
     if (label === "Visão Geral") {
       await expect(page.getByRole("heading", { name: "Lançamentos Recentes" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Compras Pendentes" })).toBeVisible();
       // ⇕ do card abre o detalhamento por programa
       await page.getByRole("button", { name: "Saldo total" }).click();
       const pop = page.getByRole("dialog", { name: "Saldo por programa" });
@@ -657,26 +627,6 @@ test("painel: três modos pelo seletor (desktop)", async () => {
   }
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Gestão" })).toBeVisible();
-});
-
-test("promoções: lista, encerradas, filtros e alerta", async () => {
-  await page.goto("/app/offers");
-  await expect(page.locator("main article").first()).toBeVisible();
-  await expect(page.getByText(/Termina (hoje|em \d+ dias?)/).first()).toBeVisible();
-  // encerradas ficam numa seção abaixo das ativas, como na referência
-  await expect(page.getByRole("region", { name: "Encerradas" }).getByText(/Encerrou em/).first()).toBeVisible();
-  await page.getByLabel("Ordenar promoções").selectOption("bonus");
-  await expect(page).toHaveURL(/ordem=bonus/);
-  await page.getByRole("group", { name: "Categoria" }).getByRole("button", { name: "Transferência" }).click();
-  await expect(page).toHaveURL(/categoria=TRANSFER_BONUS/);
-  await page.getByRole("tab", { name: "Alertas" }).click();
-  await expect(page).toHaveURL(/tab=alertas/);
-  await expect(page.getByLabel(/Bônus mínimo/)).toBeVisible();
-  await page.getByLabel("Programa").selectOption({ label: "LATAM Pass" });
-  await page.getByLabel(/Bônus mínimo/).fill("30");
-  await page.getByRole("button", { name: "Criar alerta" }).click();
-  await toastSays("Alerta de promoção criado");
-  await expect(page.getByText("Bônus a partir de 30%")).toBeVisible();
 });
 
 test("cartões: cadastro, fatura e registro de pontos", async () => {
@@ -783,8 +733,8 @@ test("celular: barra inferior e painel inferior do seletor", async () => {
   await expect(bar).toBeVisible();
   await bar.getByRole("link", { name: "Extrato" }).click();
   await expect(page).toHaveURL(/\/app\/entries/);
-  await bar.getByRole("link", { name: "Compras" }).click();
-  await expect(page).toHaveURL(/\/app\/purchases/);
+  await bar.getByRole("link", { name: "Vendas" }).click();
+  await expect(page).toHaveURL(/\/app\/sales/);
   await bar.getByRole("button", { name: "Mais opções do menu" }).click();
   await page.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Cartões de Crédito" }).click();
   await expect(page).toHaveURL(/credit-cards/);
@@ -816,7 +766,7 @@ test("página da conta: recorrência e credenciais", async () => {
   await page.goto("/app/programs");
   await page.locator("section", { hasText: "Ana E2E" }).getByRole("link", { name: "Livelo" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Livelo" })).toBeVisible();
-  for (const t of ["Saldo atual", "Custo do milheiro", "Pontos a receber", "Valor em reais", "Lançamentos Recentes", "Compras Pendentes", "Lançamentos Recorrentes", "Credenciais de acesso"]) {
+  for (const t of ["Saldo atual", "Custo do milheiro", "Pontos a receber", "Valor em reais", "Lançamentos Recentes", "Lançamentos Recorrentes", "Credenciais de acesso"]) {
     await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   }
   await expect(page.getByText("Orgânico").first()).toBeVisible();
@@ -850,35 +800,6 @@ test("página da conta: recorrência e credenciais", async () => {
   await page.screenshot({ path: `${SHOTS}/desktop_conta.png`, fullPage: true });
 });
 
-test("compras bonificadas: registrar e receber os pontos", async () => {
-  await page.goto("/app/purchases?tab=compras");
-  await page.getByRole("tab", { name: "Kanban" }).click();
-  await page.getByRole("button", { name: "Criar nova compra" }).first().click();
-  const d = page.getByRole("dialog");
-  await d.getByLabel("Programa").selectOption({ label: "LATAM Pass Bruno E2E" });
-  await d.getByLabel("Pontos por real").fill("4");
-  await d.getByLabel("Valor dos produtos (R$)").fill("500,00");
-  await expect(d).toContainText("Pontos esperados: 2.000");
-  await d.getByLabel("Descrição").fill("Loja Teste E2E");
-  await d.getByRole("button", { name: /Mais opções/ }).click();
-  await d.getByLabel("Tags").fill("teste-e2e");
-  await d.getByLabel("Tags").press("Enter");
-  await d.getByRole("button", { name: "Criar compra" }).click();
-  await toastSays("Compra registrada");
-  // Kanban: aguardando entrega → aguardando pontos → pontos recebidos
-  const entrega = page.getByRole("region", { name: "Aguardando entrega" });
-  await expect(entrega.getByRole("listitem", { name: "Compra Loja Teste E2E" })).toContainText("teste-e2e");
-  await entrega.getByRole("listitem", { name: "Compra Loja Teste E2E" }).getByRole("button", { name: "Marcar entregue" }).click();
-  await toastSays("aguardando pontos");
-  const pontos = page.getByRole("region", { name: "Aguardando pontos" });
-  await pontos.getByRole("listitem", { name: "Compra Loja Teste E2E" }).getByRole("button", { name: "Pontos recebidos" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Lançar no extrato" }).click();
-  await toastSays("Pontos lançados no extrato");
-  await expect(page.getByRole("region", { name: "Pontos recebidos" })).toContainText("Loja Teste E2E");
-  await page.goto("/app/entries?q=Loja%20Teste%20E2E");
-  await expect(page.getByRole("cell", { name: /Loja Teste E2E/ }).first()).toBeVisible();
-});
-
 test("tema claro e escuro", async () => {
   await page.goto("/app/settings");
   await page.getByRole("radio", { name: "Claro" }).first().click();
@@ -887,7 +808,7 @@ test("tema claro e escuro", async () => {
   expect(bg).toBe("rgb(246, 247, 249)");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  for (const p of ["/app", "/app/entries", "/app/purchases", "/app/credit-cards", "/app/offers"]) {
+  for (const p of ["/app", "/app/entries", "/app/credit-cards", "/app/sales"]) {
     await page.goto(p);
     await expect(page.locator("main h1")).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/claro${p.replace(/[/?=]/g, "_")}.png` });
@@ -1130,10 +1051,10 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
 });
 
 const PAGES = [
-  "/app", "/app/entries", "/app/programs", "/app/programs?view=titulares", "/app/purchases", "/app/purchases?tab=alertas",
+  "/app", "/app/entries", "/app/programs", "/app/programs?view=titulares",
   "/app/sales", "/app/sales?tab=clientes", "/app/simulators", "/app/reports", "/app/notifications", "/app/settings", "/app/settings?tab=profile", "/app/settings?tab=billing", "/app/settings?tab=referrals", "/app/settings?tab=sales-profile", "/editor", "/app/upgrade", "/app/crm", "/app/crm?view=lista", "/app/crm?view=dashboard", "/app/buscador", "/app/tradutor", "/app/tradutor?de=BSB&para=GIG",
-  "/app/offers", "/app/offers?tab=historico", "/app/offers?tab=alertas", "/app/credit-cards", "/app/management",
-  "/app/management?tab=fornecedores", "/app/guides", "/app/guides/entendendo-o-cpm", "/app/news", "/app/purchases?tab=compras",
+  "/app/credit-cards", "/app/management",
+  "/app/management?tab=fornecedores", "/app/guides", "/app/guides/entendendo-o-cpm", "/app/news",
 ];
 
 test("responsivo: celular sem rolagem lateral, extrato em lista, botão redondo", async () => {
@@ -1225,31 +1146,6 @@ test("painel administrativo completo", async ({ browser }) => {
   await expect(page.getByRole("row", { name: /Smiles/ })).toContainText("R$ 18,00");
   await d.waitFor({ state: "detached" }).catch(() => {});
 
-  await page.goto("/admin/offers");
-  await page.getByLabel("Loja").fill(`Loja E2E ${stamp}`);
-  await page.getByLabel(/Programa \(pontos\)/).selectOption({ label: "Livelo" });
-  await page.getByLabel("Pontos por real").fill("7");
-  await page.getByRole("button", { name: "Salvar oferta" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Oferta salva" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: `Loja E2E ${stamp}` })).toBeVisible();
-  // catálogo por planilha (para os programas que bloqueiam consultas automáticas)
-  const sheet = page.getByRole("form", { name: "Importar planilha" });
-  await sheet.getByLabel("Programa").selectOption({ label: "Smiles" });
-  await sheet.getByLabel("ou cole aqui").fill(`loja;pontos_por_real;ate\nPlanilha E2E ${stamp};2,5;sim`);
-  await sheet.getByRole("button", { name: "Importar planilha" }).click();
-  await toastSays(/1 lojas: 1 novas/);
-  await expect(page.getByRole("cell", { name: `Planilha E2E ${stamp}` })).toBeVisible();
-  await expect(page.getByRole("row", { name: new RegExp(`Planilha E2E ${stamp}`) })).toContainText("até 2,5");
-  // Cuponomia: planilha de cashback enviada pelo admin; linha ruim vira sucesso parcial com relatório
-  const cup = page.getByRole("listitem", { name: "Fonte Cuponomia (cashback)" });
-  await cup.getByLabel("Enviar planilha da Cuponomia (cashback)").setInputFiles({ name: "cuponomia.csv", mimeType: "text/csv", buffer: Buffer.from(`loja;cashback\nCashback E2E ${stamp};4,5%\nLinha Ruim;abc\n`) });
-  await toastSays(/Importação parcial: 1 lojas: 1 novas/);
-  await expect(cup).toContainText("Sucesso parcial");
-  await cup.getByRole("button", { name: "Ver relatório" }).click();
-  await expect(page.getByRole("list", { name: "Itens ignorados" })).toContainText("cashback inválido");
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("listitem", { name: "Fonte Livelo" })).toContainText(/Aguardando arquivo|Sucesso|Falha/);
-
   await page.goto("/admin/audit?action=admin.");
   await expect(page.getByText("admin.user_disable").first()).toBeVisible();
   await expect(page.getByText("admin.program_update").first()).toBeVisible();
@@ -1258,18 +1154,6 @@ test("painel administrativo completo", async ({ browser }) => {
 
   await page.goto("/admin/settings");
   await expect(page.getByText("Cadastro público aberto")).toBeVisible();
-
-  await page.goto("/admin/promotions");
-  await page.getByRole("button", { name: "Nova promoção" }).click();
-  const pd = page.getByRole("dialog");
-  await pd.getByLabel(/Título/).fill(`Promo E2E ${stamp}`);
-  await pd.getByLabel(/^Bônus \(%\)/).fill("90");
-  await pd.getByLabel(/Programa de destino/).selectOption({ label: "LATAM Pass" });
-  await pd.getByLabel(/^Fim/).fill(new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10));
-  await pd.getByRole("button", { name: "Salvar" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "Promoção criada" })).toBeVisible();
-  await page.goto("/app/notifications");
-  await expect(page.getByText(`Promo E2E ${stamp}`)).toBeVisible();
 
   await page.goto("/admin/calculators");
   await expect(page.getByRole("region", { name: "Parcerias de transferência" })).toContainText("Livelo");
@@ -1309,17 +1193,15 @@ test("painel administrativo completo", async ({ browser }) => {
   await expect(page.getByRole("heading", { name: "Seção" })).toBeVisible();
 
   await page.setViewportSize({ width: 375, height: 812 });
-  for (const p of ["/admin", "/admin/users", "/admin/programs", "/admin/offers", "/admin/promotions", "/admin/calculators", "/admin/guides", "/admin/news", "/admin/audit", "/admin/settings"]) {
+  for (const p of ["/admin", "/admin/users", "/admin/programs", "/admin/calculators", "/admin/guides", "/admin/news", "/admin/audit", "/admin/settings"]) {
     await page.goto(p);
     await expect(page.locator("main h1")).toBeVisible();
     await noHorizontalScroll();
   }
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // limpa: oferta de teste e rebaixa o usuário
-  await prisma.store.deleteMany({ where: { name: `Loja E2E ${stamp}` } });
+  // limpa: dados de teste e rebaixa o usuário
   await prisma.clubPlan.deleteMany({ where: { name: `Clube E2E ${stamp}` } });
-  await prisma.promotion.deleteMany({ where: { title: `Promo E2E ${stamp}` } });
   await prisma.newsPost.deleteMany({ where: { title: `Novidade E2E ${stamp}` } });
   await prisma.guide.deleteMany({ where: { slug: `guia-e2e-${stamp}` } });
   await prisma.program.update({ where: { code: "SMILES" }, data: { marketValueCpmCents: 1750 } });

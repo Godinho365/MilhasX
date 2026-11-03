@@ -24,7 +24,6 @@ import {
 } from "./form-parts";
 
 export type { AccountOpt };
-export type StoreOpt = { id: string; name: string };
 export type FormKind = "credit" | "debit" | "transfer" | "batch";
 
 /** Dados para abrir um formulário já preenchido ("Duplicar" no extrato). */
@@ -47,7 +46,7 @@ async function confirmDiscard(dirty: boolean) {
 /** Botão flutuante de outra ação da página (ex.: "Novo titular", "Simular"), no lugar do "Novo lançamento". */
 export type PageFab = { label: string; event: string; icon: React.ReactNode };
 
-export function EntryForms({ accounts, defaultAccountId, cards = [], stores = [], fab }: { accounts: AccountOpt[]; defaultAccountId?: string; cards?: CardOpt[]; stores?: StoreOpt[]; fab?: PageFab | null }) {
+export function EntryForms({ accounts, defaultAccountId, cards = [], fab }: { accounts: AccountOpt[]; defaultAccountId?: string; cards?: CardOpt[]; fab?: PageFab | null }) {
   // Conta já escolhida: a da página da conta ou, se o titular só tem uma, essa
   const preset = defaultAccountId ?? (accounts.length === 1 ? accounts[0]!.id : undefined);
   const [menu, setMenu] = useState(false);
@@ -124,7 +123,7 @@ export function EntryForms({ accounts, defaultAccountId, cards = [], stores = []
         </button>
         )}
       </div>
-      {form === "credit" && <CreditForm accounts={accounts} cards={cards} stores={stores} onClose={close} prefill={prefill} preset={preset} />}
+      {form === "credit" && <CreditForm accounts={accounts} cards={cards} onClose={close} prefill={prefill} preset={preset} />}
       {form === "debit" && <DebitForm accounts={accounts} cards={cards} onClose={close} prefill={prefill} preset={preset} />}
       {form === "transfer" && <TransferForm key={editGroupId ?? "nova"} accounts={accounts} onClose={close} preset={preset} editGroupId={editGroupId} />}
       {form === "batch" && <BatchForm accounts={accounts} onClose={close} />}
@@ -137,14 +136,14 @@ export function EntryForms({ accounts, defaultAccountId, cards = [], stores = []
 type Recent = { accountId: string; type: EntryType; points: number; costCents: number; description: string; account: string };
 const FREQS = [["MONTHLY", "Mensal"], ["WEEKLY", "Semanal"], ["DAILY", "Diário"], ["YEARLY", "Anual"]] as const;
 
-function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { accounts: AccountOpt[]; cards: CardOpt[]; stores: StoreOpt[]; onClose: () => void; prefill?: Prefill; preset?: string }) {
+function CreditForm({ accounts, cards, onClose, prefill, preset }: { accounts: AccountOpt[]; cards: CardOpt[]; onClose: () => void; prefill?: Prefill; preset?: string }) {
   const router = useRouter();
   const [key] = useState(newKey);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState("");
   const [dirty, setDirty] = useState(false);
   const [recent, setRecent] = useState<Recent[]>([]);
-  const [f, setF] = useState({ accountId: prefill?.accountId ?? preset ?? "", type: (prefill?.type ?? "") as EntryType | "", storeId: "", points: prefill ? fmtPts(prefill.points) : "", date: today(), description: prefill?.description ?? "" });
+  const [f, setF] = useState({ accountId: prefill?.accountId ?? preset ?? "", type: (prefill?.type ?? "") as EntryType | "", points: prefill ? fmtPts(prefill.points) : "", date: today(), description: prefill?.description ?? "" });
   const [costsOpen, setCostsOpen] = useState(!!prefill?.costs.length);
   const [costs, setCosts] = useState<CostRow[]>(() => toCostRows(prefill));
   const [repeat, setRepeat] = useState(false);
@@ -158,7 +157,7 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
   const types = f.type ? costTypesFor(f.type) : [];
   const update = (patch: Partial<typeof f>) => { setF({ ...f, ...patch }); setDirty(true); };
   function pickType(t: EntryType) {
-    update({ type: t, storeId: t === "PARTNER_PURCHASE" ? f.storeId : "" });
+    update({ type: t });
     const allowed = costTypesFor(t);
     // Compra de pontos já vem com o tipo "Pontos" sugerido, como na referência
     setCosts((rows) => rows.map((r, i) => ({ ...r, type: r.type && allowed.includes(r.type as CostType) ? r.type : i === 0 && t === "PURCHASE" ? "PONTOS" : "" })));
@@ -189,7 +188,7 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
     setErro("");
     const r = await api("/api/entries", "POST", {
       accountId: f.accountId, type: f.type, points, occurredAt: f.date, description: f.description || undefined,
-      storeId: f.storeId || null, costs: scaleCosts(c.items, totalCost), idempotencyKey: key,
+      costs: scaleCosts(c.items, totalCost), idempotencyKey: key,
       details: payment ? { payment } : undefined,
       recurrence: repeat
         ? { frequency: rec.frequency, interval: Number(rec.interval) || 1, dayOfMonth: rec.dayOfMonth ? Number(rec.dayOfMonth) : null, endDate: rec.endDate || null, skipWeekends: rec.skipWeekends }
@@ -243,14 +242,6 @@ function CreditForm({ accounts, cards, stores, onClose, prefill, preset }: { acc
               {MANUAL_CREDIT_TYPES.map((t) => <option key={t} value={t}>{ENTRY_LABELS[t]}</option>)}
             </select>
           </Field>
-          {f.type === "PARTNER_PURCHASE" && (
-            <Field label="Loja parceira" className="sm:col-span-2">
-              <select className="input" value={f.storeId} onChange={(e) => update({ storeId: e.target.value })}>
-                <option value="">Selecionar loja</option>
-                {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </Field>
-          )}
           <Field label="Pontos" required><PointsInput value={f.points} onChange={(v) => update({ points: v })} /></Field>
           <Field label="Data" required><input className="input" type="date" value={f.date} onChange={(e) => update({ date: e.target.value })} required /></Field>
           <Field label="Descrição" className="sm:col-span-2"><input className="input" placeholder="Informar descrição" maxLength={200} value={f.description} onChange={(e) => update({ description: e.target.value })} /></Field>

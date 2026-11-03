@@ -3,8 +3,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  ["/admin", "Indicadores"], ["/admin/users", "Usuários"], ["/admin/programs", "Programas"], ["/admin/offers", "Lojas e ofertas"],
-  ["/admin/promotions", "Promoções"], ["/admin/calculators", "Calculadoras"], ["/admin/guides", "Guias"], ["/admin/news", "Novidades"], ["/admin/audit", "Auditoria"], ["/admin/settings", "Parâmetros"],
+  ["/admin", "Indicadores"], ["/admin/users", "Usuários"], ["/admin/programs", "Programas"],
+  ["/admin/calculators", "Calculadoras"], ["/admin/guides", "Guias"], ["/admin/news", "Novidades"], ["/admin/audit", "Auditoria"], ["/admin/settings", "Parâmetros"],
 ];
 
 export function AdminNav() {

@@ -5,10 +5,6 @@ import * as holders from "@/app/api/holders/route";
 import * as accounts from "@/app/api/accounts/route";
 import * as recurrences from "@/app/api/recurrences/route";
 import * as recurrence from "@/app/api/recurrences/[id]/route";
-import * as purchases from "@/app/api/purchases/route";
-import * as receive from "@/app/api/purchases/[id]/receive/route";
-import * as cancel from "@/app/api/purchases/[id]/cancel/route";
-import * as purchase from "@/app/api/purchases/[id]/route";
 import * as credential from "@/app/api/accounts/[id]/credential/route";
 import * as reveal from "@/app/api/accounts/[id]/credential/reveal/route";
 import * as summary from "@/app/api/summary/route";
@@ -59,30 +55,6 @@ describe("recorrências", () => {
   });
 });
 
-describe("compras bonificadas", () => {
-  it("receber lança o crédito com o custo extra; não recebe duas vezes", async () => {
-    const p = await a.call(purchases.POST, "POST", "/p", { accountId: acc, storeName: "Loja", purchasedAt: "2026-10-01", amountCents: 100000, extraCostCents: 3000, pointsPerReal: 1000 });
-    expect(p.status).toBe(201);
-    expect(p.data.item.expectedPoints).toBe(10000);
-    expect((await b.call(receive.POST, "POST", "/x", { receivedAt: "2026-10-20" }, { id: p.data.item.id })).status).toBe(404);
-    const [r1, r2] = await Promise.all([
-      a.call(receive.POST, "POST", "/x", { receivedAt: "2026-10-20" }, { id: p.data.item.id }),
-      a.call(receive.POST, "POST", "/x", { receivedAt: "2026-10-20" }, { id: p.data.item.id }),
-    ]);
-    expect([r1.status, r2.status].sort()).toEqual([200, 409]);
-    expect((await a.call(summary.GET, "GET", "/s")).data.totals).toMatchObject({ balance: 10000, costCents: 3000 });
-    // excluir a compra recebida remove o lançamento
-    expect((await a.call(purchase.DELETE, "DELETE", "/x", undefined, { id: p.data.item.id })).status).toBe(200);
-    expect((await a.call(summary.GET, "GET", "/s")).data.totals.balance).toBe(0);
-  });
-
-  it("cancelar só a pendente", async () => {
-    const p = (await a.call(purchases.POST, "POST", "/p", { accountId: acc, storeName: "Loja", purchasedAt: "2026-10-01", amountCents: 1000, pointsPerReal: 100 })).data.item;
-    expect((await a.call(cancel.POST, "POST", "/x", undefined, { id: p.id })).status).toBe(200);
-    expect((await a.call(cancel.POST, "POST", "/x", undefined, { id: p.id })).status).toBe(404);
-  });
-});
-
 describe("credenciais", () => {
   it("criptografa com AES-GCM e detecta adulteração", () => {
     const enc = encrypt("minha-senha");
@@ -112,69 +84,5 @@ describe("credenciais", () => {
     await a.call(credential.PUT, "PUT", "/c", { login: "l", secret: "s" }, { id: acc });
     for (let i = 0; i < 5; i++) await a.call(reveal.POST, "POST", "/r", { password: "errada" }, { id: acc });
     expect((await a.call(reveal.POST, "POST", "/r", { password: "senha-forte-1" }, { id: acc })).status).toBe(429);
-  });
-});
-
-describe("compras em 3 estágios", () => {
-  const create = (body: Record<string, unknown> = {}) => a.call(purchases.POST, "POST", "/p", { accountId: acc, purchasedAt: "2026-10-01", amountCents: 100000, pointsPerReal: 300, ...body });
-  const stage = async (who: Client, id: string, s: string) => {
-    const { POST } = await import("@/app/api/purchases/[id]/stage/route");
-    return POST(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: who.cookie, "content-type": "application/json" }, body: JSON.stringify({ stage: s }) }), { params: Promise.resolve({ id }) });
-  };
-
-  it("aguardando entrega → aguardando pontos → pontos recebidos, com custos, tags e descrição", async () => {
-    const p = (await create({ description: "Notebook", costs: [{ type: "FRETE", amountCents: 2000 }, { type: "DIFERENCA_PRECO", amountCents: 5000 }], tags: ["black friday", "black friday", "trabalho"], expectedDeliveryAt: "2026-10-10" })).data.item;
-    expect(p).toMatchObject({ storeName: "Notebook", extraCostCents: 7000, expectedPoints: 3000, status: "PENDING", tags: ["black friday", "trabalho"] });
-    expect((await stage(b, p.id, "DELIVERED")).status).toBe(404);
-    expect((await stage(a, p.id, "DELIVERED")).status).toBe(200);
-    expect((await prisma.bonusPurchase.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("DELIVERED");
-    expect((await stage(a, p.id, "PENDING")).status).toBe(200);
-    await stage(a, p.id, "DELIVERED");
-    expect((await a.call(receive.POST, "POST", "/x", { receivedAt: "2026-10-20" }, { id: p.id })).status).toBe(200);
-    const done = await prisma.bonusPurchase.findUniqueOrThrow({ where: { id: p.id }, include: { entry: true } });
-    expect(done).toMatchObject({ status: "RECEIVED" });
-    expect(done.entry).toMatchObject({ points: 3000, inputCostCents: 7000, description: "Notebook" });
-    // recebida não volta de estágio
-    expect((await stage(a, p.id, "PENDING")).status).toBe(404);
-    // aguardando pontos ainda conta como "a receber" no painel
-    const p2 = (await create()).data.item;
-    await stage(a, p2.id, "DELIVERED");
-    const s = await a.call(summary.GET, "GET", "/s");
-    expect(s.status).toBe(200);
-  });
-
-  it("evidências: imagem, PDF e vídeo aceitos pelo conteúdo; limite de 10 MB no total", async () => {
-    const p = (await create()).data.item;
-    const { POST } = await import("@/app/api/purchases/[id]/files/route");
-    const send = (who: Client, body: Buffer, name = "x") => POST(new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: who.cookie, "x-file-name": name }, body: new Uint8Array(body) }), { params: Promise.resolve({ id: p.id }) });
-    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.alloc(16)]);
-    const mov = Buffer.concat([Buffer.from([0, 0, 0, 20]), Buffer.from("ftypqt  "), Buffer.alloc(16)]);
-    expect((await send(a, mp4, "video.mp4")).status).toBe(201);
-    expect((await send(a, mov, "video.mov")).status).toBe(201);
-    expect((await send(a, Buffer.from("%PDF-1.4\n"), "nota.pdf")).status).toBe(201);
-    expect((await send(a, Buffer.from("MZ executável"), "virus.exe")).status).toBe(415);
-    expect((await send(b, Buffer.from("%PDF-1.4\n"))).status).toBe(404);
-    expect((await send(a, Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(10 * 1024 * 1024)]))).status).toBe(413);
-    expect(await prisma.purchaseAttachment.count({ where: { purchaseId: p.id } })).toBe(3);
-  });
-});
-
-describe("lojas e sugestões de alerta", () => {
-  it("filtra por programa, ordena por pontos e sugere alertas das favoritas e das mais usadas", async () => {
-    const { listStores, alertSuggestions } = await import("@/server/services/market");
-    const livelo = await prisma.program.findFirstOrThrow({ where: { code: "LIVELO" } });
-    const latam = await prisma.program.findFirstOrThrow({ where: { code: "LATAM" } });
-    const s1 = await prisma.store.create({ data: { name: "Loja A", offers: { create: [{ programId: livelo.id, pointsPerReal: 200 }] } } });
-    const s2 = await prisma.store.create({ data: { name: "Loja B", offers: { create: [{ programId: latam.id, pointsPerReal: 800 }, { cashbackBps: 500, portal: "Portal" }] } } });
-    const byPoints = await listStores(userA, { sort: "points" });
-    expect(byPoints.items.map((x) => x.name)).toEqual(["Loja B", "Loja A"]);
-    expect((await listStores(userA, { programId: livelo.id })).items.map((x) => x.name)).toEqual(["Loja A"]);
-    expect((await listStores(userA, { sort: "cashback" })).items[0]!.name).toBe("Loja B");
-    await prisma.favoriteStore.create({ data: { userId: userA, storeId: s2.id } });
-    await a.call(purchases.POST, "POST", "/p", { accountId: acc, storeId: s1.id, purchasedAt: "2026-10-01", amountCents: 1000, pointsPerReal: 200 });
-    const sug = await alertSuggestions(userA);
-    expect(sug.map((x) => [x.name, x.threshold]).sort()).toEqual([["Loja A", 3], ["Loja B", 12]]);
-    await prisma.alert.create({ data: { userId: userA, type: "STORE_POINTS", storeId: s2.id, threshold: 1200 } });
-    expect((await alertSuggestions(userA)).map((x) => x.name)).toEqual(["Loja A"]);
   });
 });

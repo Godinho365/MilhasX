@@ -1,14 +1,15 @@
 import { Bell } from "lucide-react";
 import { fmtDateTime } from "@/lib/format";
 import { requirePageUser } from "@/server/session";
-import { listNotifications } from "@/server/services/market";
+import { listNotifications, listAlerts } from "@/server/services/market";
+import { listAccounts } from "@/server/services/wallet";
 import { PageHeader } from "@/components/stat";
 import { Empty } from "@/components/ui";
-import { MarkRead, ClearAll } from "./client";
+import { MarkRead, ClearAll, BalanceAlerts } from "./client";
 
 export default async function NotificationsPage() {
   const user = await requirePageUser();
-  const items = await listNotifications(user.id);
+  const [items, alerts, accounts] = await Promise.all([listNotifications(user.id), listAlerts(user.id), listAccounts(user.id)]);
   return (
     <>
       <PageHeader title="Notificações" subtitle="Alertas de saldo e de ofertas">
@@ -29,6 +30,12 @@ export default async function NotificationsPage() {
           ))}
         </ul>
       )}
+      <div className="mt-6">
+        <BalanceAlerts
+          alerts={alerts.map((a) => ({ id: a.id, title: `${a.account?.program.name ?? "Conta excluída"} · ${a.account?.holder.name ?? ""}`, text: `Saldo abaixo de ${a.threshold.toLocaleString("pt-BR")} pts`, triggered: !!a.lastTriggeredAt }))}
+          accounts={accounts.map((a) => ({ id: a.id, name: `${a.program.name} · ${a.holder.name}` }))}
+        />
+      </div>
     </>
   );
 }

@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { ProgramLogo } from "@/components/program-logo";
 import { notFound } from "next/navigation";
-import { Wallet, Target, Package, DollarSign, FileText, ShoppingBag, Gift } from "lucide-react";
+import { Wallet, Target, Package, DollarSign, FileText, Gift } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { accountDetail, credentialsEnabled } from "@/server/services/accounts";
 import { DomainError, prisma } from "@/server/db";
 import { fmtBRL, fmtPts, fmtSignedPts } from "@/lib/format";
 import { ENTRY_LABELS } from "@/domain/ledger";
 import { ProgramDot } from "@/components/stat";
-import { Recurrences, PendingPurchases, Credentials } from "./client";
+import { Recurrences, Credentials } from "./client";
 import { BeneficiaryLimit } from "./beneficiaries";
 import { bonusUsage } from "@/server/services/transfer-bonus";
 import { brWindows } from "@/domain/brasilia";
@@ -77,7 +77,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       </div>
 
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+      <div className="mt-4 grid gap-4 [&>*]:min-w-0">
         <section className="card card-pad">
           <SectionHead
             icon={<FileText className="h-5 w-5" />}
@@ -111,16 +111,6 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           )}
         </section>
 
-        <section className="card card-pad">
-          <SectionHead
-            icon={<ShoppingBag className="h-5 w-5" />}
-            tone="bg-orange-500/15 text-orange-300"
-            title="Compras Pendentes"
-            sub="Compras aguardando entrega ou pontos"
-            action={<Link href="/app/purchases?tab=compras" className="text-sm font-medium text-accent-light hover:underline">Gerenciar</Link>}
-          />
-          <PendingPurchases items={d.purchases.map((p) => ({ id: p.id, store: p.storeName, purchasedAt: p.purchasedAt.toISOString(), amountCents: p.amountCents, expectedPoints: p.expectedPoints, expectedAt: p.expectedAt?.toISOString() ?? null }))} />
-        </section>
       </div>
 
       <Recurrences

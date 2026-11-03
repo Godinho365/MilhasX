@@ -1,10 +1,10 @@
 import { prisma, DomainError } from "../db";
 import { PLANS, PLAN_LIMITS, effectivePlan, type PlanCode } from "@/domain/plans";
 
-type Countable = "holders" | "accounts" | "storeAlerts";
+type Countable = "holders" | "accounts";
 export type Feature = "suppliers" | "holderPage" | "pageBranding";
 
-const LABELS: Record<Countable, [string, string]> = { holders: ["titular", "titulares"], accounts: ["conta", "contas"], storeAlerts: ["alerta de loja", "alertas de loja"] };
+const LABELS: Record<Countable, [string, string]> = { holders: ["titular", "titulares"], accounts: ["conta", "contas"] };
 const FEATURE_LABELS: Record<Feature, string> = { suppliers: "Fornecedores e emissão com fornecedor", holderPage: "A página do titular", pageBranding: "Cor de fundo, banner e prévia do link" };
 const HINT = "Altere o plano em Configurações › Assinatura.";
 
@@ -14,9 +14,7 @@ async function planOf(userId: string): Promise<PlanCode | "ADMIN"> {
 }
 
 const count = (userId: string, what: Countable) =>
-  what === "holders" ? prisma.holder.count({ where: { userId } })
-  : what === "accounts" ? prisma.account.count({ where: { userId } })
-  : prisma.alert.count({ where: { userId, type: "STORE_POINTS" } });
+  what === "holders" ? prisma.holder.count({ where: { userId } }) : prisma.account.count({ where: { userId } });
 
 /** Barra a criação de mais um item quando o plano em vigor já chegou ao limite. */
 export async function assertWithinLimit(userId: string, what: Countable) {

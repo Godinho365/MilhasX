@@ -96,7 +96,6 @@ export const entrySchema = z.object({
   points,
   costCents: cents.optional(),
   costs: z.array(costItemSchema).max(20).optional(),
-  storeId: id.optional().nullable(),
   details: detailsSchema.optional().nullable(),
   recurrence: recurrenceOptionsSchema.optional().nullable(),
   occurredAt: dateStr,
@@ -189,9 +188,7 @@ export const customerSchema = z
   })
   .refine((c) => !c.docType || !!c.docNumber, { message: "Informe o número do identificador", path: ["docNumber"] });
 export const alertSchema = z.object({
-  type: z.enum(["STORE_POINTS", "MIN_BALANCE", "PROMOTION"]),
-  storeId: id.optional(),
-  programId: id.optional(),
+  type: z.literal("MIN_BALANCE"),
   accountId: id.optional(),
   threshold: z.number().int().min(0, "Limite inválido"),
 });
@@ -204,7 +201,7 @@ export const preferenceSchema = z.object({
   usageAnalytics: z.boolean().optional(),
   hideVideoTutorials: z.boolean().optional(),
   valuesMode: z.enum(["VISIBLE", "PARTIAL", "HIDDEN"]).optional(),
-  notifications: z.record(z.enum(["points", "offers", "entries", "marketing", "system", "billing"]), channel).optional(),
+  notifications: z.record(z.enum(["points", "entries", "marketing", "system", "billing"]), channel).optional(),
   // dados do PIX para a mensagem de cobrança do CRM Milhas (null apaga)
   pix: z
     .object({
@@ -244,13 +241,6 @@ export const programSchema = z.object({
   active: z.boolean(),
   marketValueCpmCents: cents,
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida").default("#3b82f6"),
-});
-export const offerSchema = z.object({
-  storeName: z.string().trim().min(1).max(100),
-  programId: id.optional().nullable(),
-  pointsPerReal: z.number().int().min(0).max(100_00),
-  cashbackBps: z.number().int().min(0).max(100_00),
-  portal: z.string().trim().max(60).optional().nullable(),
 });
 export const userStatusSchema = z.object({ status: z.enum(["ACTIVE", "DISABLED"]) });
 export const settingSchema = z.object({
@@ -333,18 +323,6 @@ export const cardSchema = z.object({
 export const invoiceSchema = z.object({ closingDate: dateStr, dueDate: dateStr, amountCents: cents.refine((v) => v > 0, "Informe o valor da fatura"), pointsIncluded: z.boolean().default(false) });
 export const cardBalanceSchema = z.object({ points: z.number().int().min(0).max(100_000_000), date: dateStr });
 export const invoiceIncludedSchema = z.object({ pointsIncluded: z.boolean() });
-export const promotionSchema = z.object({
-  kind: z.enum(["TRANSFER_BONUS", "PURCHASE_BONUS", "CLUB", "SHOPPING", "OTHER"]),
-  title: z.string().trim().min(3).max(140),
-  description: optText(1000),
-  fromProgramId: id.optional().nullable(),
-  toProgramId: id.optional().nullable(),
-  bonusPercent: z.number().int().min(0).max(300),
-  url: httpsUrl,
-  startsAt: dateStr,
-  endsAt: dateStr,
-  active: z.boolean(),
-});
 export const guideSchema = z.object({
   slug: z.string().trim().min(2).max(80).regex(/^[a-z0-9-]+$/, "Use letras minúsculas, números e hífen"),
   kind: z.enum(["VIDEO", "ARTICLE"]),
@@ -376,23 +354,6 @@ export const recurrenceSchema = z.object({
 });
 export const recurrencePatchSchema = z.object({ notify: z.boolean().optional(), active: z.boolean().optional() });
 export const tagsSchema = z.array(z.string().trim().min(1).max(30)).max(10).default([]);
-export const purchaseSchema = z.object({
-  accountId: id,
-  storeId: id.optional().nullable(),
-  storeName: z.string().trim().max(100).default(""),
-  description: z.string().trim().max(200).optional().nullable(),
-  purchasedAt: dateStr,
-  amountCents: cents.refine((v) => v > 0, "Informe o valor dos produtos"),
-  extraCostCents: cents.default(0),
-  costs: z.array(z.object({ type: z.enum(["DIFERENCA_PRECO", "FRETE", "TAXAS", "OUTROS"]), amountCents: cents })).max(20).optional(),
-  pointsPerReal: z.number().int().min(1, "Informe os pontos por real").max(100_00),
-  expectedAt: dateStr.optional().nullable(),
-  expectedDeliveryAt: dateStr.optional().nullable(),
-  tags: tagsSchema,
-  notes: z.string().trim().max(1000).optional().nullable(),
-});
-export const purchaseStageSchema = z.object({ stage: z.enum(["PENDING", "DELIVERED"]), date: dateStr.optional() });
-export const receivePurchaseSchema = z.object({ points: z.number().int().positive().max(100_000_000).optional(), receivedAt: dateStr });
 export const credentialSchema = z.object({
   login: z.string().min(1, "Informe o login").max(200),
   secret: z.string().min(1, "Informe a senha").max(200),

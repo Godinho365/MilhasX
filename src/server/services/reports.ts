@@ -1,4 +1,4 @@
-// Relatórios: período, filtros e os dados de cada aba (Visão Geral, Compras, Cartões, Economia, Evolução, Vendas, Bens e Direitos).
+// Relatórios: período, filtros e os dados de cada aba (Visão Geral, Cartões, Economia, Evolução, Vendas, Bens e Direitos).
 import type { Prisma, EntryType } from "@prisma/client";
 import { prisma } from "../db";
 import { ENTRY_LABELS } from "@/domain/ledger";
@@ -7,7 +7,7 @@ import { beneficiaryUsage } from "./accounts";
 import { programPotential } from "@/domain/potential";
 import { brWindows, revenueWindows } from "@/domain/brasilia";
 
-export const REPORT_TABS = ["overview", "purchases", "credit-cards", "savings", "evolution", "sales", "assets"] as const;
+export const REPORT_TABS = ["overview", "credit-cards", "savings", "evolution", "sales", "assets"] as const;
 export type ReportTab = (typeof REPORT_TABS)[number];
 
 export type PeriodKey = "dia" | "semana" | "mes" | "3m" | "6m" | "12m" | "ytd" | "all" | "custom";
@@ -92,10 +92,7 @@ export async function overviewReport(f: ReportFilter) {
   };
 }
 
-/* ---------------- Compras ---------------- */
-
-const PURCHASE_STATUS: Record<string, string> = { PENDING: "Aguardando entrega", DELIVERED: "Aguardando pontos", RECEIVED: "Pontos recebidos" };
-const PURCHASE_COST_LABELS: Record<string, string> = { DIFERENCA_PRECO: "Diferença de preço", FRETE: "Frete", TAXAS: "Taxas", OUTROS: "Outros", MARKUP: "Markup", IOF: "IOF" };
+/* ---------------- Somas por grupo ---------------- */
 
 const bump = <K>(m: Map<K, { name: string; value: number; color?: string }>, key: K, name: string, value: number, color?: string) => {
   const cur = m.get(key) ?? { name, value: 0, color };
@@ -103,65 +100,6 @@ const bump = <K>(m: Map<K, { name: string; value: number; color?: string }>, key
   m.set(key, cur);
 };
 const desc = <T extends { value: number }>(m: Map<unknown, T>) => [...m.values()].filter((x) => x.value).sort((a, b) => b.value - a.value);
-
-/**
- * Compras em parceiros: as acompanhadas em Compras (com status) e os lançamentos diretos de
- * "Compra em parceiro" que não vieram de uma compra acompanhada.
- */
-export async function purchasesReport(f: ReportFilter) {
-  const [tracked, direct] = await Promise.all([
-    prisma.bonusPurchase.findMany({
-      where: { userId: f.userId, purchasedAt: dateRange(f.period), account: accountWhere(f), status: { not: "CANCELED" } },
-      select: { storeName: true, amountCents: true, expectedPoints: true, status: true, costs: true, extraCostCents: true, account: { select: { program: { select: { id: true, name: true, color: true } } } } },
-    }),
-    prisma.entry.findMany({
-      where: entryWhere(f, { type: "PARTNER_PURCHASE", bonusPurchase: { is: null } }),
-      select: { points: true, inputCostCents: true, storeId: true, description: true, costs: { select: { type: true, amountCents: true } }, account: { select: { program: { select: { id: true, name: true, color: true } } } } },
-    }),
-  ]);
-  const storeNames = new Map((await prisma.store.findMany({ where: { id: { in: direct.map((e) => e.storeId).filter((x): x is string => !!x) } }, select: { id: true, name: true } })).map((x) => [x.id, x.name]));
-  const byStore = new Map<string, { name: string; value: number }>();
-  const byProgram = new Map<string, { name: string; value: number; color?: string }>();
-  const byStatus = new Map<string, { name: string; value: number }>();
-  const byCost = new Map<string, { name: string; value: number }>();
-  const multiplier = new Map<string, { name: string; points: number; spent: number }>();
-  let points = 0, extra = 0;
-  for (const b of tracked) {
-    points += b.expectedPoints;
-    bump(byStore, b.storeName, b.storeName, b.expectedPoints);
-    bump(byProgram, b.account.program.id, b.account.program.name, b.expectedPoints, b.account.program.color);
-    bump(byStatus, b.status, PURCHASE_STATUS[b.status] ?? b.status, b.expectedPoints);
-    const costs = (Array.isArray(b.costs) ? b.costs : []) as { type?: string; amountCents?: number }[];
-    if (costs.length) for (const c of costs) bump(byCost, c.type ?? "OUTROS", PURCHASE_COST_LABELS[c.type ?? ""] ?? "Outros", c.amountCents ?? 0);
-    else if (b.extraCostCents) bump(byCost, "OUTROS", "Outros", b.extraCostCents);
-    extra += b.extraCostCents;
-    const m = multiplier.get(b.storeName) ?? { name: b.storeName, points: 0, spent: 0 };
-    m.points += b.expectedPoints;
-    m.spent += b.amountCents;
-    multiplier.set(b.storeName, m);
-  }
-  let directPoints = 0;
-  for (const e of direct) {
-    const store = (e.storeId && storeNames.get(e.storeId)) || "Sem loja";
-    points += e.points;
-    directPoints += e.points;
-    bump(byStore, store, store, e.points);
-    bump(byProgram, e.account.program.id, e.account.program.name, e.points, e.account.program.color);
-    for (const c of e.costs) bump(byCost, c.type, PURCHASE_COST_LABELS[c.type] ?? c.type, c.amountCents);
-    extra += e.costs.length ? e.costs.reduce((t, c) => t + c.amountCents, 0) : e.inputCostCents;
-  }
-  const trackedPoints = points - directPoints;
-  return {
-    totals: { points, extraCents: extra, cpmCents: points > 0 && extra > 0 ? Math.round((extra * 1000) / points) : null, count: tracked.length + direct.length, partners: byStore.size },
-    byStore: desc(byStore),
-    byProgram: desc(byProgram),
-    byStatus: ["PENDING", "DELIVERED", "RECEIVED"].map((k) => byStatus.get(k)).filter((x): x is { name: string; value: number } => !!x && x.value > 0),
-    origin: [{ name: "Acompanhamento de compras", value: trackedPoints }, { name: "Lançamento direto", value: directPoints }].filter((x) => x.value > 0),
-    byCost: desc(byCost),
-    // Multiplicador médio ponderado: pontos ÷ reais gastos (só compras acompanhadas têm o valor)
-    multiplier: [...multiplier.values()].filter((m) => m.spent > 0).map((m) => ({ name: m.name, value: Math.round((m.points / (m.spent / 100)) * 100) / 100 })).sort((a, b) => b.value - a.value),
-  };
-}
 
 /* ---------------- Cartões ---------------- */
 
@@ -503,10 +441,6 @@ export async function exportReportCsv(tab: ReportTab, f: ReportFilter): Promise<
     case "overview": {
       const r = await overviewReport(f);
       return { name: "visao-geral", rows: [["grupo", "nome", "pontos"], ...r.byCategory.map((x) => ["categoria", x.name, String(x.value)]), ...r.byProgram.map((x) => ["programa", x.name, String(x.value)])] };
-    }
-    case "purchases": {
-      const r = await purchasesReport(f);
-      return { name: "compras", rows: [["grupo", "nome", "valor"], ...r.byStore.map((x) => ["parceiro_pontos", x.name, String(x.value)]), ...r.byProgram.map((x) => ["programa_pontos", x.name, String(x.value)]), ...r.byStatus.map((x) => ["status_pontos", x.name, String(x.value)]), ...r.byCost.map((x) => ["custo_extra_reais", x.name, reais(x.value)]), ...r.multiplier.map((x) => ["pontos_por_real", x.name, String(x.value)])] };
     }
     case "credit-cards": {
       const r = await cardsReport(f);

@@ -23,15 +23,15 @@ beforeEach(async () => {
 
 describe("preferências", () => {
   it("salva canais de notificação mesclando e mantém mostrar valores em sincronia com o modo", async () => {
-    const r = await c.call(prefs.PATCH, "PATCH", "/api/preferences", { soundEffects: false, valuesMode: "HIDDEN", notifications: { offers: { push: true } } });
+    const r = await c.call(prefs.PATCH, "PATCH", "/api/preferences", { soundEffects: false, valuesMode: "HIDDEN", notifications: { entries: { push: true } } });
     expect(r.status).toBe(200);
     expect(r.data.item.soundEffects).toBe(false);
     expect(r.data.item.valuesMode).toBe("HIDDEN");
     expect(r.data.item.showValues).toBe(false);
-    expect(r.data.item.notifications.offers).toEqual({ email: true, push: true });
+    expect(r.data.item.notifications.entries).toEqual({ email: true, push: true });
     expect(r.data.item.notifications.marketing.email).toBe(false);
-    const r2 = await c.call(prefs.PATCH, "PATCH", "/api/preferences", { notifications: { offers: { email: false } } });
-    expect(r2.data.item.notifications.offers).toEqual({ email: false, push: true });
+    const r2 = await c.call(prefs.PATCH, "PATCH", "/api/preferences", { notifications: { entries: { email: false } } });
+    expect(r2.data.item.notifications.entries).toEqual({ email: false, push: true });
     const r3 = await c.call(prefs.PATCH, "PATCH", "/api/preferences", { showValues: true });
     expect(r3.data.item.valuesMode).toBe("VISIBLE");
     expect((await c.call(prefs.PATCH, "PATCH", "/api/preferences", { valuesMode: "X" })).status).toBe(400);

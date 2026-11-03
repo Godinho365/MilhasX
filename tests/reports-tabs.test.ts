@@ -5,13 +5,11 @@ import * as register from "@/app/api/auth/register/route";
 import * as holders from "@/app/api/holders/route";
 import * as accounts from "@/app/api/accounts/route";
 import * as entries from "@/app/api/entries/route";
-import * as purchases from "@/app/api/purchases/route";
-import * as receive from "@/app/api/purchases/[id]/receive/route";
 import * as cards from "@/app/api/cards/route";
 import * as invoices from "@/app/api/cards/[id]/invoices/route";
 import * as invoiceClose from "@/app/api/invoices/[id]/close/route";
 import * as entry from "@/app/api/entries/[id]/route";
-import { purchasesReport, cardsReport, savingsReport, evolutionReport, assetsReport, exportReportCsv, REPORT_TABS } from "@/server/services/reports";
+import { cardsReport, savingsReport, evolutionReport, assetsReport, exportReportCsv, REPORT_TABS } from "@/server/services/reports";
 
 let c: Client;
 let userId: string;
@@ -31,19 +29,6 @@ beforeEach(async () => {
 const add = (body: Record<string, unknown>) => c.call(entries.POST, "POST", "/api/entries", { occurredAt: "2026-10-01", ...body });
 
 describe("relatórios", () => {
-  it("Compras: acompanhadas e diretas, status, custo extra e multiplicador", async () => {
-    const p1 = await c.call(purchases.POST, "POST", "/p", { accountId: liv, storeName: "Loja A", purchasedAt: "2026-10-01", amountCents: 100000, extraCostCents: 3000, pointsPerReal: 1000 });
-    await c.call(purchases.POST, "POST", "/p", { accountId: liv, storeName: "Loja B", purchasedAt: "2026-10-02", amountCents: 50000, pointsPerReal: 400 });
-    await c.call(receive.POST, "POST", "/x", { receivedAt: "2026-10-20" }, { id: p1.data.item.id });
-    await add({ accountId: lat, type: "PARTNER_PURCHASE", points: 500 });
-    const r = await purchasesReport(all());
-    expect(r.totals).toMatchObject({ points: 10000 + 2000 + 500, extraCents: 3000, count: 3 });
-    expect(r.totals.cpmCents).toBe(Math.round((3000 * 1000) / 12500));
-    expect(r.byStatus).toEqual([{ name: "Aguardando entrega", value: 2000 }, { name: "Pontos recebidos", value: 10000 }]);
-    expect(r.origin).toEqual([{ name: "Acompanhamento de compras", value: 12000 }, { name: "Lançamento direto", value: 500 }]);
-    expect(r.multiplier).toEqual([{ name: "Loja A", value: 10 }, { name: "Loja B", value: 4 }]);
-  });
-
   it("Cartões: faturas por status, recebidos e pontos por real", async () => {
     const card = (await c.call(cards.POST, "POST", "/c", { accountId: liv, name: "Black", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10 })).data.item.id;
     const inv = (await c.call(invoices.POST, "POST", "/i", { closingDate: "2026-10-03", dueDate: "2026-10-10", amountCents: 450000 }, { id: card })).data.item;

@@ -11,7 +11,7 @@ export const PLANS: Record<PlanCode, { name: string; monthlyCents: number; tagli
     name: "Pessoal",
     monthlyCents: 0,
     tagline: "Para organizar os seus próprios pontos",
-    features: ["Até 5 contas em programas", "1 titular", "Extrato e relatórios", "Simuladores básicos", "Alertas de lojas (até 3)"],
+    features: ["Até 5 contas em programas", "1 titular", "Extrato e relatórios", "Simuladores básicos", "Alertas de saldo"],
   },
   PRO: {
     name: "PRO",
@@ -19,12 +19,10 @@ export const PLANS: Record<PlanCode, { name: string; monthlyCents: number; tagli
     tagline: "Para quem acumula com estratégia",
     features: [
       "Tudo do Pessoal",
-      "Contas e compras ilimitadas",
+      "Contas ilimitadas",
       "Até 2 titulares",
       "Simulador de vendas",
       "Comprovantes e limite de CPFs",
-      "Alertas de lojas ilimitados",
-      "Alertas de promoções em tempo real",
       "Evolução e anexos",
     ],
   },
@@ -64,8 +62,7 @@ export const VALUES_LABELS: Record<ValuesMode, string> = { VISIBLE: "Visível", 
 
 // Canais de notificação por categoria (o push fica guardado como preferência; não há envio de push local)
 export const NOTIFY_CATEGORIES = [
-  ["points", "Alertas de pontuação", "Quando uma loja atingir os pontos do seu alerta"],
-  ["offers", "Alertas de ofertas", "Promoções de transferência e compra de pontos"],
+  ["points", "Alertas de saldo", "Quando o saldo de uma conta ficar abaixo do limite"],
   ["entries", "Lançamentos", "Recorrências geradas e pontos a receber"],
   ["marketing", "Marketing", "Novidades e dicas do MilhasX"],
   ["system", "Sistema", "Avisos importantes sobre a sua conta"],
@@ -83,9 +80,9 @@ export function notifyPrefs(raw: unknown): NotifyPrefs {
 }
 
 // Limites de cada plano (tirados das listas de recursos acima). null = sem limite.
-export type PlanLimits = { holders: number | null; accounts: number | null; storeAlerts: number | null; suppliers: boolean; holderPage: boolean; pageBranding: boolean };
+export type PlanLimits = { holders: number | null; accounts: number | null; suppliers: boolean; holderPage: boolean; pageBranding: boolean };
 export const PLAN_LIMITS: Record<PlanCode, PlanLimits> = {
-  PESSOAL: { holders: 1, accounts: 5, storeAlerts: 3, suppliers: false, holderPage: false, pageBranding: false },
-  PRO: { holders: 2, accounts: null, storeAlerts: null, suppliers: false, holderPage: false, pageBranding: true },
-  GESTOR: { holders: null, accounts: null, storeAlerts: null, suppliers: true, holderPage: true, pageBranding: true },
+  PESSOAL: { holders: 1, accounts: 5, suppliers: false, holderPage: false, pageBranding: false },
+  PRO: { holders: 2, accounts: null, suppliers: false, holderPage: false, pageBranding: true },
+  GESTOR: { holders: null, accounts: null, suppliers: true, holderPage: true, pageBranding: true },
 };

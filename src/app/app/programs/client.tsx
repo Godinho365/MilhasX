@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2, UserPlus, WalletCards, FileText, MoreHorizontal, Eye, Pencil, Pin, PinOff, Archive, ArchiveRestore, Search, Filter, CreditCard } from "lucide-react";
 import { fmtDate } from "@/lib/format";
 import { Switch } from "@/components/form-parts";
-import { TagsInput } from "../purchases/purchases";
+import { TagsInput } from "@/components/tags-input";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtPts } from "@/lib/format";
 import { Avatar } from "@/components/stat";

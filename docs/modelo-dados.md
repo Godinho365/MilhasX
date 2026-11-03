@@ -13,8 +13,7 @@ Definido em `prisma/schema.prisma`. As migrações versionadas ficam em `prisma/
 | `Account` | Carteira | Titular × programa (único). `balance`, `costCents` e `investedCents` são **derivados** do extrato |
 | `Entry` | Lançamento | `points` com sinal; `inputCostCents` (informado) e `costCents` (calculado); `status` CONFIRMED/PENDING; `groupId` liga as pernas de transferências e vendas; `idempotencyKey` |
 | `Sale` / `Customer` | Vendas e clientes | Venda = débito `SALE` + registro com preço do milheiro, taxas e valor líquido |
-| `Store` / `StoreOffer` / `FavoriteStore` | Lojas parceiras | Ofertas em pts/R$ (×100) e cashback (pontos-base), mantidas pelo admin |
-| `Alert` / `Notification` | Alertas | `STORE_POINTS` (oferta ≥ limite) e `MIN_BALANCE` (saldo < limite); disparam uma vez até a condição voltar ao normal |
+| `Alert` / `Notification` | Alertas | `MIN_BALANCE` (saldo < limite); disparam uma vez até a condição voltar ao normal |
 | `UserPreference` | Preferências | Mostrar valores em R$, ocultar checklist |
 | `AuditLog` | Auditoria | Ações administrativas, cadastro, troca e redefinição de senha |
 | `AppSetting` | Parâmetros | `registrationOpen`, `supportEmail`, `announcement` (lista fechada) |

@@ -1,4 +1,4 @@
-// Conteúdo inicial próprio (guias, novidades e promoções de exemplo). Idempotente.
+// Conteúdo inicial próprio (guias e novidades). Idempotente.
 import type { PrismaClient } from "@prisma/client";
 
 const GUIDES = [
@@ -104,27 +104,6 @@ export async function seedContent(prisma: PrismaClient) {
   if ((await prisma.newsPost.count()) === 0) {
     for (const n of NEWS) {
       await prisma.newsPost.create({ data: { title: n.title, body: n.body, publishedAt: new Date(Date.now() - n.daysAgo * 86400_000) } });
-    }
-  }
-  if ((await prisma.promotion.count()) === 0) {
-    const byCode = async (code: string) => (await prisma.program.findUnique({ where: { code } }))?.id ?? null;
-    const day = 86400_000;
-    const now = Date.now();
-    const promos = [
-      { kind: "TRANSFER_BONUS", title: "Transferência Livelo → LATAM Pass com bônus (exemplo)", from: "LIVELO", to: "LATAM", bonus: 25, start: -2, end: 0 },
-      { kind: "TRANSFER_BONUS", title: "Transferência Esfera → Smiles com bônus (exemplo)", from: "ESFERA", to: "SMILES", bonus: 80, start: -1, end: 8 },
-      { kind: "CLUB", title: "Pontos extras ao assinar o clube (exemplo)", from: null, to: "AZUL", bonus: 0, start: -3, end: 12 },
-      { kind: "PURCHASE_BONUS", title: "Compra de pontos com desconto (exemplo)", from: null, to: "LIVELO", bonus: 0, start: -20, end: -5 },
-    ] as const;
-    for (const p of promos) {
-      await prisma.promotion.create({
-        data: {
-          kind: p.kind, title: p.title, bonusPercent: p.bonus,
-          description: "Promoção fictícia para demonstração. Cadastre as promoções reais em Administração → Promoções.",
-          fromProgramId: p.from ? await byCode(p.from) : null, toProgramId: p.to ? await byCode(p.to) : null,
-          startsAt: new Date(now + p.start * day), endsAt: new Date(now + p.end * day),
-        },
-      });
     }
   }
   await prisma.appSetting.upsert({ where: { key: "supportEmail" }, update: {}, create: { key: "supportEmail", value: process.env.SUPPORT_EMAIL || "suporte@milheiro.local" } });

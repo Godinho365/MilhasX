@@ -1,6 +1,6 @@
 import { MobileTabs, MobileTab } from "@/components/mobile-tabs";
 import Link from "next/link";
-import { HandCoins, TrendingUp, Scale, ScrollText, ShoppingBag } from "lucide-react";
+import { HandCoins, TrendingUp, Scale, ScrollText } from "lucide-react";
 import { requirePageUser, selectedHolderId } from "@/server/session";
 import { walletSummary, evolutionByHolder, activationProgress, pendingBreakdown, overviewData } from "@/server/services/wallet";
 import { salesDashboard } from "@/server/services/extras";
@@ -104,7 +104,6 @@ async function WalletStats({ userId, s, pending, money }: { userId: string; s: S
   const toReceive: Breakdown = {
     title: "Detalhamento",
     groups: [
-      { name: "Compras pendentes", rows: pending.purchases.map((p) => ({ label: `${p.storeName} · ${p.account.program.name} ${p.account.holder.name}`, value: pts(p.expectedPoints), color: p.account.program.color })) },
       { name: "Faturas de cartão", rows: pending.invoices.map((e) => ({ label: `${e.invoice!.card.name} · ${e.account.program.name} ${e.account.holder.name}`, value: pts(e.points), color: e.account.program.color })) },
       ...(pending.others.length ? [{ name: "Transferências e outros", rows: pending.others.map((e) => ({ label: e.description, value: pts(e.points), color: e.account.program.color })) }] : []),
     ],
@@ -253,7 +252,7 @@ async function OverviewView({ userId, holderId, money }: { userId: string; holde
           <CreditsDebits data={o.months} />
         </Panel></MobileTab>
       </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-4">
         <MobileTab k="recentes"><Panel icon={<ScrollText className="h-5 w-5" />} tone="bg-blue-500/15 text-blue-400" title="Lançamentos Recentes" subtitle="Últimas movimentações nas suas contas" link={{ href: "/app/entries", label: "Ver todos" }}>
           {o.recent.length === 0 ? <p className="rounded-xl bg-panel2 px-4 py-8 text-center text-sm text-muted">Nenhum lançamento ainda.</p> : (
             <ul className="space-y-2">
@@ -276,31 +275,6 @@ async function OverviewView({ userId, holderId, money }: { userId: string; holde
                   </li>
                 );
               })}
-            </ul>
-          )}
-        </Panel></MobileTab>
-        <MobileTab k="geral"><Panel icon={<ShoppingBag className="h-5 w-5" />} tone="bg-orange-500/15 text-orange-400" title="Compras Pendentes" subtitle="Compras aguardando entrega ou pontos" link={{ href: "/app/purchases?tab=compras", label: "Gerenciar" }}>
-          {pending.purchases.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 rounded-xl bg-panel2/60 px-4 py-10 text-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-panel text-muted"><ShoppingBag className="h-5 w-5" /></span>
-              <p className="max-w-xs text-sm text-muted">Cadastre compras pendentes para rastrear o recebimento dos pontos.</p>
-              <Link href="/app/purchases?tab=compras" className="btn-ghost h-9">Cadastrar compra</Link>
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {pending.purchases.slice(0, 5).map((p) => (
-                <li key={p.id} className="flex items-center gap-3 rounded-xl bg-panel2/60 px-4 py-3">
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p.account.program.color }} aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{p.storeName}</p>
-                    <p className="truncate text-xs text-muted">{p.account.program.name} {p.account.holder.name} · comprado em {dayMonth(p.purchasedAt)}{p.expectedAt && ` · previsto ${dayMonth(p.expectedAt)}`}</p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-sm font-semibold tabular-nums text-amber-300">+{fmtPts(p.expectedPoints)}</p>
-                    <p className="text-xs tabular-nums text-muted">{money(p.amountCents)}</p>
-                  </div>
-                </li>
-              ))}
             </ul>
           )}
         </Panel></MobileTab>
