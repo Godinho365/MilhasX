@@ -23,7 +23,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
   const period = sp.from || sp.to || sp.periodo === "tudo" ? sp : { ...sp, ...month };
   const parsed = saleQuerySchema.safeParse(Object.fromEntries(Object.entries(period).filter(([k, v]) => v && k !== "tab" && k !== "periodo")));
   const range = parsed.success && (parsed.data.from || parsed.data.to) ? { from: period.from ?? period.to!, to: period.to ?? period.from! } : null;
-  const [sales, customers, accounts, suppliers, cards, tags, partners] = await Promise.all([
+  const [sales, customers, accounts, suppliers, cards, tags, partners, members] = await Promise.all([
     listSales(user.id, { ...(parsed.success ? parsed.data : {}), holderId }),
     listCustomers(user.id),
     listAccounts(user.id, holderId),
@@ -31,6 +31,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
     prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     saleTags(user.id),
     prisma.partner.findMany({ where: { userId: user.id, active: true }, select: { id: true, name: true, mode: true, value: true }, orderBy: { name: "asc" } }),
+    prisma.teamMember.findMany({ where: { userId: user.id, active: true }, select: { id: true, name: true, issuer: true }, orderBy: { name: "asc" } }),
   ]);
   const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, groupId: sp.edit }, select: { id: true } }) : null;
   const editSale = toEdit ? await getSale(user.id, toEdit.id) : null;
@@ -67,6 +68,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
             range={range}
             tags={tags}
             partners={partners}
+            members={members}
             sales={sales}
             editSale={editSale}
             accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} ${a.holder.name}`, balance: a.balance, costCents: a.costCents }))}

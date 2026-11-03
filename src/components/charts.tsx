@@ -50,7 +50,8 @@ export function HolderEvolution({ holders, points, costs }: { holders: { id: str
   );
 }
 
-export function HBar({ data, unit = "pts" }: { data: { name: string; value: number; color?: string }[]; unit?: string }) {
+export function HBar({ data, unit = "pts", money = false }: { data: { name: string; value: number; color?: string }[]; unit?: string; money?: boolean }) {
+  const fmt = (v: number) => (money ? brl.format(v / 100) : `${nf.format(v)} ${unit}`);
   if (data.length === 0) return <p className="py-8 text-center text-sm text-muted">Sem dados no período.</p>;
   return (
     <div className="chart-strong w-full" style={{ height: Math.max(96, data.length * 44) }} role="img" aria-label="Gráfico de barras">
@@ -58,10 +59,10 @@ export function HBar({ data, unit = "pts" }: { data: { name: string; value: numb
         <BarChart data={data} layout="vertical" margin={{ left: 0, right: 56, top: 4, bottom: 4 }}>
           <XAxis type="number" hide />
           <YAxis type="category" dataKey="name" width={150} tick={{ fill: "#d4d4d8", fontSize: 12 }} tickLine={false} axisLine={false} />
-          <Tooltip cursor={{ fill: "#18181b" }} contentStyle={tooltipStyle} formatter={(v: number) => [`${nf.format(v)} ${unit}`, ""]} />
+          <Tooltip cursor={{ fill: "#18181b" }} contentStyle={tooltipStyle} formatter={(v: number) => [fmt(v), ""]} />
           <Bar dataKey="value" fill="#60a5fa" radius={[0, 6, 6, 0]} isAnimationActive={false} barSize={22} background={{ fill: "rgb(var(--panel2))", radius: 6 }}>
             {data.map((d, i) => <Cell key={d.name} fill={d.color ?? DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-            <LabelList dataKey="value" position="right" formatter={(v: number) => nf.format(v)} className="fill-zinc-300 text-xs font-semibold tabular-nums" />
+            <LabelList dataKey="value" position="right" formatter={(v: number) => (money ? brl.format(v / 100) : nf.format(v))} className="fill-zinc-300 text-xs font-semibold tabular-nums" />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -306,3 +307,26 @@ export function DailyParity({ data }: { data: { day: string; program: string; va
   );
 }
 
+/** Faturamento e lucro de cada dia do período (Métricas): áreas sobrepostas, eixo em reais. */
+export function DailyMoney({ data, empty, labels = { revenue: "Faturamento", profit: "Lucro" } }: { data: { day: string; revenue: number; profit: number }[]; empty: string; labels?: { revenue: string; profit: string } }) {
+  if (data.every((d) => !d.revenue && !d.profit)) return <p className="py-16 text-center text-sm text-muted">{empty}</p>;
+  return (
+    <div className="h-72 w-full" role="img" aria-label={`Gráfico diário de ${labels.revenue.toLowerCase()} e ${labels.profit.toLowerCase()}`}>
+      <ResponsiveContainer>
+        <AreaChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
+          <defs>
+            <linearGradient id="g-daily-rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#60a5fa" stopOpacity={0.35} /><stop offset="100%" stopColor="#60a5fa" stopOpacity={0} /></linearGradient>
+            <linearGradient id="g-daily-profit" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#4ade80" stopOpacity={0.35} /><stop offset="100%" stopColor="#4ade80" stopOpacity={0} /></linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgb(var(--line))" vertical={false} />
+          <XAxis dataKey="day" tickFormatter={ddmm} tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={16} />
+          <YAxis tickFormatter={(v: number) => brl.format(v / 100)} tick={{ fill: "#a1a1aa", fontSize: 11 }} width={84} tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => ddmm(String(d))} formatter={(v: number, k) => [brl.format(v / 100), k === "revenue" ? labels.revenue : labels.profit]} />
+          <Legend formatter={(k: string) => <span className="text-xs text-zinc-300">{k === "revenue" ? labels.revenue : labels.profit}</span>} iconType="circle" iconSize={8} />
+          <Area type="monotone" dataKey="revenue" stroke="#60a5fa" fill="url(#g-daily-rev)" strokeWidth={2} isAnimationActive={false} />
+          <Area type="monotone" dataKey="profit" stroke="#4ade80" fill="url(#g-daily-profit)" strokeWidth={2} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

@@ -418,6 +418,7 @@ model Sale {
   partnerId              String? // parceiro que trouxe a venda (comissão)
   partner                Partner?         @relation(fields: [partnerId], references: [id], onDelete: SetNull)
   partnerCommissionCents Int              @default(0) // comissão calculada na venda (sai do lucro)
+  issuerIds              String[]         @default([]) // quem emitiu (TeamMember); com mais de um, o resultado é rateado em partes iguais
   createdAt              DateTime         @default(now())
 
   items         SaleItem[]
@@ -516,6 +517,7 @@ model UserPreference {
   valuesMode         String    @default("VISIBLE")
   notifications      Json      @default("{}")
   pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
+  metricsHidden      String[]  @default([]) // blocos escondidos na página Métricas ("vendas.mix", ...)
 }
 
 model AuditLog {

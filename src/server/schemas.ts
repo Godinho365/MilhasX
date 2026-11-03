@@ -620,6 +620,8 @@ export const salesPartnerSchema = z.object({
   active: z.boolean().optional(),
 });
 export const salePartnerSchema = z.object({ partnerId: id.nullable() });
+export const saleIssuersSchema = z.object({ memberIds: z.array(id).max(10) });
+export const metricsHiddenSchema = z.object({ hidden: z.array(z.string().max(40)).max(40) });
 export const taskMoveSchema = z.union([
   z.object({ status: z.enum(["TODO", "DOING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() }),
   z.object({ columnId: z.string().trim().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() }),
