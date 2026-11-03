@@ -9,7 +9,7 @@ import * as access from "@/app/api/public/order-access/[slug]/[token]/route";
 import * as contract from "@/app/api/public/contract/[slug]/[token]/route";
 import * as orderFile from "@/app/api/public/order-file/[token]/[fid]/route";
 import { publicOrder, hasOrderAccess, listSignatures } from "@/server/services/client-pages";
-import { resolveProposal } from "@/domain/proposal";
+import { resolveProposal, airlineSite } from "@/domain/proposal";
 import { prisma } from "@/server/db";
 import { entryStage } from "@/server/services/pipelines";
 
@@ -130,5 +130,14 @@ describe("termo de compra e venda", () => {
     expect((await publicOrder("ana-milhas", token))?.order.signed).toMatchObject({ name: "Maria Cliente" });
     expect((await listSignatures(userId))[0]).toMatchObject({ name: "Maria Cliente", orderNumber: 7 });
     expect(await prisma.notification.count({ where: { userId, title: "Termo assinado" } })).toBe(1);
+  });
+});
+
+describe("acompanhar no site da companhia", () => {
+  it("GOL abre o Encontrar viagem e pede código, origem e sobrenome; as outras ficam no site", () => {
+    expect(airlineSite("GOL")).toMatchObject({ name: "GOL", manage: { url: "https://b2c.voegol.com.br/minhas-viagens/encontrar-viagem", asks: ["locator", "origin", "lastName"] } });
+    expect(airlineSite("", "Smiles")?.manage?.url).toContain("encontrar-viagem");
+    expect(airlineSite("LATAM")).toEqual({ name: "LATAM", url: "https://www.latamairlines.com/br/pt" });
+    expect(airlineSite("Desconhecida")).toBeNull();
   });
 });

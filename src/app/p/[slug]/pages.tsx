@@ -237,10 +237,14 @@ export function ReservaView({ agency, whatsapp, design, order, fileBase, links }
       {order.locator && (
         <section className="card p-5" aria-label="Acompanhar a reserva">
           <CardTitle icon={Search}>Acompanhar a reserva</CardTitle>
-          {[["Código de reserva", order.locator], ["Sobrenome", r.lastName]].filter(([, v]) => v).map(([k, v]) => (
+          {(site?.manage
+            ? site.manage.asks.map((f) => f === "locator" ? ["Código de reserva", order.locator ?? ""] : f === "origin" ? ["Origem", legs[0]?.origin ?? ""] : ["Sobrenome", r.lastName ?? ""])
+            : [["Código de reserva", order.locator ?? ""], ["Sobrenome", r.lastName ?? ""]]
+          ).filter(([, v]) => v).map(([k, v]) => (
             <div key={k} className="mb-2 flex items-center justify-between rounded-xl bg-panel2 px-3 py-2.5"><span><span className="block text-xs text-muted">{k}</span><span className="font-semibold">{v}</span></span><CopyButton text={v} label="Copiar" /></div>
           ))}
-          {site && <a href={site.url} target="_blank" rel="noopener noreferrer" className="btn-primary mt-2 h-11 w-full">Acompanhar no site da {site.name}<ExternalLink className="h-4 w-4" /></a>}
+          {site && <a href={site.manage?.url ?? site.url} target="_blank" rel="noopener noreferrer" className="btn-primary mt-2 h-11 w-full">Acompanhar no site da {site.name}<ExternalLink className="h-4 w-4" /></a>}
+          {site?.manage && <p className="mt-2 text-xs text-muted">O site da {site.name} não recebe a reserva pelo link: copie os dados acima, cole nos campos de lá e toque em Continuar.</p>}
         </section>
       )}
 
