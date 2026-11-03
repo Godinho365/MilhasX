@@ -32,7 +32,6 @@ const isGroup = (it: NavItem): it is NavGroup => "children" in it;
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: "Menu principal", items: [
     { href: "/app/reports", label: "Relatórios", icon: LineChart },
-    { href: "/app/entries", label: "Extrato", icon: FileText },
   ] },
   { group: "Operação", items: [
     { href: "/app/sales", label: "Vendas", icon: ReceiptText },
@@ -46,12 +45,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
     ] },
   ] },
   { group: "Recursos", items: [
-    { key: "financeiro", label: "Financeiro", icon: Landmark, children: [
-      { href: "/app/financeiro", label: "Financeiro" },
-      { href: "/app/financeiro/notas", label: "Notas Fiscais" },
-    ] },
     { key: "milhas", label: "Milhas", icon: WalletCards, children: [
       { href: "/app", label: "Painel" },
+      { href: "/app/entries", label: "Extrato" },
       { href: "/app/programs", label: "Central de Contas" },
       { href: "/app/credit-cards", label: "Central de Cartões" },
       { href: "/app/entries?novo=transfer", label: "Transferência" },
@@ -60,6 +56,10 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/app/milhas/sugerir", label: "Sugerir Conta" },
       { href: "/app/milhas/sugestor-compra", label: "Sugestor de Compra" },
       { href: "/app/milhas/viaje-facil", label: "ViajeFácil" },
+    ] },
+    { key: "financeiro", label: "Financeiro", icon: Landmark, children: [
+      { href: "/app/financeiro", label: "Financeiro" },
+      { href: "/app/financeiro/notas", label: "Notas Fiscais" },
     ] },
     { href: "/app/simulators", label: "Simuladores", icon: Calculator },
     { href: "/app/calculadoras", label: "Calculadoras", icon: Percent },
