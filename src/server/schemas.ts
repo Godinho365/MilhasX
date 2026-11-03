@@ -550,3 +550,67 @@ export const finTxSchema = z.object({
 });
 export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
 export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });
+
+// Equipe, tarefas, metas e processos
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida");
+const priority = z.enum(["LOW", "MEDIUM", "HIGH"]);
+export const memberSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  role: z.string().trim().max(80).nullable().optional(),
+  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  color: hexColor.optional(),
+  active: z.boolean().optional(),
+});
+export const taskSchema = z.object({
+  title: z.string().trim().min(1, "Informe a tarefa").max(200),
+  description: z.string().trim().max(2000).nullable().optional(),
+  priority,
+  memberId: id.nullable().optional(),
+  dueDate: dateStr.nullable().optional(),
+  status: z.enum(["TODO", "DOING", "DONE"]).optional(),
+});
+export const taskMoveSchema = z.object({ status: z.enum(["TODO", "DOING", "DONE"]), position: z.number().int().min(0).max(10_000).optional() });
+export const goalSchema = z.object({
+  title: z.string().trim().min(1, "Informe o objetivo").max(200),
+  period: z.enum(["MONTH", "QUARTER", "YEAR"]),
+  start: dateStr,
+  memberId: id.nullable().optional(),
+  keyResults: z.array(z.object({
+    title: z.string().trim().min(1, "Dê um nome ao resultado-chave").max(200),
+    metric: z.enum(["MANUAL", "REVENUE", "PROFIT", "SALES", "MILES", "CUSTOMERS"]),
+    target: z.number().int().positive("A meta precisa ser maior que zero").max(10_000_000_000),
+    current: z.number().int().min(0).max(10_000_000_000).optional(),
+  })).min(1, "Inclua ao menos um resultado-chave").max(10),
+});
+export const checkInSchema = z.object({ current: z.number().int().min(0).max(10_000_000_000) });
+export const processSchema = z.object({
+  title: z.string().trim().min(1, "Dê um nome ao processo").max(120),
+  description: z.string().trim().max(1000).nullable().optional(),
+  steps: z.array(z.object({ title: z.string().trim().max(200), detail: z.string().trim().max(1000).nullable().optional() })).min(1).max(50),
+});
+export const processRunSchema = z.object({ label: z.string().trim().max(80).nullable().optional(), memberId: id.nullable().optional(), dueDate: dateStr.nullable().optional() });
+
+// Contatos: passageiros e interesses de viagem
+export const passengerSchema = z.object({
+  name: z.string().trim().min(1, "Informe o nome").max(120),
+  cpf: z.string().trim().max(20).nullable().optional(),
+  birthDate: dateStr.nullable().optional(),
+  email: z.union([z.string().trim().email("E-mail inválido").max(200), z.literal("")]).nullable().optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  customerId: id.nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
+const interestStatus = z.enum(["NEW", "SEARCHING", "OFFER_SENT", "BOOKED", "LOST"]);
+export const interestSchema = z.object({
+  customerId: id.nullable().optional(),
+  customerName: z.string().trim().max(120).default(""),
+  origin: z.string().trim().max(3).nullable().optional(),
+  destination: z.string().trim().min(1, "Informe o destino").max(80),
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Mês inválido").nullable().optional(),
+  priority,
+  status: interestStatus,
+  programs: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+}).refine((v) => !!v.customerId || v.customerName.length > 0, { message: "Informe o cliente", path: ["customerName"] });
+export const interestStatusSchema = z.object({ status: interestStatus });

@@ -121,6 +121,12 @@ model User {
   viajeFacil          ViajeFacil[]
   finAccounts         FinAccount[]
   finTransactions     FinTransaction[]
+  teamMembers         TeamMember[]
+  tasks               Task[]
+  goals               Goal[]
+  processes           Process[]
+  passengers          Passenger[]
+  travelInterests     TravelInterest[]
   milesDeals          MilesDeal[]
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
@@ -319,10 +325,12 @@ model Customer {
   documents Json? // documentos adicionais: [{ type, number }]
   createdAt DateTime @default(now())
 
-  sales      Sale[]
-  saleItems  SaleItem[]    @relation("SaleItemCustomers")
-  orders     TravelOrder[]
-  milesDeals MilesDeal[]
+  sales           Sale[]
+  passengers      Passenger[]
+  travelInterests TravelInterest[]
+  saleItems       SaleItem[]       @relation("SaleItemCustomers")
+  orders          TravelOrder[]
+  milesDeals      MilesDeal[]
 
   @@index([userId])
 }
@@ -1074,4 +1082,124 @@ model FinTransaction {
 
   @@index([userId, dueDate])
   @@index([userId, competence])
+}
+
+// Equipe: pessoas da operação (responsáveis por tarefas e metas). O login de membros vem depois.
+model TeamMember {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  role      String? // cargo
+  email     String?
+  phone     String?
+  color     String   @default("#60a5fa")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  tasks     Task[]
+  goals     Goal[]
+
+  @@index([userId])
+}
+
+// Tarefas em quadro (A fazer, Fazendo, Feito)
+model Task {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      String      @default("TODO") // TODO | DOING | DONE
+  priority    String      @default("MEDIUM") // LOW | MEDIUM | HIGH
+  memberId    String?
+  member      TeamMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  dueDate     DateTime?
+  position    Int         @default(0)
+  doneAt      DateTime?
+  createdAt   DateTime    @default(now())
+
+  @@index([userId, status])
+}
+
+// Metas: objetivo do período com resultados-chave (alguns medidos sozinhos pelas vendas)
+model Goal {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  period     String // MONTH | QUARTER | YEAR
+  start      DateTime // primeiro dia do período
+  memberId   String? // responsável (vazio = empresa)
+  member     TeamMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  createdAt  DateTime    @default(now())
+  keyResults KeyResult[]
+
+  @@index([userId, start])
+}
+
+model KeyResult {
+  id        String   @id @default(cuid())
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  title     String
+  metric    String   @default("MANUAL") // MANUAL | REVENUE | PROFIT | SALES | MILES | CUSTOMERS
+  target    Int // centavos (REVENUE/PROFIT) ou quantidade
+  current   Int      @default(0) // só para MANUAL
+  position  Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// Processos: passo a passo da operação, reaproveitável (vira tarefas quando usado)
+model Process {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  steps       Json // [{ title, detail? }]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Passageiros: quem viaja (CPF, nascimento), ligado ao cliente que comprou
+model Passenger {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  cpf        String? // só dígitos
+  birthDate  DateTime?
+  email      String?
+  phone      String?
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, cpf])
+  @@index([userId, name])
+}
+
+// Interesses de viagem dos clientes: destino, quando, prioridade e o andamento
+model TravelInterest {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName String
+  origin       String?
+  destination  String
+  month        String? // AAAA-MM (vazio = qualquer época)
+  priority     String    @default("MEDIUM") // LOW | MEDIUM | HIGH
+  status       String    @default("NEW") // NEW | SEARCHING | OFFER_SENT | BOOKED | LOST
+  programs     String[]  @default([])
+  notes        String?
+  offerSentAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status])
 }

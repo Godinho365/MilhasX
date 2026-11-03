@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db";
 
 const TABLES = [
-  "TransferPartner", "ClubPlan", "AccountBeneficiary", "OrderAccess", "ContractSignature", "MilesLead", "FlightSearch", "FlightQuote", "OrderEvent", "OrderAttachment", "TravelOrder", "OrderPipelineStage", "OrderPipeline", "ViajeFacil", "FinTransaction", "FinAccount", "Subscription", "HolderAccess", "SalesProfile", "HolderAttachment", "Simulation", "ProgramLogo", "AccountCredential", "Recurrence", "CardInvoice", "CreditCard", "SupplierAccount", "Supplier", "Guide", "NewsPost",
+  "TransferPartner", "ClubPlan", "AccountBeneficiary", "OrderAccess", "ContractSignature", "MilesLead", "FlightSearch", "FlightQuote", "OrderEvent", "OrderAttachment", "TravelOrder", "OrderPipelineStage", "OrderPipeline", "ViajeFacil", "FinTransaction", "FinAccount", "KeyResult", "Goal", "Task", "TeamMember", "Process", "Passenger", "TravelInterest", "Subscription", "HolderAccess", "SalesProfile", "HolderAttachment", "Simulation", "ProgramLogo", "AccountCredential", "Recurrence", "CardInvoice", "CreditCard", "SupplierAccount", "Supplier", "Guide", "NewsPost",
   "AuditLog", "Notification", "Alert", "SaleAttachment", "SaleItem", "Sale", "Customer", "Entry",
   "Account", "Holder", "UserPreference", "PasswordResetToken", "Session", "LoginAttempt", "AppSetting", "User", "Program",
 ];
