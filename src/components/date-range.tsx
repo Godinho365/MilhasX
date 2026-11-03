@@ -8,7 +8,7 @@ import { type DayRange, MONTHS, WEEKDAYS, addDays, addMonths, brShort, monthRang
 export type { DayRange };
 export { rangeLabel };
 
-export function DateRangePicker({ value, onChange }: { value: DayRange; onChange: (r: DayRange) => void }) {
+export function DateRangePicker({ value, onChange, align = "left" }: { value: DayRange; onChange: (r: DayRange) => void; align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -29,12 +29,12 @@ export function DateRangePicker({ value, onChange }: { value: DayRange; onChange
       <button type="button" className="min-w-[150px] px-2 text-center text-sm font-semibold first-letter:uppercase" onClick={() => setOpen((o) => !o)} aria-label="Escolher período">{rangeLabel(value)}</button>
       <button type="button" className="btn-subtle h-9 w-9 px-0" onClick={() => step(1)} aria-label="Próximo mês"><ChevronRight className="h-4 w-4" /></button>
       <button type="button" className="btn-subtle h-9 w-9 px-0" onClick={() => setOpen((o) => !o)} aria-label="Abrir calendário" aria-expanded={open}><CalendarDays className="h-4 w-4" /></button>
-      {open && <Popover value={value} onPick={(r) => { onChange(r); setOpen(false); }} />}
+      {open && <Popover value={value} align={align} onPick={(r) => { onChange(r); setOpen(false); }} />}
     </div>
   );
 }
 
-function Popover({ value, onPick }: { value: DayRange; onPick: (r: DayRange) => void }) {
+function Popover({ value, onPick, align }: { value: DayRange; onPick: (r: DayRange) => void; align: "left" | "right" }) {
   const t = today();
   const [view, setView] = useState(monthStart(value?.from ?? t)); // mês mostrado
   const [start, setStart] = useState<string | null>(null); // 1º clique, esperando o dia final
@@ -52,7 +52,7 @@ function Popover({ value, onPick }: { value: DayRange; onPick: (r: DayRange) => 
   }
 
   return (
-    <div className="absolute left-0 top-full z-40 mt-2 flex animate-pop-in overflow-hidden rounded-xl border border-line bg-panel2 shadow-xl shadow-black/40" role="dialog" aria-label="Escolher período">
+    <div className={`absolute ${align === "right" ? "right-0" : "left-0"} top-full z-40 mt-2 flex animate-pop-in overflow-hidden rounded-xl border border-line bg-panel2 shadow-xl shadow-black/40`} role="dialog" aria-label="Escolher período">
       <div className="hidden w-40 border-r border-line p-2 sm:block">
         <p className="px-2 pb-1 text-xs text-muted">Atalhos</p>
         {shortcuts(t).map((s) => (

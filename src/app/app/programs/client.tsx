@@ -210,7 +210,9 @@ export function ProgramsClient(props: { view: "programas" | "titulares"; holders
 }
 
 /** Editar conta: nome, CPFs disponíveis e tags. */
-function AccountDialog({ account, tagSuggestions, onClose }: { account: Acc; tagSuggestions: string[]; onClose: () => void }) {
+export type EditableAccount = Pick<Acc, "id" | "nickname" | "cpfAvailable" | "transferBonusPct" | "transferBonusCap" | "tags" | "programName" | "holderName">;
+
+export function AccountDialog({ account, tagSuggestions, onClose }: { account: EditableAccount; tagSuggestions: string[]; onClose: () => void }) {
   const router = useRouter();
   const [f, setF] = useState({ nickname: account.nickname ?? "", cpf: account.cpfAvailable != null ? String(account.cpfAvailable) : "", bonus: account.transferBonusPct != null ? String(account.transferBonusPct) : "", bonusCap: account.transferBonusCap != null ? String(account.transferBonusCap) : "" });
   const [tags, setTags] = useState(account.tags);

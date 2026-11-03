@@ -101,6 +101,7 @@ model User {
   avatarMime      String?
   avatarUpdatedAt DateTime?
   simulations     Simulation[]
+  showcaseItems   ShowcaseItem[]
 
   // Assinatura: o plano só muda pela administração (sem cobrança real)
   plan                Plan                @default(PESSOAL)
@@ -161,7 +162,33 @@ model SalesProfile {
   banner          Bytes?
   bannerMime      String?
   bannerUpdatedAt DateTime?
+  showcaseActive  Boolean   @default(false) // vitrine pública de pacotes (/p/<slug>/vitrine)
+  showcaseTitle   String?
   updatedAt       DateTime  @updatedAt
+}
+
+model ShowcaseItem {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId        String? // cotação do CRM que originou o card (só referência)
+  title          String
+  destination    String
+  period         String? // ex.: 16 a 23 de novembro
+  includes       String[]  @default([]) // ex.: Aéreo ida e volta, Bagagem despachada
+  description    String?
+  priceCents     Int?
+  priceNote      String? // ex.: por pessoa
+  installments   String? // ex.: em até 10x sem juros
+  image          Bytes?
+  imageMime      String?
+  imageUpdatedAt DateTime?
+  active         Boolean   @default(true)
+  position       Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, position])
 }
 
 model Session {
@@ -539,12 +566,71 @@ model CreditCard {
   balanceEntryId  String?  @unique // lançamento "Saldo inicial" com os pontos já acumulados no cartão
   balanceEntry    Entry?   @relation("CardBalance", fields: [balanceEntryId], references: [id], onDelete: SetNull)
   active          Boolean  @default(true)
+  bank            String? // banco emissor (Nubank, Itaú…)
+  brandTier       String? // categoria da bandeira (Visa Infinite, Mastercard Black…)
+  last4           String? // só os 4 últimos dígitos; nunca o número completo nem o CVV
+  printedName     String? // nome impresso no cartão
+  modality        String? // CREDIT | DEBIT | MULTIPLE | PREPAID | CORPORATE
+  cardType        String? // HOLDER | ADDITIONAL
+  status          String   @default("ACTIVE") // ACTIVE | BLOCKED | CANCELED | EXPIRED
+  expMonth        Int?
+  expYear         Int?
+  limitCents      Int?
+  annualFeeMonth  Int? // mês em que a anuidade é cobrada (1-12)
+  color           String? // cor do cartão na vitrine (#rrggbb)
+  benefits        String[] @default([])
+  benefitsUrl     String?
+  tags            String[] @default([])
+  notes           String?
   createdAt       DateTime @default(now())
 
-  invoices   CardInvoice[]
-  entryCosts EntryCost[]
+  invoices    CardInvoice[]
+  entryCosts  EntryCost[]
+  reminders   CardReminder[]
+  attachments CardAttachment[]
+  activity    CardActivity[]
 
   @@index([userId])
+}
+
+model CardReminder {
+  id          String     @id @default(cuid())
+  cardId      String
+  card        CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind        String // DUE | CLOSING | ANNUAL_FEE | EXPIRY | BENEFIT | CUSTOM
+  title       String
+  date        DateTime // próxima ocorrência (dia)
+  recurrence  String     @default("NONE") // NONE | MONTHLY | YEARLY
+  advanceDays Int        @default(0)
+  whatsapp    Boolean    @default(false)
+  note        String?
+  createdAt   DateTime   @default(now())
+
+  @@index([cardId])
+}
+
+model CardAttachment {
+  id        String     @id @default(cuid())
+  cardId    String
+  card      CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  name      String
+  mime      String
+  size      Int
+  data      Bytes
+  createdAt DateTime   @default(now())
+
+  @@index([cardId])
+}
+
+model CardActivity {
+  id        String     @id @default(cuid())
+  cardId    String
+  card      CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  kind      String     @default("COMMENT") // COMMENT | ACTIVITY
+  text      String
+  createdAt DateTime   @default(now())
+
+  @@index([cardId])
 }
 
 model CardInvoice {

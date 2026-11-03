@@ -319,7 +319,33 @@ export const cardSchema = z.object({
   dueDay: dayOfMonth,
   annualFeeCents: cents.default(0),
   feeWaiverCents: cents.nullable().default(null),
+  bank: optText(40),
+  brandTier: optText(40),
+  last4: z.string().trim().regex(/^\d{4}$/, "Informe só os 4 últimos dígitos").optional().nullable().or(z.literal("").transform(() => null)),
+  printedName: optText(60),
+  modality: z.enum(["CREDIT", "DEBIT", "MULTIPLE", "PREPAID", "CORPORATE"]).optional().nullable(),
+  cardType: z.enum(["HOLDER", "ADDITIONAL"]).optional().nullable(),
+  status: z.enum(["ACTIVE", "BLOCKED", "CANCELED", "EXPIRED"]).optional(),
+  expMonth: z.number().int().min(1).max(12).optional().nullable(),
+  expYear: z.number().int().min(2000).max(2100).optional().nullable(),
+  limitCents: cents.optional().nullable(),
+  annualFeeMonth: z.number().int().min(1).max(12).optional().nullable(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida").optional().nullable(),
+  benefits: z.array(z.string().trim().min(1).max(60)).max(60).optional(),
+  benefitsUrl: z.string().trim().url("Link inválido").max(300).optional().nullable().or(z.literal("").transform(() => null)),
+  tags: z.array(z.string().trim().min(1).max(30)).max(15).optional(),
+  notes: optText(2000),
 });
+export const cardReminderSchema = z.object({
+  kind: z.enum(["DUE", "CLOSING", "ANNUAL_FEE", "EXPIRY", "BENEFIT", "CUSTOM"]),
+  title: z.string().trim().min(1, "Dê um título ao lembrete").max(120),
+  date: dateStr,
+  recurrence: z.enum(["NONE", "MONTHLY", "YEARLY"]).default("NONE"),
+  advanceDays: z.number().int().min(0).max(90).default(0),
+  whatsapp: z.boolean().default(false),
+  note: optText(500),
+});
+export const cardCommentSchema = z.object({ text: z.string().trim().min(1, "Escreva o comentário").max(2000) });
 export const invoiceSchema = z.object({ closingDate: dateStr, dueDate: dateStr, amountCents: cents.refine((v) => v > 0, "Informe o valor da fatura"), pointsIncluded: z.boolean().default(false) });
 export const cardBalanceSchema = z.object({ points: z.number().int().min(0).max(100_000_000), date: dateStr });
 export const invoiceIncludedSchema = z.object({ pointsIncluded: z.boolean() });
@@ -641,3 +667,18 @@ export const interestSchema = z.object({
   notes: z.string().trim().max(1000).nullable().optional(),
 }).refine((v) => !!v.customerId || v.customerName.length > 0, { message: "Informe o cliente", path: ["customerName"] });
 export const interestStatusSchema = z.object({ status: interestStatus });
+
+export const showcaseSchema = z.object({
+  title: z.string().trim().min(1, "Dê um título ao pacote").max(120),
+  destination: z.string().trim().min(1, "Informe o destino").max(80),
+  period: optText(80),
+  includes: z.array(z.string().trim().max(60)).max(12).optional(), // vazios e repetidos saem no serviço (até 8)
+  description: optText(1000),
+  priceCents: cents.nullable().optional(),
+  priceNote: optText(60),
+  installments: optText(60),
+  active: z.boolean().optional(),
+  orderId: id.nullable().optional(),
+});
+export const showcaseSettingsSchema = z.object({ active: z.boolean(), title: optText(80) });
+export const showcaseMoveSchema = z.object({ dir: z.union([z.literal(-1), z.literal(1)]) });

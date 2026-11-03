@@ -86,7 +86,14 @@ export const cityOf = (code: string) => AIRPORTS.find((a) => a.code === code)?.c
 /** Código curto mostrado ao cliente (derivado do número do pedido, sem revelar o token). */
 export const proposalCode = (orderNumber: number) => `COT-${String(orderNumber).padStart(4, "0")}`;
 
-// Sites oficiais das companhias, para "Acompanhar no site da companhia"
+// Sites oficiais das companhias, para "Acompanhar no site da companhia".
+// manage: página de consultar a reserva, quando conhecida, e os dados que ela pede (na ordem do site).
+export type ManageField = "locator" | "origin" | "lastName";
+type AirlineSite = { name: string; url: string; manage?: { url: string; asks: ManageField[] } };
+const MANAGE: Record<string, AirlineSite["manage"]> = {
+  // a GOL não aceita o código pelo link e confirma a busca com reCAPTCHA: o cliente cola os 3 dados
+  GOL: { url: "https://b2c.voegol.com.br/minhas-viagens/encontrar-viagem", asks: ["locator", "origin", "lastName"] },
+};
 const AIRLINE_SITES: [RegExp, string, string][] = [
   [/latam/i, "LATAM", "https://www.latamairlines.com/br/pt"],
   [/gol|smiles/i, "GOL", "https://www.voegol.com.br"],
@@ -98,8 +105,8 @@ const AIRLINE_SITES: [RegExp, string, string][] = [
   [/klm/i, "KLM", "https://www.klm.com.br"],
   [/copa/i, "Copa Airlines", "https://www.copaair.com/pt-br/"],
 ];
-export function airlineSite(airline: string, program = ""): { name: string; url: string } | null {
-  for (const [re, name, url] of AIRLINE_SITES) if (re.test(airline) || re.test(program)) return { name, url };
+export function airlineSite(airline: string, program = ""): AirlineSite | null {
+  for (const [re, name, url] of AIRLINE_SITES) if (re.test(airline) || re.test(program)) return { name, url, ...(MANAGE[name] ? { manage: MANAGE[name] } : {}) };
   return null;
 }
 

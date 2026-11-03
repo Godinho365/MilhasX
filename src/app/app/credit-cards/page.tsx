@@ -1,7 +1,8 @@
-import { requirePageUser, selectedHolderId, holderScopeLabel } from "@/server/session";
+import { requirePageUser, selectedHolderId } from "@/server/session";
 import { cardsOverview } from "@/server/services/extras";
 import { listAccounts } from "@/server/services/wallet";
-import { PageHeader } from "@/components/stat";
+import { upcomingCardReminders } from "@/server/services/card-details";
+import { brDay } from "@/domain/brasilia";
 import { CardsClient } from "./client";
 
 /**
@@ -21,27 +22,30 @@ export default async function CreditCardsPage() {
   const user = await requirePageUser();
   // Titular marcado no topo: cartões e contas do formulário só dele
   const holderId = await selectedHolderId(user.id);
-  const [o, accounts, scope] = await Promise.all([cardsOverview(user.id, holderId), listAccounts(user.id, holderId), holderScopeLabel(holderId)]);
+  const today = brDay();
+  const [o, accounts, reminders] = await Promise.all([cardsOverview(user.id, holderId), listAccounts(user.id, holderId), upcomingCardReminders(user.id, today)]);
   return (
-    <>
-      <PageHeader title="Cartões de Crédito" subtitle={`Faturas, pontuação esperada e pontos recebidos de cada cartão · ${scope}`} />
-      <CardsClient
-        stats={o.stats}
-        accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} · ${a.holder.name}` }))}
-        actions={o.actions.map((a) => ({ ...a, dueDate: a.dueDate.toISOString() }))}
-        cards={o.cards.map((c) => ({
-          id: c.id, name: c.name, brand: c.brand, program: c.account.program.name, programId: c.account.programId, logo: c.account.program.logoUpdatedAt?.getTime().toString() ?? null, color: c.account.program.color, holder: c.account.holder.name, accountId: c.accountId,
-          pointsPerDollar: c.pointsPerDollar / 100, dollarRateCents: c.dollarRateCents, closingDay: c.closingDay, dueDay: c.dueDay,
-          annualFeeCents: c.annualFeeCents, feeWaiverCents: c.feeWaiverCents,
-          ...currentCpm(c),
-          balancePoints: c.balanceEntry?.points ?? 0, balanceDate: c.balanceEntry?.occurredAt.toISOString().slice(0, 10) ?? null,
-          received: c.invoices.filter((i) => i.entry?.status === "CONFIRMED").reduce((s, i) => s + (i.entry?.points ?? 0), 0),
-          invoices: c.invoices.map((i) => ({
-            id: i.id, closingDate: i.closingDate.toISOString(), dueDate: i.dueDate.toISOString(), amountCents: i.amountCents, expectedPoints: i.expectedPoints, feeCents: i.feeCents, pointsIncluded: i.pointsIncluded,
-            status: i.status === "OPEN" ? "OPEN" : i.entry?.status === "CONFIRMED" ? "RECEIVED" : "CLOSED",
-          })),
-        }))}
-      />
-    </>
+    <CardsClient
+      today={today}
+      stats={o.stats}
+      reminders={reminders}
+      accounts={accounts.map((a) => ({ id: a.id, label: `${a.program.name} · ${a.holder.name}`, holder: a.holder.name }))}
+      actions={o.actions.map((a) => ({ ...a, dueDate: a.dueDate.toISOString() }))}
+      cards={o.cards.map((c) => ({
+        id: c.id, name: c.name, brand: c.brand, program: c.account.program.name, programId: c.account.programId, logo: c.account.program.logoUpdatedAt?.getTime().toString() ?? null, color: c.account.program.color, holder: c.account.holder.name, accountId: c.accountId,
+        pointsPerDollar: c.pointsPerDollar / 100, dollarRateCents: c.dollarRateCents, closingDay: c.closingDay, dueDay: c.dueDay,
+        annualFeeCents: c.annualFeeCents, feeWaiverCents: c.feeWaiverCents,
+        bank: c.bank, brandTier: c.brandTier, last4: c.last4, printedName: c.printedName, modality: c.modality, cardType: c.cardType, status: c.status,
+        expMonth: c.expMonth, expYear: c.expYear, limitCents: c.limitCents, annualFeeMonth: c.annualFeeMonth, cardColor: c.color,
+        benefits: c.benefits, benefitsUrl: c.benefitsUrl, tags: c.tags, notes: c.notes,
+        ...currentCpm(c),
+        balancePoints: c.balanceEntry?.points ?? 0, balanceDate: c.balanceEntry?.occurredAt.toISOString().slice(0, 10) ?? null,
+        received: c.invoices.filter((i) => i.entry?.status === "CONFIRMED").reduce((s, i) => s + (i.entry?.points ?? 0), 0),
+        invoices: c.invoices.map((i) => ({
+          id: i.id, closingDate: i.closingDate.toISOString(), dueDate: i.dueDate.toISOString(), amountCents: i.amountCents, expectedPoints: i.expectedPoints, feeCents: i.feeCents, pointsIncluded: i.pointsIncluded,
+          status: i.status === "OPEN" ? "OPEN" : i.entry?.status === "CONFIRMED" ? "RECEIVED" : "CLOSED",
+        })),
+      }))}
+    />
   );
 }

@@ -2,18 +2,28 @@
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, Trash2, ReceiptText, Pencil, Trophy, MoreHorizontal, ChevronsUpDown, ChevronRight, Wallet } from "lucide-react";
+import { CreditCard, Trash2, ReceiptText, Pencil, Trophy, MoreHorizontal, ChevronsUpDown, ChevronRight, Wallet, Plus, Search, LayoutGrid, List, Bell } from "lucide-react";
 import Link from "next/link";
 import { api, today } from "@/lib/api";
-import { fmtBRL, fmtDate, fmtPts, parseBRLToCents } from "@/lib/format";
+import { fmtBRL, fmtDate, fmtPts, parseBRLToCents, shortName } from "@/lib/format";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { ProgramLogo } from "@/components/program-logo";
 import { toast, confirmDialog } from "@/components/feedback";
-import { feeCpmCents, simulateMonth } from "@/domain/cards";
+import { BRANDS, CARD_STATUS, ALL_BENEFITS, MODALITIES } from "@/domain/card-catalog";
+import { CardDialog, CardFace } from "./card-dialog";
 
 type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; pointsIncluded: boolean; status: "OPEN" | "CLOSED" | "RECEIVED" };
-type Card = { id: string; name: string; brand: string | null; program: string; programId: string; logo: string | null; color: string; holder: string; accountId: string; pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; balancePoints: number; balanceDate: string | null; accountCpmCents: number | null; accountBalance: number; openFeeCents: number; received: number; invoices: Invoice[] };
-const money = (c: number | null | undefined) => (c ? (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "");
+export type CardView = {
+  id: string; name: string; brand: string | null; program: string; programId: string; logo: string | null; color: string; holder: string; accountId: string;
+  pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null;
+  bank: string | null; brandTier: string | null; last4: string | null; printedName: string | null; modality: string | null; cardType: string | null; status: string;
+  expMonth: number | null; expYear: number | null; limitCents: number | null; annualFeeMonth: number | null; cardColor: string | null;
+  benefits: string[]; benefitsUrl: string | null; tags: string[]; notes: string | null;
+  balancePoints: number; balanceDate: string | null; accountCpmCents: number | null; accountBalance: number; openFeeCents: number; received: number; invoices: Invoice[];
+};
+type Card = CardView;
+type Reminder = { id: string; cardId: string; card: string; title: string; date: string; advanceDays: number; late: boolean };
+const STATUS_TONE: Record<string, string> = { ACTIVE: "bg-emerald-500/15 text-emerald-300", BLOCKED: "bg-amber-500/15 text-amber-300", CANCELED: "bg-red-500/15 text-red-300", EXPIRED: "bg-panel2 text-muted" };
 
 const STATUS: Record<Invoice["status"], { label: string; cls: string }> = {
   OPEN: { label: "Aberta", cls: "bg-amber-500/15 text-amber-300" },
@@ -29,47 +39,27 @@ function nextDate(day: number, after = new Date()) {
 
 type Stats = { activePoints: number; expectedPoints: number; openCents: number; receivedPoints: number; actionCards: number; totalCards: number };
 
-export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]; accounts: { id: string; label: string }[]; actions: { cardId: string; card: string; invoiceId: string; dueDate: string; amountCents: number }[]; stats: Stats }) {
+export function CardsClient({ cards, accounts, actions, stats, reminders, today: t0 }: { cards: Card[]; accounts: { id: string; label: string; holder: string }[]; actions: { cardId: string; card: string; invoiceId: string; dueDate: string; amountCents: number }[]; stats: Stats; reminders: Reminder[]; today: string }) {
   const router = useRouter();
-  const [cardModal, setCardModal] = useState(false);
-  const [editing, setEditing] = useState<Card | null>(null);
+  const [dialog, setDialog] = useState<Card | "new" | null>(null);
+  const [q, setQ] = useState("");
+  const [fBrand, setFBrand] = useState("");
+  const [fProgram, setFProgram] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [fBenefit, setFBenefit] = useState("");
+  const [view, setView] = useState<"grid" | "list">("grid");
+  useEffect(() => { try { if (localStorage.getItem("mm:cards-view") === "list") setView("list"); } catch {} }, []);
+  const pickView = (v: "grid" | "list") => { setView(v); try { localStorage.setItem("mm:cards-view", v); } catch {} };
   const [invoiceFor, setInvoiceFor] = useState<Card | null>(null);
   const [registering, setRegistering] = useState<(Invoice & { card: Card }) | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [erro, setErro] = useState("");
-  const newCard = () => { setErro(""); setEditing(null); setCardModal(true); };
+  const newCard = () => setDialog("new");
   useEffect(() => {
     window.addEventListener("mm:new-card", newCard);
     return () => window.removeEventListener("mm:new-card", newCard);
   }, []);
 
-  async function saveCard(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const rate = parseBRLToCents(String(f.get("rate") || "5,50"));
-    const fee = parseBRLToCents(String(f.get("fee") || "0"));
-    const waiver = parseBRLToCents(String(f.get("waiver") || "0"));
-    if (rate === null || fee === null || waiver === null) return setErro("Valor inválido");
-    const body = {
-      accountId: f.get("accountId"), name: f.get("name"), brand: f.get("brand") || null,
-      pointsPerDollar: Math.round(Number(String(f.get("ppd")).replace(",", ".")) * 100), dollarRateCents: rate,
-      closingDay: Number(f.get("closing")), dueDay: Number(f.get("due")), annualFeeCents: fee, feeWaiverCents: waiver || null,
-    };
-    const r = editing ? await api<{ item: { id: string } }>(`/api/cards/${editing.id}`, "PUT", body) : await api<{ item: { id: string } }>("/api/cards", "POST", body);
-    if (!r.ok) return setErro(r.erro);
-    // Pontos que o cartão já tem acumulados: viram "Saldo inicial" na conta que recebe os pontos
-    const bal = Number(String(f.get("balance") || "0").replace(/\D/g, "")) || 0;
-    const balDate = String(f.get("balanceDate") || today());
-    if (bal !== (editing?.balancePoints ?? 0) || (bal > 0 && balDate !== editing?.balanceDate)) {
-      const b = await api(`/api/cards/${r.data.item.id}/balance`, "PUT", { points: bal, date: balDate });
-      if (!b.ok) return setErro(b.erro);
-    }
-    setErro("");
-    setCardModal(false);
-    toast(editing ? "Cartão atualizado" : "Cartão cadastrado");
-    setEditing(null);
-    refreshSafe(router);
-  }
   async function saveInvoice(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!invoiceFor) return;
@@ -116,14 +106,6 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     toast("Fatura excluída");
     refreshSafe(router);
   }
-  async function delCard(c: Card) {
-    if (!(await confirmDialog({ title: `Excluir ${c.name}?`, confirmLabel: "Excluir", danger: true }))) return;
-    const r = await api(`/api/cards/${c.id}`, "DELETE");
-    if (!r.ok) return toast(r.erro, "error");
-    toast("Cartão excluído");
-    refreshSafe(router);
-  }
-
   const now = Date.now();
   const all = cards.flatMap((c) => c.invoices.map((i) => ({ ...i, card: c }))).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const upcoming = all.filter((i) => i.status !== "RECEIVED" && !(i.pointsIncluded && i.status === "CLOSED"));
@@ -162,14 +144,117 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
     );
   };
 
+  const term = q.trim().toLowerCase();
+  const shown = cards.filter((c) =>
+    (!term || [c.name, c.holder, c.printedName, c.bank, c.last4, c.program, ...c.tags].some((x) => (x ?? "").toLowerCase().includes(term))) &&
+    (!fBrand || c.brand === fBrand) && (!fProgram || c.programId === fProgram) && (!fStatus || c.status === fStatus) && (!fBenefit || c.benefits.includes(fBenefit)));
+  const programs = [...new Map(cards.map((c) => [c.programId, c.program])).entries()];
+  const brands = [...new Set(cards.map((c) => c.brand).filter(Boolean))] as string[];
+  const faceOf = (c: Card) => ({ ...c, holder: c.holder, color: c.cardColor || c.color });
+
   return (
     <>
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-panel2 text-muted"><CreditCard className="h-5 w-5" /></span>
+        <div className="mr-auto">
+          <h1 className="text-2xl font-semibold tracking-tight">Central de Cartões</h1>
+          <p className="text-sm text-muted">{cards.length} {cards.length === 1 ? "cartão cadastrado" : "cartões cadastrados"}</p>
+        </div>
+        <button type="button" className="btn-primary" onClick={newCard} disabled={accounts.length === 0} title={accounts.length === 0 ? "Cadastre antes uma conta em Programas" : undefined}><Plus className="h-4 w-4" />Novo cartão</button>
+      </div>
+
+      <div className="card mb-4 flex flex-wrap items-center gap-2 p-3">
+        <label className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input className="input h-9 pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por apelido, titular, banco ou final..." aria-label="Buscar cartões" />
+        </label>
+        <select className="input h-9 w-auto" value={fBrand} onChange={(e) => setFBrand(e.target.value)} aria-label="Bandeira"><option value="">Todas as bandeiras</option>{(brands.length ? brands : Object.keys(BRANDS)).map((b) => <option key={b}>{b}</option>)}</select>
+        <select className="input h-9 w-auto" value={fProgram} onChange={(e) => setFProgram(e.target.value)} aria-label="Programa"><option value="">Todos os programas</option>{programs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+        <select className="input h-9 w-auto" value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Status"><option value="">Todos status</option>{Object.entries(CARD_STATUS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <select className="input h-9 w-auto" value={fBenefit} onChange={(e) => setFBenefit(e.target.value)} aria-label="Benefício"><option value="">Todos os benefícios</option>{ALL_BENEFITS.map((b) => <option key={b}>{b}</option>)}</select>
+        <div className="inline-flex gap-0.5 rounded-lg border border-line bg-panel p-0.5" role="group" aria-label="Visualização">
+          <button type="button" aria-pressed={view === "grid"} onClick={() => pickView("grid")} className={`rounded-md p-1.5 ${view === "grid" ? "bg-panel2 text-white" : "text-muted"}`} aria-label="Em cartões"><LayoutGrid className="h-4 w-4" /></button>
+          <button type="button" aria-pressed={view === "list"} onClick={() => pickView("list")} className={`rounded-md p-1.5 ${view === "list" ? "bg-panel2 text-white" : "text-muted"}`} aria-label="Em lista"><List className="h-4 w-4" /></button>
+        </div>
+      </div>
+
+      {cards.length === 0 ? (
+        <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
+          <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre o primeiro cartão para acompanhar benefícios, lembretes, faturas e pontos."}</p>
+          <button className="btn-primary" onClick={newCard} disabled={accounts.length === 0}><Plus className="h-4 w-4" />Cadastrar cartão</button>
+        </Empty>
+      ) : shown.length === 0 ? (
+        <div className="card mb-4 py-10 text-center text-sm text-muted">Nenhum cartão com esses filtros.</div>
+      ) : view === "grid" ? (
+        <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {shown.map((c) => (
+            <div key={c.id} className="group">
+              <button type="button" className="block w-full text-left transition-transform hover:-translate-y-0.5" onClick={() => setDialog(c)} aria-label={`Abrir ${c.name}`}><CardFace c={faceOf(c)} small /></button>
+              <div className="mt-2 flex items-center gap-2 px-1 text-xs text-muted">
+                <ProgramLogo programId={c.programId} name={c.program} color={c.color} version={c.logo} size={18} />
+                <span className="min-w-0 flex-1 truncate">{c.program} · {shortName(c.holder)} · {c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</span>
+                {c.benefits.length > 0 && <span title={c.benefits.join(", ")}>{c.benefits.length} benef.</span>}
+                <RowMenu label={`Ações de ${c.name}`} items={[
+                  { label: "Adicionar fatura", icon: <ReceiptText className="h-4 w-4" />, onClick: () => { setErro(""); setInvoiceFor(c); } },
+                  { label: "Editar cartão", icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog(c) },
+                ]} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <section className="card mb-4 overflow-visible" aria-label="Cartões">
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead><tr><th>Cartão</th><th>Banco · bandeira</th><th>Final</th><th>Titular</th><th>Pontuação</th><th>Status</th><th className="w-12" /></tr></thead>
+              <tbody>
+                {shown.map((c) => (
+                  <tr key={c.id} className="cursor-pointer hover:bg-panel2/40" onClick={() => setDialog(c)}>
+                    <td><span className="flex items-center gap-2 font-medium"><span className="h-6 w-9 shrink-0 rounded" style={{ background: `linear-gradient(135deg, ${c.cardColor || c.color}, #0b0b12)` }} aria-hidden />{c.name}</span></td>
+                    <td className="text-muted">{[c.bank, c.brandTier || c.brand].filter(Boolean).join(" · ") || "—"}{c.modality && <span className="block text-[11px]">{MODALITIES[c.modality as keyof typeof MODALITIES]}</span>}</td>
+                    <td className="font-mono">{c.last4 ? `•••• ${c.last4}` : "—"}</td>
+                    <td>{shortName(c.holder)}<span className="block text-[11px] text-muted">{c.program}</span></td>
+                    <td className="whitespace-nowrap tabular-nums">{c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</td>
+                    <td><span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_TONE[c.status] ?? ""}`}>{CARD_STATUS[c.status as keyof typeof CARD_STATUS] ?? c.status}</span></td>
+                    <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <RowMenu label={`Ações de ${c.name}`} items={[
+                        { label: "Adicionar fatura", icon: <ReceiptText className="h-4 w-4" />, onClick: () => { setErro(""); setInvoiceFor(c); } },
+                        { label: "Editar cartão", icon: <Pencil className="h-4 w-4" />, onClick: () => setDialog(c) },
+                      ]} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {reminders.length > 0 && (
+        <section className="card mb-4 overflow-hidden" aria-label="Lembretes dos cartões">
+          <h2 className="flex items-center gap-2 border-b border-line px-5 py-3 font-semibold"><Bell className="h-4 w-4 text-muted" />Lembretes dos próximos 30 dias</h2>
+          <ul className="divide-y divide-line">
+            {reminders.map((r) => {
+              const c = cards.find((x) => x.id === r.cardId);
+              return (
+                <li key={r.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+                  <span className={`w-20 shrink-0 tabular-nums ${r.late ? "text-red-300" : r.date === t0 ? "text-amber-300" : "text-muted"}`}>{fmtDate(r.date)}</span>
+                  <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                  {c && <button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setDialog(c)}>{r.card}</button>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {cards.length > 0 && <h2 className="mb-3 mt-6 text-lg font-semibold">Faturas e pontos</h2>}
+      {cards.length > 0 && <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {kpi("Pontos esperados", fmtPts(stats.expectedPoints), "Próximas faturas", "from-panel to-panel")}
         {kpi("Valor em aberto", fmtBRL(stats.openCents), "Próximas faturas", "from-panel to-panel")}
         {kpi("Pontos recebidos", fmtPts(stats.receivedPoints), "De todas as faturas", "from-panel to-panel")}
         {kpi("Ação necessária", `${stats.actionCards} de ${stats.totalCards}`, stats.actionCards ? (stats.actionCards === 1 ? "cartão precisa de atenção" : "cartões precisam de atenção") : "tudo em dia", stats.actionCards ? "from-panel to-amber-500/10" : "from-panel to-panel")}
-      </div>
+      </div>}
 
       {first && (
         <section className="card mb-4 flex flex-wrap items-center gap-3 bg-gradient-to-r from-accent-soft/60 to-panel px-5 py-4" aria-label="Próximo passo">
@@ -178,49 +263,6 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
             <p className="truncate text-sm text-muted">{first.card} · Fatura de {new Date(first.dueDate).toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })} · {fmtBRL(first.amountCents)}</p>
           </div>
           <button type="button" className="btn-ghost h-9 bg-panel" onClick={() => { const i = all.find((x) => x.id === first.invoiceId); if (i) { setErro(""); setRegistering(i); } }}><Trophy className="h-4 w-4" />Registrar pontos</button>
-        </section>
-      )}
-
-      {cards.length === 0 ? (
-        <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
-          <p className="max-w-sm text-sm text-muted">{accounts.length === 0 ? "Cadastre primeiro uma conta em Programas para receber os pontos do cartão." : "Cadastre seus cartões para acompanhar faturas e a pontuação de cada um."}</p>
-          <button className="btn-primary" onClick={newCard} disabled={accounts.length === 0}>Novo cartão</button>
-        </Empty>
-      ) : (
-        <section className="card mb-4 overflow-visible" aria-label="Cartões">
-          <div className="overflow-x-auto">
-            <table className="table-base">
-              <thead><tr><th>Cartão</th><th>Pontuação</th><th className="hidden md:table-cell">Acumulado · CPM</th><th>Status</th><th className="w-12" /></tr></thead>
-              <tbody>
-                {cards.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <span className="flex items-center gap-3">
-                        <ProgramLogo programId={c.programId} name={c.program} color={c.color} version={c.logo} size={36} />
-                        <span className="min-w-0">
-                          <span className="flex flex-wrap items-center gap-2"><span className="truncate font-semibold">{c.name}</span>{c.brand && <span className="rounded border border-line px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">{c.brand}</span>}</span>
-                          <span className="block truncate text-xs text-muted">{c.program} · {c.holder}</span>
-                        </span>
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap tabular-nums">{c.pointsPerDollar.toLocaleString("pt-BR")} pts/US$</td>
-                    <td className="hidden tabular-nums md:table-cell">
-                      <span className="font-medium">{c.balancePoints > 0 ? `${fmtPts(c.balancePoints)} pts` : "--"}</span>
-                      <span className="block text-[11px] text-muted">CPM {c.accountCpmCents != null ? fmtBRL(c.accountCpmCents) : "R$ 0,00"}{c.annualFeeCents > 0 ? ` · anuidade ${fmtBRL(Math.round(c.annualFeeCents / 12))}/mês` : ""}</span>
-                    </td>
-                                        <td className="whitespace-nowrap text-sm">{needsAction(c) ? <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-400" aria-hidden />Registrar pontos</span> : <span className="flex items-center gap-1.5 text-muted"><span className="h-2 w-2 rounded-full bg-zinc-500" aria-hidden />Em dia</span>}</td>
-                    <td className="text-right">
-                      <RowMenu label={`Ações de ${c.name}`} items={[
-                        { label: "Adicionar fatura", icon: <ReceiptText className="h-4 w-4" />, onClick: () => { setErro(""); setInvoiceFor(c); } },
-                        { label: "Editar cartão", icon: <Pencil className="h-4 w-4" />, onClick: () => { setErro(""); setEditing(c); setCardModal(true); } },
-                        { label: "Excluir", icon: <Trash2 className="h-4 w-4" />, onClick: () => delCard(c), danger: true },
-                      ]} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </section>
       )}
 
@@ -244,9 +286,7 @@ export function CardsClient({ cards, accounts, actions, stats }: { cards: Card[]
         </section>
       )}
 
-      <Modal open={cardModal} onClose={() => { setCardModal(false); setEditing(null); }} title={editing ? `Editar ${editing.name}` : "Novo cartão"} footer={<><button className="btn-ghost" onClick={() => { setCardModal(false); setEditing(null); }}>Cancelar</button><button form="card-form" className="btn-primary">Salvar</button></>}>
-        <CardForm key={editing?.id ?? "novo"} card={editing} accounts={accounts} erro={erro} onSubmit={saveCard} />
-      </Modal>
+      {dialog && <CardDialog key={dialog === "new" ? "novo" : dialog.id} card={dialog === "new" ? null : dialog} accounts={accounts} onClose={() => setDialog(null)} />}
       <Modal open={!!invoiceFor} onClose={() => setInvoiceFor(null)} title={`Nova fatura · ${invoiceFor?.name ?? ""}`} size="sm" footer={<><button className="btn-ghost" onClick={() => setInvoiceFor(null)}>Cancelar</button><button form="invoice-form" className="btn-primary">Adicionar</button></>}>
         {invoiceFor && (
           <form id="invoice-form" onSubmit={saveInvoice} className="space-y-4">
@@ -287,49 +327,6 @@ function invoiceState(i: Invoice, now: number): { label: string; cls: string; ac
 }
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC" });
 
-
-/** Formulário do cartão (novo ou edição) com simulação: gastando X no mês, quantos pontos e qual CPM da anuidade. */
-function CardForm({ card, accounts, erro, onSubmit }: { card: Card | null; accounts: { id: string; label: string }[]; erro: string; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
-  const [ppd, setPpd] = useState(card ? String(card.pointsPerDollar).replace(".", ",") : "");
-  const [rate, setRate] = useState(card ? money(card.dollarRateCents) : "5,50");
-  const [fee, setFee] = useState(card ? money(card.annualFeeCents) : "");
-  const [waiver, setWaiver] = useState(card ? money(card.feeWaiverCents) : "");
-  const [spend, setSpend] = useState(card?.invoices[0] ? money(card.invoices[0].amountCents) : "5.000,00");
-  const rule = {
-    pointsPerDollar: Math.round((Number(ppd.replace(",", ".")) || 0) * 100),
-    dollarRateCents: parseBRLToCents(rate) ?? 0,
-    annualFeeCents: parseBRLToCents(fee) ?? 0,
-    feeWaiverCents: parseBRLToCents(waiver) || null,
-  };
-  const s = simulateMonth(rule, parseBRLToCents(spend) ?? 0);
-  return (
-    <form id="card-form" onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">
-      {erro && <div className="sm:col-span-2"><Alert>{erro}</Alert></div>}
-      <Field label="Nome do cartão" required className="sm:col-span-2"><input className="input" name="name" required maxLength={80} placeholder="Ex.: Visa Infinite do banco X" defaultValue={card?.name} /></Field>
-      <Field label="Conta que recebe os pontos" required><select className="input" name="accountId" required defaultValue={card?.accountId ?? ""}><option value="" disabled>Selecione</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></Field>
-      <Field label="Bandeira"><input className="input" name="brand" maxLength={30} placeholder="Visa, Mastercard…" defaultValue={card?.brand ?? ""} /></Field>
-      <Field label="Pontos por dólar" required><input className="input" name="ppd" inputMode="decimal" required placeholder="2,2" value={ppd} onChange={(e) => setPpd(e.target.value)} /></Field>
-      <Field label="Cotação do dólar (R$)" hint="Usada para estimar os pontos"><input className="input" name="rate" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} /></Field>
-      <Field label="Dia do fechamento" required><input className="input" name="closing" type="number" min={1} max={31} required defaultValue={card?.closingDay} /></Field>
-      <Field label="Dia do vencimento" required><input className="input" name="due" type="number" min={1} max={31} required defaultValue={card?.dueDay} /></Field>
-      <Field label="Pontos já acumulados no cartão" hint="Entram no saldo da conta que recebe os pontos (lançamento “Saldo inicial”)"><input className="input" name="balance" inputMode="numeric" placeholder="0" defaultValue={card?.balancePoints ? fmtPts(card.balancePoints) : ""} /></Field>
-      <Field label="Data do saldo"><input className="input" type="date" name="balanceDate" defaultValue={card?.balanceDate ?? today()} /></Field>
-      <Field label="Anuidade (R$ por ano)" hint="Cobrada em 12 parcelas; cada parcela vira custo dos pontos da fatura"><input className="input" name="fee" inputMode="decimal" placeholder="0,00" value={fee} onChange={(e) => setFee(e.target.value)} /></Field>
-      <Field label="Isenta gastando (R$ por mês)" hint="Vazio: sem isenção. Ex.: 8.000,00"><input className="input" name="waiver" inputMode="decimal" placeholder="8.000,00" value={waiver} onChange={(e) => setWaiver(e.target.value)} /></Field>
-      <section className="rounded-xl border border-line bg-panel2 p-4 sm:col-span-2" aria-label="Simulação do mês">
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Se eu gastar no mês (R$)" className="w-44"><input className="input" inputMode="decimal" value={spend} onChange={(e) => setSpend(e.target.value)} aria-label="Gasto no mês" /></Field>
-          <dl className="grid flex-1 grid-cols-3 gap-2 text-sm">
-            <div><dt className="kicker">Pontos</dt><dd className="font-semibold tabular-nums">{fmtPts(s.points)}</dd></div>
-            <div><dt className="kicker">Anuidade no mês</dt><dd className="font-semibold tabular-nums">{rule.annualFeeCents <= 0 ? "—" : s.waived ? "Isenta" : fmtBRL(s.feeCents)}</dd></div>
-            <div><dt className="kicker">CPM da anuidade</dt><dd className="font-semibold tabular-nums" aria-label="CPM da anuidade">{s.cpmCents > 0 ? fmtBRL(s.cpmCents) : "R$ 0,00"}</dd></div>
-          </dl>
-        </div>
-        {rule.annualFeeCents > 0 && rule.feeWaiverCents && !s.waived && <p className="mt-2 text-xs text-muted">Faltam {fmtBRL(rule.feeWaiverCents - (parseBRLToCents(spend) ?? 0))} no mês para isentar a anuidade.</p>}
-      </section>
-    </form>
-  );
-}
 
 type MenuItem = { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean };
 
