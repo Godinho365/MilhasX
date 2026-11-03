@@ -527,3 +527,26 @@ export const viajeFacilSchema = z.object({
   notes: z.string().trim().max(1000).nullable().optional(),
 });
 export const viajeFacilPaidSchema = z.object({ paid: z.boolean() });
+
+// Financeiro
+export const finAccountSchema = z.object({
+  name: z.string().trim().min(1, "Dê um nome para a conta").max(60),
+  kind: z.enum(["BANK", "CASH", "WALLET", "OTHER"]),
+  initialCents: z.number().int().min(-100_000_000_00).max(100_000_000_00),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida").optional(),
+});
+export const finTxSchema = z.object({
+  type: z.enum(["INCOME", "EXPENSE", "TRANSFER"]),
+  accountId: id,
+  toAccountId: id.nullable().optional(),
+  category: z.string().trim().max(80).nullable().optional(),
+  amountCents: z.number().int().positive("Informe o valor").max(100_000_000_00),
+  description: z.string().trim().max(200).nullable().optional(),
+  counterpart: z.string().trim().max(120).nullable().optional(),
+  competence: dateStr,
+  dueDate: dateStr,
+  paid: z.boolean(),
+  repeatMonths: z.number().int().min(1).max(36).optional(),
+});
+export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
+export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });

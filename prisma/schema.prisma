@@ -119,6 +119,8 @@ model User {
   travelOrders        TravelOrder[]
   orderPipelines      OrderPipeline[]
   viajeFacil          ViajeFacil[]
+  finAccounts         FinAccount[]
+  finTransactions     FinTransaction[]
   milesDeals          MilesDeal[]
   flightQuotes        FlightQuote[]
   flightSearches      FlightSearch[]
@@ -349,6 +351,8 @@ model Sale {
   refundTaxReceivedAt   DateTime? // estorno da taxa de embarque e dos repasses pela companhia
   paidAt                DateTime? // cliente pagou (vazio = a receber)
   tags                  String[]         @default([]) // etiquetas livres para filtrar
+  nfNumber              String? // nota fiscal de serviço emitida para a venda
+  nfIssuedAt            DateTime?
   createdAt             DateTime         @default(now())
 
   items         SaleItem[]
@@ -1030,4 +1034,44 @@ model ViajeFacil {
   updatedAt      DateTime  @updatedAt
 
   @@index([userId, deadline])
+}
+
+// Financeiro: contas (banco, caixa) e lançamentos de receita, despesa e transferência entre contas.
+model FinAccount {
+  id           String           @id @default(cuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  kind         String           @default("BANK") // BANK | CASH | WALLET | OTHER
+  initialCents Int              @default(0) // saldo no dia em que a conta foi cadastrada
+  color        String           @default("#60a5fa")
+  archived     Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  outgoing     FinTransaction[] @relation("FinFrom")
+  incoming     FinTransaction[] @relation("FinTo")
+
+  @@index([userId])
+}
+
+model FinTransaction {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        String // INCOME | EXPENSE | TRANSFER
+  accountId   String
+  account     FinAccount  @relation("FinFrom", fields: [accountId], references: [id], onDelete: Cascade)
+  toAccountId String? // transferência: conta de destino
+  toAccount   FinAccount? @relation("FinTo", fields: [toAccountId], references: [id], onDelete: Cascade)
+  category    String? // "Grupo › Item" (domain/finance.ts)
+  amountCents Int
+  description String?
+  counterpart String? // fornecedor ou cliente
+  competence  DateTime // mês a que pertence (regime de competência)
+  dueDate     DateTime // vencimento / data prevista do pagamento (regime de caixa)
+  paidAt      DateTime? // pago ou recebido; vazio = pendente (não mexe no saldo)
+  repeatGroup String? // lançamentos criados juntos pela repetição mensal
+  createdAt   DateTime    @default(now())
+
+  @@index([userId, dueDate])
+  @@index([userId, competence])
 }
