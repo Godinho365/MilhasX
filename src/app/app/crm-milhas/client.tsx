@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck, ImageUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
-import { fmtBRL, fmtPts, parseBRLToCents, fmtDateTime, fmtDay as fmtDayBR } from "@/lib/format";
+import { fmtBRL, fmtPts, parseBRLToCents, fmtDate, fmtDateTime, fmtDay as fmtDayBR } from "@/lib/format";
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
@@ -167,7 +167,13 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
             ))}
           </div>
         )}
-        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
+        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>, {deal.paidAt ? `paga em ${fmtDate(deal.paidAt)}` : "a receber"}. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
+        {deal && onMove && !deal.saleId && (deal.stage === "ISSUED" || deal.stage === "PAID") && (
+          <Alert kind="info">
+            Esta negociação {deal.stage === "PAID" ? "está paga" : "foi emitida"}, mas a venda ainda não está em Vendas.{" "}
+            <button type="button" className="font-medium underline" onClick={() => onMove(deal.stage)}>{deal.stage === "PAID" ? "Lançar a venda paga" : "Lançar a venda a receber"}</button>
+          </Alert>
+        )}
         <Field label="Comprador">
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Tipo de comprador">
             {BUYER_TYPES.map((b) => (
@@ -308,7 +314,8 @@ function FileBox({ title, what, url, file, hint, doneHint, removable = true, blo
   );
 }
 
-/** Emitida só com o bilhete (aí aparece a mensagem para o comprador); paga só com o comprovante (aí vira venda). */
+/** Emitida só com o bilhete (aí aparece a mensagem para o comprador e vira venda a receber); paga só com o
+ *  comprovante (aí a venda fica paga). */
 function Emission({ deal: initial }: { deal: DealView }) {
   const router = useRouter();
   const [deal, setDeal] = useState(initial);
@@ -325,19 +332,19 @@ function Emission({ deal: initial }: { deal: DealView }) {
     <>
       <FaceCheck deal={deal} onChanged={(d) => { setDeal(d); refreshSafe(router); }} />
       <FileBox
-        title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket}
+        title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket} removable={!deal.saleId}
         blocked={verified ? undefined : "Faça a verificação acima (validação facial do titular) antes de anexar o bilhete."}
-        hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida e a mensagem para o comprador aparece."
-        doneHint="O comprador pode baixar pela página dele."
-        onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: negociação emitida", removed: "Bilhete removido" })}
+        hint="Anexe a passagem (PDF ou imagem) depois de emitir: só então a negociação fica Emitida, a venda entra em Vendas como a receber e a mensagem para o comprador aparece."
+        doneHint={deal.saleId ? "O comprador pode baixar pela página dele. Para tirar o bilhete, exclua a venda em Vendas." : "O comprador pode baixar pela página dele."}
+        onChanged={changed({ up: "Bilhete anexado", moved: "Bilhete anexado: venda lançada a receber", removed: "Bilhete removido" })}
       />
       {deal.ticket && <IssuedMessage deal={deal} />}
       {(deal.ticket || deal.receipt) && (
         <FileBox
-          title="Comprovante de pagamento" what="comprovante" url={`/api/miles-deals/${deal.id}/receipt`} file={deal.receipt} removable={!deal.saleId}
-          hint="Quando o comprador pagar, anexe o comprovante: a negociação vai para Pago e a venda é lançada em Vendas (com o bilhete e o comprovante anexados)."
-          doneHint={deal.saleId ? "Venda lançada em Vendas, com o bilhete e o comprovante anexados." : "A venda ainda não foi lançada."}
-          onChanged={changed({ up: "Comprovante anexado", moved: "Comprovante anexado: venda lançada em Vendas", removed: "Comprovante removido" })}
+          title="Comprovante de pagamento" what="comprovante" url={`/api/miles-deals/${deal.id}/receipt`} file={deal.receipt} removable={!(deal.saleId && deal.stage === "PAID")}
+          hint="Quando o comprador pagar, anexe o comprovante: a negociação vai para Pago e a venda fica paga em Vendas (com o bilhete e o comprovante anexados)."
+          doneHint={deal.saleId ? (deal.paidAt ? "Venda paga em Vendas, com o bilhete e o comprovante anexados." : "Venda a receber em Vendas.") : "A venda ainda não foi lançada."}
+          onChanged={changed({ up: "Comprovante anexado", moved: "Comprovante anexado: venda paga", removed: "Comprovante removido" })}
         />
       )}
     </>
@@ -840,7 +847,11 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
           {d.locator && <span className="rounded-full bg-panel2 px-2 py-0.5 font-mono">{d.locator}</span>}
           {d.ticket && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-accent" title={`Bilhete: ${d.ticket.name}`}>Bilhete</span>}
           {d.profitCents != null && <span className={`rounded-full px-2 py-0.5 font-medium ${d.profitCents >= 0 ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"}`}>lucro {fmtBRL(d.profitCents)}</span>}
-          {d.saleId && <span className="flex items-center gap-0.5 rounded-full bg-panel2 px-2 py-0.5"><Receipt className="h-3 w-3" />venda lançada</span>}
+          {d.saleId ? (
+            d.paidAt
+              ? <span className="flex items-center gap-0.5 rounded-full bg-panel2 px-2 py-0.5" title={`Venda paga em ${fmtDate(d.paidAt)}`}><Receipt className="h-3 w-3" />venda paga</span>
+              : <span className="flex items-center gap-0.5 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-300" title="Venda lançada em Vendas, esperando o pagamento"><Receipt className="h-3 w-3" />a receber</span>
+          ) : (d.stage === "ISSUED" || d.stage === "PAID") && <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-red-300" title="Abra a negociação para lançar a venda">venda não lançada</span>}
         </div>
       </button>
       {wa && (
@@ -876,7 +887,10 @@ export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null
       setList(prev);
       return toast(r.erro, "error");
     }
-    if (stage === "PAID" && !prev.find((d) => d.id === id)?.saleId) toast("Venda lançada em Vendas");
+    const was = prev.find((d) => d.id === id);
+    if (stage === "ISSUED" && !was?.saleId) toast("Venda lançada em Vendas, a receber");
+    else if (stage === "PAID" && was?.stage !== "PAID") toast(was?.saleId ? "Venda marcada como paga" : "Venda lançada em Vendas, já paga");
+    else if (stage === "ISSUED" && was?.stage === "PAID") toast("A venda voltou para a receber");
     refreshSafe(router);
   }
   function drop(e: React.DragEvent, stage: DealStageKey) {
@@ -911,6 +925,8 @@ export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null
             const items = shown.filter((d) => d.stage === stage);
             const total = items.reduce((t, d) => t + (d.chargeCents ?? 0), 0);
             const profit = items.reduce((t, d) => t + (d.profitCents ?? 0), 0);
+            // emitidas: o que o comprador ainda deve (vendas sem pagamento)
+            const receivable = items.filter((d) => !d.paidAt).reduce((t, d) => t + (d.chargeCents ?? 0), 0);
             return (
               <section key={stage} aria-label={DEAL_STAGE_LABELS[stage]} onDragOver={(e) => { e.preventDefault(); setOver(stage); }} onDragLeave={() => setOver((s) => (s === stage ? null : s))} onDrop={(e) => drop(e, stage)}
                 className={`flex w-[290px] shrink-0 flex-col overflow-hidden rounded-2xl border transition-colors ${over === stage ? "border-accent-light bg-accent-soft/40" : "border-line bg-panel2/40"}`}>
@@ -920,10 +936,12 @@ export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null
                   <span className="flex-1 truncate">{DEAL_STAGE_LABELS[stage]}</span>
                   <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-medium tabular-nums text-muted">{items.length}</span>
                 </h2>
-                <p className="px-3 pb-2 text-[11px] text-muted">{total > 0 ? `${fmtBRL(total)} · lucro ${fmtBRL(profit)}` : " "}</p>
+                <p className="px-3 pb-2 text-[11px] text-muted">
+                  {total > 0 ? <>{stage === "ISSUED" && receivable > 0 ? <b className="font-semibold text-amber-300">{fmtBRL(receivable)} a receber</b> : fmtBRL(total)} · lucro {fmtBRL(profit)}</> : " "}
+                </p>
                 <ul className="max-h-[calc(100vh-320px)] min-h-[120px] flex-1 space-y-2 overflow-y-auto px-2 pb-2" role="list">
                   {items.map((d) => <Card key={d.id} d={d} onOpen={() => setOpen(d.id)} onDragStart={(e) => { dragged.current = d.id; e.dataTransfer.setData("text/plain", d.id); }} />)}
-                  {items.length === 0 && <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-line text-center text-xs text-muted">{q || buyer !== "ALL" ? "Nenhuma negociação com esse filtro." : stage === "PAID" ? "Arraste para cá para lançar a venda" : "Arraste negociações para cá"}</li>}
+                  {items.length === 0 && <li className="flex h-24 items-center justify-center rounded-xl border border-dashed border-line text-center text-xs text-muted">{q || buyer !== "ALL" ? "Nenhuma negociação com esse filtro." : stage === "ISSUED" ? "Com o bilhete, a negociação vem para cá e vira venda a receber" : stage === "PAID" ? "Arraste para cá quando o comprador pagar" : "Arraste negociações para cá"}</li>}
                 </ul>
                 {stage === "NEW" && <button type="button" className="mx-2 mb-2 flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed border-line text-sm text-muted transition-colors hover:border-zinc-500 hover:text-zinc-100" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Adicionar negociação</button>}
               </section>

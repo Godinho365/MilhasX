@@ -22,7 +22,7 @@ export default async function CrmMilhasPage({ searchParams }: { searchParams: Pr
   ]);
   const accountOpts = accounts.map((a) => ({ id: a.id, label: a.nickname || `${a.program.name} · ${a.holder.name}`, balance: a.balance, cpmCents: a.balance > 0 ? Math.round((a.costCents * 1000) / a.balance) : null }));
   const subtitle = {
-    kanban: "Negociações de venda de milhas. Com o bilhete a negociação fica Emitida; com o comprovante vai para Pago e a venda é lançada.",
+    kanban: "Negociações de venda de milhas. Com o bilhete a negociação fica Emitida e a venda entra em Vendas como a receber; com o comprovante vai para Pago e a venda fica paga.",
     lista: "Todas as negociações em formato de lista, ativas e arquivadas.",
     dashboard: "Os principais indicadores das suas vendas de milhas.",
   }[view];

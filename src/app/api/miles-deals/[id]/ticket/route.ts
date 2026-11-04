@@ -26,7 +26,8 @@ export const POST = route(async (req, { params }) => {
   try {
     name = decodeURIComponent(req.headers.get("x-file-name") || "bilhete");
   } catch {}
-  return json({ ok: true, item: await addDealTicket(u.id, (await params).id!, name, await readBodyLimited(req, TICKET_MAX, "Arquivo maior que 10 MB")) }, 201);
+  const r = await addDealTicket(u.id, (await params).id!, name, await readBodyLimited(req, TICKET_MAX, "Arquivo maior que 10 MB"));
+  return json({ ok: true, ...r }, 201);
 });
 
 export const DELETE = route(async (req, { params }) => {

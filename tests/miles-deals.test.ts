@@ -1,4 +1,4 @@
-// CRM Milhas: negociações de venda de milhas, Kanban e venda lançada ao chegar em "Pago".
+// CRM Milhas: negociações de venda de milhas, Kanban, venda a receber ao emitir e paga ao chegar em "Pago".
 import { describe, it, expect, beforeEach } from "vitest";
 import { resetDb, Client, seedPrograms } from "./helpers";
 import * as register from "@/app/api/auth/register/route";
@@ -59,7 +59,7 @@ describe("CRM Milhas", () => {
     expect((await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 10000, saleCpmCents: 3000, profitCents: null }, { id: a.id })).data.item).toMatchObject({ profitCents: 5000, profitManual: false });
   });
 
-  it("ao mover para Pago lança a venda uma vez, baixa os pontos e trava a negociação", async () => {
+  it("ao mover para Pago lança a venda uma vez, já paga, baixa os pontos e trava a negociação", async () => {
     const d = (await newDeal({ customerName: "Agência Voa" })).data.item;
     // Sem comprovante de pagamento não vai para Pago
     expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).status).toBe(409);
@@ -80,6 +80,8 @@ describe("CRM Milhas", () => {
     expect(await acc(lat)).toMatchObject({ balance: 10000, costCents: 25000 });
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
     expect(s).toMatchObject({ points: 10000, totalCents: 30000 });
+    expect(s.paidAt).toBeTruthy(); // com o comprovante a venda já entra paga
+    expect(paid.paidAt).toBe(s.paidAt!.toISOString());
     expect(s.items[0]).toMatchObject({ kind: "OTHER", clientType: "AGENCY", points: 10000, salePriceCents: 30000 });
     expect(await prisma.saleAttachment.findMany({ where: { saleId: paid.saleId }, select: { name: true } })).toEqual([{ name: "comprovante.pdf" }]);
     // venda lançada: o comprovante não sai mais da negociação (está nos anexos da venda)
@@ -89,7 +91,7 @@ describe("CRM Milhas", () => {
     // De novo em Pago não duplica; voltar de etapa, mudar a venda ou excluir é bloqueado
     await c.call(move.POST, "POST", "/x", { stage: "PAID", position: 0 }, { id: d.id });
     expect(await prisma.sale.count()).toBe(1);
-    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).status).toBe(409);
+    expect((await c.call(move.POST, "POST", "/x", { stage: "AWAITING" }, { id: d.id })).status).toBe(409);
     expect((await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 5000, saleCpmCents: 3000 }, { id: d.id })).status).toBe(409);
     expect((await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa Ltda", accountId: lat, points: 10000, saleCpmCents: 3000 }, { id: d.id })).status).toBe(200);
     expect((await c.call(deal.DELETE, "DELETE", "/x", undefined, { id: d.id })).status).toBe(409);
@@ -158,28 +160,84 @@ describe("CRM Milhas", () => {
     expect((await up(Buffer.from("texto qualquer"))).status).toBe(415);
     const att = await up(Buffer.from("%PDF-1.4\n"));
     expect(att.status).toBe(201);
-    expect((await att.json()).item).toMatchObject({ stage: "ISSUED", ticket: { name: "bilhete.pdf" } });
+    // emitida: vira venda a receber em Vendas (baixa os pontos), com o bilhete nos anexos
+    const issued = await att.json();
+    expect(issued.aviso).toBeNull();
+    expect(issued.item).toMatchObject({ stage: "ISSUED", ticket: { name: "bilhete.pdf" }, paidAt: null });
+    expect(issued.item.saleId).toBeTruthy();
+    expect(await acc(lat)).toMatchObject({ balance: 20000 - 8673 });
+    const open = await prisma.sale.findUniqueOrThrow({ where: { id: issued.item.saleId }, include: { attachments: { select: { name: true } } } });
+    expect(open.paidAt).toBeNull();
+    expect(open.attachments.map((a) => a.name)).toEqual(["bilhete.pdf"]);
     expect((await publicDeal("ana", token))!.deal).toMatchObject({ issued: true, locator: "ABC123", ticketName: "bilhete.pdf" });
     const pubTicket = await pubTicketRoute.GET(new Request("http://localhost:3100/x"), { params: Promise.resolve({ slug: "ana", token }) });
     expect(pubTicket.status).toBe(200);
     expect(Buffer.from(await pubTicket.arrayBuffer()).toString()).toBe("%PDF-1.4\n");
     expect((await send([ana])).status).toBe(409);
-    // tirar o bilhete volta para "Aguardando"; anexar de novo emite outra vez
+    // virou venda: o bilhete não sai mais (só troca), trocar não duplica a venda e não volta para antes de Emitido
     const del = await ticket.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
-    expect((await del.json()).item).toMatchObject({ stage: "AWAITING", ticket: null });
+    expect(del.status).toBe(409);
     expect((await up(Buffer.from("%PDF-1.4\n"))).status).toBe(201);
+    expect(await prisma.sale.count()).toBe(1);
+    expect((await c.call(move.POST, "POST", "/x", { stage: "AWAITING" }, { id: d.id })).status).toBe(409);
 
-    // Em Pago, a venda cobra milhas + taxas e as taxas são custo repassado (não mudam o lucro)
+    // Em Pago (com o comprovante) a mesma venda fica paga; ela cobra milhas + taxas e as taxas são custo repassado
     const paidRes = await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.5\n"), "pix.pdf");
     const { item: paid, aviso } = await paidRes.json();
     expect(aviso).toBeNull();
     expect(paid.stage).toBe("PAID");
+    expect(paid.saleId).toBe(issued.item.saleId);
+    expect(paid.paidAt).toBeTruthy();
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true, attachments: { select: { name: true } } } });
+    expect(s.paidAt).toBeTruthy();
     expect(s.attachments.map((a) => a.name).sort()).toEqual(["bilhete.pdf", "pix.pdf"]);
     // quem ocupa vaga no limite de CPFs é o passageiro emitido, não o comprador (Agência Voa)
     expect(await prisma.accountBeneficiary.findMany({ where: { saleId: s.id }, select: { name: true, document: true, accountId: true } })).toEqual([{ name: "Ana Souza Lima", document: "12345678909", accountId: lat }]);
     expect(s.totalCents).toBe(26125);
     expect(s.items[0]).toMatchObject({ salePriceCents: 22550, reservation: "ABC123", costs: [{ type: "TAXA_EMBARQUE", amountCents: 3575 }] });
+
+    // Pago de volta para Emitido: a venda volta a receber; em Pago de novo, quita (sempre a mesma venda)
+    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).data.item).toMatchObject({ stage: "ISSUED", paidAt: null });
+    expect((await prisma.sale.findUniqueOrThrow({ where: { id: s.id } })).paidAt).toBeNull();
+    expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item.paidAt).toBeTruthy();
+    expect(await prisma.sale.count()).toBe(1);
+  });
+
+  it("bilhete sem conta fica salvo com aviso; completando a negociação, Emitido lança a venda a receber", async () => {
+    const d = (await newDeal({ buyerType: "BALCAO", customerName: "Balcão X" })).data.item;
+    await c.call(faceRoute.POST, "POST", "/x", { status: "NOT_NEEDED" }, { id: d.id });
+    const r = await (await sendFile(ticket.POST, d.id, Buffer.from("%PDF-1.4\n"), "bilhete.pdf")).json();
+    expect(r.aviso).toMatch(/Bilhete salvo.*Emitido.*conta/);
+    expect(r.item).toMatchObject({ stage: "NEW", ticket: { name: "bilhete.pdf" }, saleId: null });
+    // negociação que já estava em Emitido sem venda (de antes desta regra): lança ao mover, mesmo na mesma coluna
+    await prisma.milesDeal.update({ where: { id: d.id }, data: { stage: "ISSUED" } });
+    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).status).toBe(400); // falta a conta
+    await c.call(deal.PUT, "PUT", "/x", { buyerType: "BALCAO", customerName: "Balcão X", accountId: lat, points: 5000, saleCpmCents: 2800 }, { id: d.id });
+    const item = (await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).data.item;
+    expect(item).toMatchObject({ stage: "ISSUED", paidAt: null });
+    expect(item.saleId).toBeTruthy();
+    expect(await acc(lat)).toMatchObject({ balance: 15000 });
+    expect((await prisma.sale.findUniqueOrThrow({ where: { id: item.saleId } })).paidAt).toBeNull();
+  });
+
+  it("sem a quantidade de CPFs a venda conta 1 CPF; mudando os CPFs depois, a venda e o limite da conta acompanham", async () => {
+    const body = { buyerType: "BALCAO", customerName: "Balcão X", accountId: lat, points: 5000, saleCpmCents: 2800 };
+    const d = (await newDeal(body)).data.item;
+    await c.call(faceRoute.POST, "POST", "/x", { status: "NOT_NEEDED" }, { id: d.id });
+    const { item } = await (await sendFile(ticket.POST, d.id, Buffer.from("%PDF-1.4\n"), "bilhete.pdf")).json();
+    expect(item).toMatchObject({ stage: "ISSUED", passengers: null, passengersData: [] });
+    const cpfs = async () => ({
+      venda: (await prisma.saleItem.findFirstOrThrow({ where: { saleId: item.saleId } })).passengers,
+      conta: (await prisma.accountBeneficiary.findMany({ where: { saleId: item.saleId, accountId: lat }, select: { name: true }, orderBy: { name: "asc" } })).map((b) => b.name),
+    });
+    // toda emissão usa ao menos um CPF: entra no lucro por CPF e ocupa vaga na conta
+    expect(await cpfs()).toEqual({ venda: 1, conta: ["Anônimo"] });
+    // combinou 2 CPFs depois de lançar: a venda passa a contar 2
+    expect((await c.call(deal.PUT, "PUT", "/x", { ...body, passengers: 2 }, { id: d.id })).status).toBe(200);
+    expect(await cpfs()).toEqual({ venda: 2, conta: ["Anônimo", "Anônimo"] });
+    // passageiro informado ocupa a vaga com o nome; o outro CPF combinado segue anônimo
+    await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana Souza Lima", cpf: "123.456.789-09", birthDate: "1990-05-20" }] }, { id: d.id });
+    expect(await cpfs()).toEqual({ venda: 2, conta: ["Ana Souza Lima", "Anônimo"] });
   });
 
   it("usuário informa os passageiros que o comprador mandou pelo WhatsApp (e pode limpar)", async () => {
