@@ -4,7 +4,7 @@ import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
 import { createSale } from "./sales";
 import { brDay } from "@/domain/brasilia";
-import { DEAL_STAGES, dealChargeCents, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
+import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
 import { unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 
@@ -146,7 +146,7 @@ export async function milesDealsDashboard(userId: string, days: number | null, n
   const sum = (l: DealView[], f: (d: DealView) => number | null | undefined) => l.reduce((t, d) => t + (f(d) ?? 0), 0);
   const revenue = sum(paid, (d) => d.chargeCents);
   const points = sum(paid, (d) => d.points);
-  const pax = sum(paid, (d) => d.passengersData.length || d.passengers);
+  const pax = sum(paid, dealCpfs);
   const profit = sum(paid, (d) => d.profitCents);
   const byBuyer = new Map<string, { name: string; deals: number; points: number; revenueCents: number }>();
   for (const d of paid) {
@@ -204,7 +204,9 @@ export async function updateDeal(userId: string, id: string, input: DealInput) {
   if (d.saleId && (next.accountId !== d.accountId || next.points !== d.points || next.saleCpmCents !== d.saleCpmCents || next.taxesCents !== d.taxesCents)) {
     throw new DomainError(409, "Esta negociação já virou venda: para mudar conta, pontos, milheiro ou taxas, exclua a venda em Vendas");
   }
-  return view(await prisma.milesDeal.update({ where: { id }, data: next, include }));
+  const saved = await prisma.milesDeal.update({ where: { id }, data: next, include });
+  if (dealCpfs(saved) !== dealCpfs(d)) await syncSaleCpfs(userId, saved);
+  return view(saved);
 }
 
 /** Lança a venda da negociação em Vendas, a receber (idempotente: mover de novo não duplica). */
@@ -226,8 +228,8 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       salePriceCents: dealTotalCents(d.points, d.saleCpmCents)!,
       clientType: d.buyerType === "FINAL" ? "FINAL" : "AGENCY",
       customerIds: d.customerId ? [d.customerId] : [],
-      // CPFs da emissão: o combinado ou, sem ele, os passageiros informados (contam no lucro por CPF)
-      passengers: d.passengers ?? ((Array.isArray(d.passengersData) && d.passengersData.length) || undefined),
+      // CPFs da emissão (ao menos 1): contam no lucro por CPF
+      passengers: dealCpfs(d),
       // Taxas pagas na emissão e cobradas do comprador: entram no total como custo repassado
       costs: d.taxesCents ? [{ type: "TAXA_EMBARQUE", amountCents: d.taxesCents }] : [],
       reservation: d.locator ?? undefined,
@@ -246,15 +248,25 @@ async function passengersAsBeneficiaries(userId: string, d: Awaited<ReturnType<t
   const pax = (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[];
   if (!d.accountId) return;
   const sale = await prisma.sale.findUniqueOrThrow({ where: { id: saleId }, select: { occurredAt: true } });
-  // sem nomes para todos os CPFs combinados, o restante fica "Anônimo"
+  // sem nomes para todos os CPFs da emissão, o restante fica "Anônimo"
   const rows = [
     ...pax.map((p) => ({ name: p.name.trim(), document: p.cpf.replace(/\D/g, "") || null })),
-    ...Array.from({ length: Math.max(0, (d.passengers ?? 0) - pax.length) }, () => ({ name: ANONYMOUS, document: null })),
+    ...Array.from({ length: dealCpfs(d) - pax.length }, () => ({ name: ANONYMOUS, document: null })),
   ];
   await prisma.$transaction([
     prisma.accountBeneficiary.deleteMany({ where: { saleId, userId } }),
     prisma.accountBeneficiary.createMany({ data: rows.map((r) => ({ userId, accountId: d.accountId!, saleId, ...r, usedAt: sale.occurredAt })) }),
   ]);
+}
+
+/** Negociação já lançada: mudou a quantidade de CPFs ou os passageiros, a venda e o limite da conta acompanham.
+ *  Só mexe na venda com um item em milhas (o que a negociação criou); editada em Vendas com mais itens, fica como está. */
+async function syncSaleCpfs(userId: string, d: Awaited<ReturnType<typeof own>>) {
+  if (!d.saleId) return;
+  const items = await prisma.saleItem.findMany({ where: { saleId: d.saleId, issuedWith: "POINTS" }, select: { id: true } });
+  if (items.length !== 1) return;
+  await prisma.saleItem.update({ where: { id: items[0]!.id }, data: { passengers: dealCpfs(d) } });
+  await passengersAsBeneficiaries(userId, d, d.saleId);
 }
 
 /** Bilhete e comprovante da negociação vão para os anexos da venda (sem repetir o que já está lá). */
@@ -475,7 +487,8 @@ export async function publicDealTicket(slug: string, token: string) {
 export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
   const d = await own(userId, id);
   const data = passengers.map(cleanPassenger);
-  await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
+  const saved = await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
+  await syncSaleCpfs(userId, saved);
   return getDeal(userId, id);
 }
 

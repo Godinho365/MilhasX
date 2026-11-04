@@ -220,6 +220,26 @@ describe("CRM Milhas", () => {
     expect((await prisma.sale.findUniqueOrThrow({ where: { id: item.saleId } })).paidAt).toBeNull();
   });
 
+  it("sem a quantidade de CPFs a venda conta 1 CPF; mudando os CPFs depois, a venda e o limite da conta acompanham", async () => {
+    const body = { buyerType: "BALCAO", customerName: "Balcão X", accountId: lat, points: 5000, saleCpmCents: 2800 };
+    const d = (await newDeal(body)).data.item;
+    await c.call(faceRoute.POST, "POST", "/x", { status: "NOT_NEEDED" }, { id: d.id });
+    const { item } = await (await sendFile(ticket.POST, d.id, Buffer.from("%PDF-1.4\n"), "bilhete.pdf")).json();
+    expect(item).toMatchObject({ stage: "ISSUED", passengers: null, passengersData: [] });
+    const cpfs = async () => ({
+      venda: (await prisma.saleItem.findFirstOrThrow({ where: { saleId: item.saleId } })).passengers,
+      conta: (await prisma.accountBeneficiary.findMany({ where: { saleId: item.saleId, accountId: lat }, select: { name: true }, orderBy: { name: "asc" } })).map((b) => b.name),
+    });
+    // toda emissão usa ao menos um CPF: entra no lucro por CPF e ocupa vaga na conta
+    expect(await cpfs()).toEqual({ venda: 1, conta: ["Anônimo"] });
+    // combinou 2 CPFs depois de lançar: a venda passa a contar 2
+    expect((await c.call(deal.PUT, "PUT", "/x", { ...body, passengers: 2 }, { id: d.id })).status).toBe(200);
+    expect(await cpfs()).toEqual({ venda: 2, conta: ["Anônimo", "Anônimo"] });
+    // passageiro informado ocupa a vaga com o nome; o outro CPF combinado segue anônimo
+    await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Ana Souza Lima", cpf: "123.456.789-09", birthDate: "1990-05-20" }] }, { id: d.id });
+    expect(await cpfs()).toEqual({ venda: 2, conta: ["Ana Souza Lima", "Anônimo"] });
+  });
+
   it("usuário informa os passageiros que o comprador mandou pelo WhatsApp (e pode limpar)", async () => {
     const d = (await newDeal({ accountId: lat, points: 8673, saleCpmCents: 2600, passengers: 1 })).data.item;
     const r = await c.call(paxRoute.PUT, "PUT", "/x", { passengers: [{ name: "Nicolas Eduardo Amaral", firstName: "Nicolas", lastName: "Eduardo Amaral", cpf: "037.355.180-01", birthDate: "2002-03-23", gender: "M", phone: "(21) 99493-4776" }] }, { id: d.id });

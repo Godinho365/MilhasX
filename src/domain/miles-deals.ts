@@ -27,6 +27,11 @@ export const dealChargeCents = (points: number | null, saleCpmCents: number | nu
   return miles == null ? (taxesCents ?? null) : miles + (taxesCents ?? 0);
 };
 
+/** CPFs que a emissão usa: o combinado ou os passageiros informados (o maior); sem nenhum, 1,
+ *  porque toda emissão usa ao menos um CPF. Vale para a venda, o limite de CPFs da conta e o lucro por CPF. */
+export const dealCpfs = (d: { passengers: number | null; passengersData: unknown }) =>
+  Math.max(d.passengers ?? 0, Array.isArray(d.passengersData) ? d.passengersData.length : 0, 1);
+
 export type DealPaste = { orderLink?: string; points?: number; passengers?: number; taxesCents?: number };
 
 /**
