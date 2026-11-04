@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Layers, User, Check, ChevronsUpDown, Loader2, SlidersHorizontal } from "lucide-react";
-import { selectHolder } from "@/app/app/actions";
+import { api } from "@/lib/api";
 import { Avatar } from "./stat";
 import { toast } from "./feedback";
 
@@ -42,8 +42,9 @@ export function HolderPicker({ holders, value, redirectFor }: { holders: HolderO
     setOpen(false);
     if (v === value) return;
     start(async () => {
-      const r = await selectHolder(v);
-      if (!r.ok) return toast(r.erro, "error");
+      // falha de rede vira aviso (o api() não lança), em vez de derrubar a tela
+      const r = await api("/api/preferences/holder", "PUT", { value: v });
+      if (!r.ok) return toast(r.status === 0 ? "Sem conexão com o servidor: o titular não foi trocado" : r.erro, "error");
       // Recarrega por completo: todas as telas dependem do titular e não podem ficar com dado em cache.
       // Na página de uma conta, vai direto para a mesma conta (programa) do novo titular.
       const to = redirectFor?.(v);

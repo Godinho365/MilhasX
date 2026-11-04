@@ -3,8 +3,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getUserByToken, SESSION_COOKIE } from "./auth";
 import { prisma } from "./db";
+import { findChosenHolder, HOLDER_CHOICE_COOKIE, SELF_HOLDER } from "./services/holder-choice";
 
-export const HOLDER_COOKIE = "mm_holder";
+export const HOLDER_COOKIE = HOLDER_CHOICE_COOKIE;
+export { SELF_HOLDER };
 
 export async function currentUser() {
   const jar = await cookies();
@@ -24,14 +26,10 @@ export async function requirePageAdmin() {
 }
 
 /** Titular selecionado no seletor global (validado contra o usuário). */
-/** Valor especial do seletor: o titular marcado como "sou eu". */
-export const SELF_HOLDER = "self";
-
 export async function selectedHolderId(userId: string) {
   const id = (await cookies()).get(HOLDER_COOKIE)?.value;
   if (!id) return undefined;
-  const h = await prisma.holder.findFirst({ where: id === SELF_HOLDER ? { userId, isSelf: true } : { id, userId }, select: { id: true } });
-  return h?.id;
+  return (await findChosenHolder(userId, id))?.id;
 }
 
 /** Texto do escopo atual para os cabeçalhos: "Titular: Fulano" ou "Todos os titulares". */
