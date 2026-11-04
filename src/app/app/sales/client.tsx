@@ -2,7 +2,7 @@
 // Vendas: lista (Data, Programa, Descrição, Pontos, Valor, Resultado, Ações), detalhes e a aba Clientes.
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2, CircleCheck, Tag, Wallet, Columns3, Handshake } from "lucide-react";
+import { Search, MoreHorizontal, Eye, Trash2, HandCoins, Users, Pencil, FileText, X, Eraser, ArrowDown, ArrowUp, ChevronsUpDown, Plus, Undo2, CircleCheck, Tag, Wallet, Columns3, Handshake, UserCheck } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
@@ -18,7 +18,7 @@ import type { SaleView } from "@/server/services/sales";
 
 const COST_LABELS: Record<string, string> = { TAXA_EMBARQUE: "Taxa de embarque", IOF: "IOF", BAGAGEM: "Bagagem", ASSENTO: "Assento", COMPLETAR_PONTOS: "Completar pontos", OUTROS: "Outros" };
 
-export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, partners, editSale }: { partners: { id: string; name: string; mode: string; value: number }[]; sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
+export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, partners, members = [], editSale }: { partners: { id: string; name: string; mode: string; value: number }[]; members?: { id: string; name: string; issuer: boolean }[]; sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
@@ -29,6 +29,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   const [refunding, setRefunding] = useState<SaleView | null>(null);
   const [tagging, setTagging] = useState<SaleView | null>(null);
   const [partnering, setPartnering] = useState<SaleView | null>(null);
+  const [issuing, setIssuing] = useState<SaleView | null>(null);
   const [cols, setCols] = useColumns();
   const on = (k: ColKey) => cols.includes(k);
   // prazo de reembolso (24h depois da emissão): o relógio da tela anda sozinho a cada minuto
@@ -200,6 +201,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); setPaid(s, !s.paidAt); }}><Wallet className="h-4 w-4 shrink-0" />{menu.s.paidAt ? "Voltar para a receber" : "Cliente pagou"}</button>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setTagging(menu.s); setMenu(null); }}><Tag className="h-4 w-4" />Etiquetas</button>
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setPartnering(menu.s); setMenu(null); }}><Handshake className="h-4 w-4" />Parceiro</button>}
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setIssuing(menu.s); setMenu(null); }}><UserCheck className="h-4 w-4" />Emissores</button>
           {menu.s.refund && !menu.s.refund.milesReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "miles"); }}><CircleCheck className="h-4 w-4 shrink-0" />Milhas estornadas</button>}
           {menu.s.refund && !menu.s.refund.taxReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "tax"); }}><CircleCheck className="h-4 w-4 shrink-0" />Taxa estornada</button>}
           {menu.s.refund
@@ -216,6 +218,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {refunding && <RefundDialog sale={refunding} onClose={() => setRefunding(null)} />}
       {tagging && <TagsDialog sale={tagging} known={tags} onClose={() => setTagging(null)} />}
       {partnering && <PartnerDialog sale={partnering} partners={partners} onClose={() => setPartnering(null)} />}
+      {issuing && <IssuersDialog sale={issuing} members={members} onClose={() => setIssuing(null)} />}
     </>
   );
 }
@@ -561,6 +564,46 @@ function TagsDialog({ sale: s, known, onClose }: { sale: SaleView; known: string
           </div>
         )}
         {erro && <Alert kind="error">{erro}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Quem emitiu a venda (membros da Equipe): base da aba Equipe em Métricas. Com vários, o resultado é rateado. */
+function IssuersDialog({ sale: s, members, onClose }: { sale: SaleView; members: { id: string; name: string; issuer: boolean }[]; onClose: () => void }) {
+  const router = useRouter();
+  const [ids, setIds] = useState<string[]>(s.issuerIds ?? []);
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  // quem emite passagens aparece primeiro; quem já está marcado continua na lista mesmo sem a marca de emissor
+  const list = [...members].sort((a, b) => Number(b.issuer) - Number(a.issuer) || a.name.localeCompare(b.name));
+  async function save() {
+    setBusy(true);
+    const r = await api(`/api/sales/${s.id}/issuers`, "POST", { memberIds: ids });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast(ids.length ? "Emissores salvos" : "Emissores tirados da venda");
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title="Emissores da venda" size="sm" icon={<UserCheck className="h-5 w-5" />}
+      footer={<><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={busy} onClick={save}>Salvar</button></>}>
+      <div className="space-y-3">
+        <p className="truncate text-sm text-muted">{s.description}</p>
+        {erro && <Alert kind="error">{erro}</Alert>}
+        {list.length === 0 ? <p className="text-sm text-muted">Ninguém na equipe ainda. Cadastre em Gestão › Equipe.</p> : (
+          <div className="space-y-1" role="group" aria-label="Emissores">
+            {list.map((m) => (
+              <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-panel2">
+                <input type="checkbox" checked={ids.includes(m.id)} onChange={(e) => setIds((x) => (e.target.checked ? [...x, m.id] : x.filter((y) => y !== m.id)))} />
+                <span className="text-sm">{m.name}</span>
+                {m.issuer && <span className="ml-auto rounded-full bg-panel2 px-2 py-0.5 text-[11px] text-muted">emissor</span>}
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-muted">Aparece em Métricas › Equipe. Com mais de um emissor, a venda conta em partes iguais para cada um.</p>
       </div>
     </Modal>
   );

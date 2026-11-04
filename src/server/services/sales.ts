@@ -345,6 +345,7 @@ function present(s: SaleRow) {
     // comissão do parceiro (guardada quando o parceiro foi escolhido ou a venda editada) sai do lucro
     ...(commission ? { resultCents: f.resultCents - commission, marginPct: pct(f.resultCents - commission, f.pricedCents), roePct: pct(f.resultCents - commission, f.investedCents) } : {}),
     partner: s.partner ? { id: s.partner.id, name: s.partner.name, commissionCents: commission } : null,
+    issuerIds: s.issuerIds, // quem emitiu (Equipe); vários = resultado rateado em partes iguais
     refundUntil: refunded ? null : refundDeadline(s).toISOString(),
     refund: refunded
       ? {
@@ -596,5 +597,16 @@ export async function setSalePartner(userId: string, saleId: string, partnerId: 
   if (partnerId && !(await prisma.partner.findFirst({ where: { id: partnerId, userId, active: true }, select: { id: true } }))) throw new DomainError(404, "Parceiro não encontrado");
   await prisma.sale.update({ where: { id: saleId }, data: { partnerId, partnerCommissionCents: 0 } });
   if (partnerId) await refreshPartnerCommission(userId, saleId);
+  return getSale(userId, saleId);
+}
+
+/** Quem emitiu a venda (membros da Equipe). Com mais de um, as métricas dividem o resultado em partes iguais. */
+export async function setSaleIssuers(userId: string, saleId: string, memberIds: string[]) {
+  const sale = await prisma.sale.findFirst({ where: { id: saleId, userId }, select: { id: true } });
+  if (!sale) throw new DomainError(404, "Venda não encontrada");
+  const ids = [...new Set(memberIds)];
+  if (ids.length > 10) throw new DomainError(400, "No máximo 10 emissores por venda");
+  if (ids.length && (await prisma.teamMember.count({ where: { userId, id: { in: ids } } })) !== ids.length) throw new DomainError(404, "Membro da equipe não encontrado");
+  await prisma.sale.update({ where: { id: saleId }, data: { issuerIds: ids } });
   return getSale(userId, saleId);
 }
