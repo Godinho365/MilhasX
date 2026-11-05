@@ -13,11 +13,11 @@ async function main() {
   const { importProgramLogos } = await import("./program-logos");
 
   const programs = [
-    { code: "LIVELO", name: "Livelo", kind: "POINTS", mv: 2800, color: "#ec4899" },
-    { code: "ESFERA", name: "Esfera", kind: "POINTS", mv: 2600, color: "#ef4444" },
-    { code: "LATAM", name: "LATAM Pass", kind: "MILES", mv: 2450, color: "#818cf8" },
-    { code: "SMILES", name: "Smiles", kind: "MILES", mv: 1750, color: "#f97316" },
-    { code: "AZUL", name: "Azul Fidelidade", kind: "MILES", mv: 1900, color: "#38bdf8" },
+    { code: "LIVELO", name: "Livelo", kind: "POINTS", mv: 3050, color: "#ec4899" },
+    { code: "ESFERA", name: "Esfera", kind: "POINTS", mv: 3050, color: "#ef4444" },
+    { code: "LATAM", name: "LATAM Pass", kind: "MILES", mv: 2500, color: "#818cf8" },
+    { code: "SMILES", name: "Smiles", kind: "MILES", mv: 1600, color: "#f97316" },
+    { code: "AZUL", name: "Azul Fidelidade", kind: "MILES", mv: 1600, color: "#38bdf8" },
     { code: "NUBANK", name: "Nubank Ultravioleta", kind: "POINTS", mv: 0, color: "#820ad1" },
   ] as const;
   const prog: Record<string, string> = {};
