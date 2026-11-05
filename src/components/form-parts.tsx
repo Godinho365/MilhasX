@@ -132,7 +132,17 @@ export function useDirty<T>(initial: T) {
 
 export type PayState = { installments: number; anticipate: boolean; payoff: string };
 export const emptyPay = (): PayState => ({ installments: 1, anticipate: false, payoff: "" });
+/** Valor para quitar vazio = estimado pela taxa da antecipação. */
 export const toPlan = (p: PayState): PaymentPlan => ({ installments: p.installments, anticipate: p.anticipate, payoffCents: p.payoff.trim() ? parseBRLToCents(p.payoff) : null });
+/** Erro no valor para quitar digitado (vazio vale o estimado). */
+export function payoffError(p: PayState, totalCents: number): string | null {
+  if (p.installments <= 1 || !p.anticipate || !p.payoff.trim()) return null;
+  const v = parseBRLToCents(p.payoff);
+  const { restCents } = planCost(totalCents, { installments: p.installments, anticipate: false, payoffCents: null });
+  if (v == null) return "Valor para quitar as parcelas inválido";
+  if (v > restCents) return `O valor para quitar não pode passar de ${fmtBRL(restCents)} (as ${p.installments - 1} parcelas).`;
+  return null;
+}
 /** Detalhe gravado no lançamento (só quando parcelado). */
 export const paymentDetail = (p: PayState, totalCents: number) => {
   if (p.installments <= 1) return null;
@@ -144,7 +154,7 @@ const pctBR = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigit
 export function PaymentFields({ totalCents, value, onChange, label = "Pagamento" }: { totalCents: number; value: PayState; onChange: (p: PayState) => void; label?: string }) {
   const r = planCost(totalCents, toPlan(value));
   const n = value.installments;
-  const payoffInvalid = value.anticipate && value.payoff.trim() !== "" && (toPlan(value).payoffCents == null || (toPlan(value).payoffCents ?? 0) > r.restCents);
+  const payoffErr = payoffError(value, totalCents);
   return (
     <div className="space-y-3 rounded-xl border border-line p-3" aria-label={label}>
       <div className="flex flex-wrap items-center gap-3">
@@ -168,12 +178,13 @@ export function PaymentFields({ totalCents, value, onChange, label = "Pagamento"
             <div className="space-y-2">
               <label className="block text-sm">
                 <span className="label">Valor para quitar as {n - 1} parcelas (R$)</span>
-                <input className="input tabular-nums" inputMode="decimal" placeholder={totalCents > 0 ? `até ${fmtBRL(r.restCents)}` : "R$ 0,00"} value={value.payoff} onChange={(e) => onChange({ ...value, payoff: e.target.value })} aria-label="Valor para quitar as parcelas" />
+                <input className="input tabular-nums" inputMode="decimal" placeholder={totalCents > 0 && r.estimated && r.payoffCents != null ? `${fmtBRL(r.payoffCents)} (estimado)` : "R$ 0,00"} value={value.payoff} onChange={(e) => onChange({ ...value, payoff: e.target.value })} aria-label="Valor para quitar as parcelas" />
               </label>
-              {payoffInvalid && <p className="text-xs text-red-300">O valor para quitar não pode passar de {fmtBRL(r.restCents)} (as {n - 1} parcelas).</p>}
-              {r.discountCents > 0 && (
+              {payoffErr && <p className="text-xs text-red-300">{payoffErr}</p>}
+              {!payoffErr && r.discountCents > 0 && (
                 <p className="rounded-lg bg-panel2 px-3 py-2 text-xs text-muted" aria-label="Resumo da antecipação">
-                  Desconto de <b className="text-ok">{fmtBRL(r.discountCents)}</b>: {pctBR(r.discountPct ?? 0)} nas parcelas antecipadas · {pctBR(r.discountTotalPct ?? 0)} na compra · ≈ {pctBR(r.monthlyRatePct ?? 0)} ao mês. Custo real: <b className="text-white">{fmtBRL(r.effectiveCents)}</b>.
+                  {r.estimated ? "Desconto estimado de" : "Desconto de"} <b className="text-ok">{fmtBRL(r.discountCents)}</b>: {pctBR(r.discountPct ?? 0)} nas parcelas antecipadas · {pctBR(r.discountTotalPct ?? 0)} na compra · ≈ {pctBR(r.monthlyRatePct ?? 0)} ao mês. Custo real: <b className="text-white">{fmtBRL(r.effectiveCents)}</b>.
+                  {r.estimated && <> Estimado com a taxa da antecipação da Livelo; se o valor para quitar for outro, digite acima.</>}
                 </p>
               )}
             </div>
