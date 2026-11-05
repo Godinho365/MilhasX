@@ -19,7 +19,7 @@ import { ProgramLogo } from "./program-logo";
 import { toast, confirmDialog } from "./feedback";
 import {
   Collapsible, Switch, PointsInput, AccountSelect, CostRows, costsPayload, emptyCost, parsePts, accountLabel,
-  PaymentFields, emptyPay, toPlan, paymentDetail, type PayState,
+  PaymentFields, emptyPay, toPlan, payoffError, paymentDetail, type PayState,
   type AccountOpt, type CardOpt, type CostRow,
 } from "./form-parts";
 
@@ -181,8 +181,8 @@ function CreditForm({ accounts, cards, onClose, prefill, preset }: { accounts: A
     if (points <= 0) return setErro("Informe os pontos");
     const c = costsPayload(costs);
     if (c.erro) return setErro(c.erro);
-    const plan = toPlan(pay);
-    if (pay.installments > 1 && pay.anticipate && (plan.payoffCents == null || plan.payoffCents > planCost(nominalCost, plan).restCents)) return setErro("Valor para quitar as parcelas inválido");
+    const payErr = payoffError(pay, nominalCost);
+    if (payErr) return setErro(payErr);
     const payment = paymentDetail(pay, nominalCost);
     setBusy(true);
     setErro("");
@@ -563,7 +563,8 @@ function TransferForm({ accounts, onClose, preset, editGroupId }: { accounts: Ac
     if (points <= 0) return setErro("Informe os pontos");
     if (adv.fee && parseBRLToCents(adv.fee) === null) return setErro("Taxa inválida");
     if (adv.cart && (cartPts <= 0 || parseBRLToCents(adv.cartPrice) === null)) return setErro("Informe a quantidade e o preço da compra de pontos");
-    if (adv.cart && cartPay.installments > 1 && cartPay.anticipate && (toPlan(cartPay).payoffCents == null || (toPlan(cartPay).payoffCents ?? 0) > planCost(cartNominal, toPlan(cartPay)).restCents)) return setErro("Valor para quitar as parcelas inválido");
+    const cartPayErr = adv.cart ? payoffError(cartPay, cartNominal) : null;
+    if (cartPayErr) return setErro(cartPayErr);
     if (adv.delivery && !adv.deliveryDate) return setErro("Informe a data de entrega no destino");
     if (adv.delivery && adv.deliveryDate < f.date) return setErro("A data de entrega no destino não pode ser anterior à data da transferência");
     setBusy(true);

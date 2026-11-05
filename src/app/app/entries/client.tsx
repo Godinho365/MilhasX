@@ -11,7 +11,7 @@ import { airportLabel } from "@/domain/airports";
 import { EntryIcon } from "@/components/entry-meta";
 import { ProgramDot } from "@/components/stat";
 import { openEntryForm } from "@/components/entry-forms";
-import { CostRows, costsPayload, emptyCost, PaymentFields, emptyPay, toPlan, paymentDetail, type CostRow, type CardOpt, type PayState } from "@/components/form-parts";
+import { CostRows, costsPayload, emptyCost, PaymentFields, emptyPay, toPlan, payoffError, paymentDetail, type CostRow, type CardOpt, type PayState } from "@/components/form-parts";
 import { planCost, scaleCosts } from "@/domain/installments";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
@@ -548,9 +548,9 @@ function EditDialog({ row, cards, onClose }: { row: Row; cards: CardOpt[]; onClo
       body.costs = c.items;
       if (credit) {
         const nominal = c.items.reduce((t, x) => t + x.amountCents, 0);
-        const plan = toPlan(pay);
-        const r = planCost(nominal, plan);
-        if (pay.installments > 1 && pay.anticipate && (plan.payoffCents == null || plan.payoffCents > r.restCents)) return setErro("Valor para quitar as parcelas inválido");
+        const payErr = payoffError(pay, nominal);
+        if (payErr) return setErro(payErr);
+        const r = planCost(nominal, toPlan(pay));
         body.costs = scaleCosts(c.items, r.effectiveCents);
         body.payment = paymentDetail(pay, nominal);
       }
