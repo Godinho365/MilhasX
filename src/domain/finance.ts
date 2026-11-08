@@ -32,13 +32,15 @@ export const NOT_OPERATIONAL = ["Compra de pontos e milhas", "Custos da emissão
 
 /** De onde vem o valor no fluxo de caixa: lançamento do próprio Financeiro, ou puxado sozinho das vendas
  *  (o que o cliente paga e os custos da emissão) e dos custos dos lançamentos do Extrato (compra de pontos, clube...). */
-export type TxSource = "manual" | "sales" | "saleCosts" | "purchases";
+export type TxSource = "manual" | "sales" | "saleCosts" | "purchases" | "cardOther";
+/** De onde veio a compra (para editar a partir da fatura): lançamento do Financeiro, do Extrato ou venda. */
+export type TxRef = { kind: "fin" | "entry" | "sale"; id: string };
 /** Categoria com que os valores puxados sozinhos aparecem nos totais por categoria (compra de pontos e custos da
  *  emissão já estão descontados no lucro das vendas, por isso ficam fora das despesas operacionais). */
-const AUTO_CATEGORY: Record<Exclude<TxSource, "manual">, string> = { sales: "Vendas", saleCosts: "Custos da emissão", purchases: "Compra de pontos e milhas" };
+const AUTO_CATEGORY: Record<Exclude<TxSource, "manual">, string> = { sales: "Vendas", saleCosts: "Custos da emissão", purchases: "Compra de pontos e milhas", cardOther: "Outras despesas" };
 
 /** cardId: compra no cartão (dueDate = vencimento da fatura, paga quando a fatura é paga); chargeDay: dia da compra. */
-export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource; cardId?: string | null; chargeDay?: string; description?: string | null };
+export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource; cardId?: string | null; chargeDay?: string; description?: string | null; ref?: TxRef | null };
 
 /** Saldo da conta: saldo inicial + o que já foi pago/recebido (pendente não conta), com as transferências. */
 export function accountBalance(accountId: string, initialCents: number, txs: Tx[]) {
@@ -89,15 +91,15 @@ export type PaidCost = { amountCents: number; card: CardDays | null; cardId?: st
 
 /** Saída que não tem "pago" próprio (custos do Extrato e da emissão): sem cartão, realizada quando a data já passou;
  *  num cartão cadastrado, fica em aberto até a fatura ser marcada como paga (withBillPayments). */
-const outflow = (due: string, amountCents: number, source: "purchases" | "saleCosts", competence: string, today: string, extra: { cardId?: string | null; description?: string | null } = {}): Tx => ({
+const outflow = (due: string, amountCents: number, source: "purchases" | "saleCosts", competence: string, today: string, extra: { cardId?: string | null; description?: string | null; ref?: TxRef | null } = {}): Tx => ({
   type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY[source], competence, dueDate: due,
   paidAt: extra.cardId ? null : due <= today ? due : null, source,
-  ...(extra.cardId ? { cardId: extra.cardId, chargeDay: competence } : {}), description: extra.description ?? null,
+  ...(extra.cardId ? { cardId: extra.cardId, chargeDay: competence } : {}), description: extra.description ?? null, ref: extra.ref ?? null,
 });
 
 /** Custos de um lançamento do Extrato no fluxo de caixa: à vista, na data; parcelado, uma parcela por mês; com as
  *  parcelas restantes antecipadas, tudo no mês da compra. No cartão, cada parcela vence numa fatura. */
-export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: number | null; anticipated?: boolean | null; description?: string | null }, today: string): Tx[] {
+export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: number | null; anticipated?: boolean | null; description?: string | null; ref?: TxRef | null }, today: string): Tx[] {
   const n = p.anticipated ? 1 : Math.max(1, p.installments ?? 1);
   const groups = new Map<string, { card: CardDays | null; cardId: string | null; cents: number }>();
   for (const c of p.costs) {
@@ -111,7 +113,7 @@ export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: 
     const first = g.card ? cardDueDay(p.day, g.card) : p.day;
     return splitInstallments(g.cents, n).map((cents, i) => outflow(
       g.card ? dayIn(addMonths(monthOf(first), i), g.card.dueDay) : dayIn(addMonths(monthOf(first), i), Number(first.slice(8, 10))), cents, "purchases", p.day, today,
-      { cardId: g.cardId, description: p.description ? (n > 1 ? `${p.description} (${i + 1}/${n})` : p.description) : null },
+      { cardId: g.cardId, description: p.description ? (n > 1 ? `${p.description} (${i + 1}/${n})` : p.description) : null, ref: p.ref },
     ));
   });
 }
@@ -119,40 +121,125 @@ export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: 
 /** Venda no fluxo de caixa: entra o que o cliente paga, na data da venda (realizado quando a venda está paga);
  *  reembolsada, só a taxa de administração que fica. Os custos pagos na emissão (fornecedor, emissão em dinheiro,
  *  taxas repassadas, comissão) saem na data da venda, ou na fatura do cartão. */
-export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[]; description?: string | null }, today: string): Tx[] {
+export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[]; description?: string | null; ref?: TxRef | null }, today: string): Tx[] {
   const amountCents = s.refunded ? s.refundFeeCents : s.totalCents;
   const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY.sales, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
   if (s.refunded) return income; // milhas e taxas voltaram: os custos da emissão se desfazem
-  return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today, { cardId: c.cardId, description: s.description }))];
+  return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today, { cardId: c.cardId, description: s.description, ref: s.ref }))];
 }
 
 /* ---------------- Faturas do cartão ---------------- */
 
+/** A fatura é identificada pelo cartão e pelo vencimento calculado (fechamento e vencimento do cartão). */
 export const billKey = (cardId: string, dueDate: string) => `${cardId}|${dueDate}`;
+/** Vencimento calculado da fatura que vence no mês (o dia de vencimento do cartão). */
+export const billDueIn = (month: string, card: CardDays) => dayIn(month, card.dueDay);
 
-/** Compras no cartão ficam pagas quando a fatura delas (cartão + vencimento) foi marcada como paga; as outras, em aberto. */
-export const withBillPayments = (txs: Tx[], paid: Map<string, string>): Tx[] =>
-  txs.map((t) => (t.cardId && t.type === "EXPENSE" ? { ...t, paidAt: paid.get(billKey(t.cardId, t.dueDate)) ?? null } : t));
-
+/** Ajustes da fatura: valor real que veio no banco e vencimento alterado só nesta fatura. */
+export type BillEdit = { realCents: number | null; dueOverride: string | null };
+export type BillPayment = { id: string; paidAt: string; amountCents: number; accountId: string | null };
+export type BillItem = { description: string | null; amountCents: number; source: TxSource; category: string | null; day: string; ref: TxRef | null; accountId: string };
 export type Bill = {
-  cardId: string; dueDate: string; totalCents: number; paidAt: string | null; overdue: boolean;
-  items: { description: string | null; amountCents: number; source: TxSource; day: string }[];
+  cardId: string;
+  dueDate: string; // vencimento calculado (a chave da fatura)
+  effectiveDue: string; // vencimento que vale (o alterado, se houver)
+  itemsCents: number; // soma das compras lançadas
+  realCents: number | null; // valor real informado
+  adjustCents: number; // real − compras: outros gastos (positivo) ou créditos/estornos (negativo) no cartão
+  totalCents: number; // o que é para pagar
+  paidCents: number;
+  openCents: number; // falta pagar
+  status: "open" | "partial" | "paid";
+  overdue: boolean;
+  paidAt: string | null; // quitada: data do último pagamento
+  payments: BillPayment[];
+  items: BillItem[];
 };
 
-/** Faturas: as compras no cartão (Extrato, custos das vendas e despesas do Financeiro) agrupadas por cartão e vencimento. */
-export function cardBills(txs: Tx[], today: string): Bill[] {
-  const bills = new Map<string, Bill>();
-  for (const t of txs) {
+/** Faturas: as compras no cartão (Extrato, custos das vendas e despesas do Financeiro) agrupadas por cartão e
+ *  vencimento, com o valor real, o vencimento alterado e os pagamentos (pode ser parcial). Uma fatura sem compras
+ *  existe quando tem valor real ou pagamento. */
+export function cardBills(charges: Tx[], today: string, edits = new Map<string, BillEdit>(), payments = new Map<string, BillPayment[]>()): Bill[] {
+  const groups = new Map<string, { cardId: string; dueDate: string; items: BillItem[] }>();
+  const group = (cardId: string, dueDate: string) => {
+    const key = billKey(cardId, dueDate);
+    const g = groups.get(key) ?? { cardId, dueDate, items: [] };
+    groups.set(key, g);
+    return g;
+  };
+  for (const t of charges) {
     if (!t.cardId || t.type !== "EXPENSE") continue;
-    const key = billKey(t.cardId, t.dueDate);
-    const b = bills.get(key) ?? { cardId: t.cardId, dueDate: t.dueDate, totalCents: 0, paidAt: t.paidAt, overdue: false, items: [] };
-    b.totalCents += t.amountCents;
-    b.items.push({ description: t.description ?? null, amountCents: t.amountCents, source: t.source ?? "manual", day: t.chargeDay ?? t.competence });
-    bills.set(key, b);
+    group(t.cardId, t.dueDate).items.push({ description: t.description ?? null, amountCents: t.amountCents, source: t.source ?? "manual", category: t.category, day: t.chargeDay ?? t.competence, ref: t.ref ?? null, accountId: t.accountId });
   }
-  return [...bills.values()]
-    .map((b) => ({ ...b, overdue: !b.paidAt && b.dueDate < today, items: b.items.sort((x, y) => x.day.localeCompare(y.day)) }))
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  for (const key of [...edits.keys(), ...payments.keys()]) {
+    const [cardId, dueDate] = key.split("|") as [string, string];
+    group(cardId, dueDate);
+  }
+  const sum = (xs: { amountCents: number }[]) => xs.reduce((t, x) => t + x.amountCents, 0);
+  return [...groups.values()]
+    .map((g): Bill => {
+      const key = billKey(g.cardId, g.dueDate);
+      const edit = edits.get(key);
+      const pays = [...(payments.get(key) ?? [])].sort((a, b) => a.paidAt.localeCompare(b.paidAt));
+      const itemsCents = sum(g.items);
+      const realCents = edit?.realCents ?? null;
+      const totalCents = realCents ?? itemsCents;
+      const paidCents = sum(pays);
+      const openCents = Math.max(0, totalCents - paidCents);
+      const status = openCents === 0 ? "paid" : paidCents > 0 ? "partial" : "open";
+      const effectiveDue = edit?.dueOverride ?? g.dueDate;
+      return {
+        cardId: g.cardId, dueDate: g.dueDate, effectiveDue, itemsCents, realCents, adjustCents: realCents == null ? 0 : realCents - itemsCents, totalCents,
+        paidCents, openCents, status, overdue: status !== "paid" && effectiveDue < today, paidAt: status === "paid" ? pays.at(-1)?.paidAt ?? null : null,
+        payments: pays, items: g.items.sort((x, y) => x.day.localeCompare(y.day)),
+      };
+    })
+    .filter((b) => b.items.length > 0 || b.realCents != null || b.payments.length > 0)
+    .sort((a, b) => a.effectiveDue.localeCompare(b.effectiveDue));
+}
+
+/** Divide um valor na proporção dos pesos; o último fica com o arredondamento. */
+function splitByWeights<K>(cents: number, weights: { key: K; w: number }[]): { key: K; cents: number }[] {
+  const total = weights.reduce((t, x) => t + x.w, 0);
+  let used = 0;
+  return weights.map((x, i) => {
+    const v = i === weights.length - 1 ? cents - used : Math.floor((cents * x.w) / total);
+    used += v;
+    return { key: x.key, cents: v };
+  });
+}
+
+/** Saída de caixa das faturas: cada pagamento na data em que foi feito (e da conta de onde saiu) e o que falta pagar
+ *  no vencimento. Dividida pela origem e categoria das compras da fatura (outros gastos entram em "Outras despesas"). */
+export function billCashTxs(bills: Bill[]): Tx[] {
+  return bills.flatMap((b) => {
+    const byKey = new Map<string, { source: TxSource; category: string | null; w: number }>();
+    for (const i of b.items) {
+      const k = `${i.source}|${i.category ?? ""}`;
+      const x = byKey.get(k) ?? { source: i.source, category: i.category, w: 0 };
+      x.w += i.amountCents;
+      byKey.set(k, x);
+    }
+    if (b.adjustCents > 0) byKey.set("cardOther|", { source: "cardOther", category: AUTO_CATEGORY.cardOther, w: b.adjustCents });
+    const weights = [...byKey.values()].filter((x) => x.w > 0).map((x) => ({ key: x, w: x.w }));
+    const parts = (cents: number) => (weights.length ? splitByWeights(cents, weights) : [{ key: { source: "cardOther" as TxSource, category: AUTO_CATEGORY.cardOther }, cents }]);
+    const tx = (cents: number, paidAt: string | null, accountId: string | null): Tx[] =>
+      parts(cents).filter((p) => p.cents !== 0).map((p) => ({
+        type: "EXPENSE", accountId: accountId ?? "", toAccountId: null, amountCents: p.cents, category: p.key.category, competence: b.effectiveDue,
+        dueDate: b.effectiveDue, paidAt, source: p.key.source, description: "Fatura do cartão",
+      }));
+    return [...b.payments.flatMap((p) => tx(p.amountCents, p.paidAt, p.accountId)), ...(b.openCents > 0 ? tx(b.openCents, null, null) : [])];
+  });
+}
+
+/** Diferença entre o valor real da fatura e as compras lançadas, no regime de competência: a mais, "Outras despesas";
+ *  a menos (estorno, crédito), "Outras receitas". */
+export function billAdjustTxs(bills: Bill[]): Tx[] {
+  return bills.filter((b) => b.adjustCents !== 0).map((b) => ({
+    type: b.adjustCents > 0 ? "EXPENSE" : "INCOME", accountId: "", toAccountId: null, amountCents: Math.abs(b.adjustCents),
+    category: b.adjustCents > 0 ? AUTO_CATEGORY.cardOther : "Outras receitas", competence: b.effectiveDue, dueDate: b.effectiveDue,
+    paidAt: b.paidAt, source: "cardOther", description: b.adjustCents > 0 ? "Outros gastos no cartão" : "Créditos na fatura do cartão",
+  }));
 }
 
 /** Receitas e despesas do mês (sem transferências), realizadas e previstas, e por categoria. */
@@ -196,7 +283,7 @@ export function cashflow(txs: Tx[], months: string[], startBalance: number) {
       const of = (x: Tx) => x.type === type && (x.source ?? "manual") === src;
       return { planned: s(of), done: s((x) => of(x) && !!x.paidAt) };
     };
-    const parts = { sales: part("INCOME", "sales"), manualIncome: part("INCOME", "manual"), purchases: part("EXPENSE", "purchases"), saleCosts: part("EXPENSE", "saleCosts"), manualExpense: part("EXPENSE", "manual") };
+    const parts = { sales: part("INCOME", "sales"), manualIncome: part("INCOME", "manual"), purchases: part("EXPENSE", "purchases"), saleCosts: part("EXPENSE", "saleCosts"), cardOther: part("EXPENSE", "cardOther"), manualExpense: part("EXPENSE", "manual") };
     running += row.incomePlanned - row.expensePlanned;
     return { ...row, net: row.incomePlanned - row.expensePlanned, running, parts };
   });

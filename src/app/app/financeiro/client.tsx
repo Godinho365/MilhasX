@@ -208,24 +208,56 @@ function TxDialog({ tx, type: initialType, month, accounts, cards, onClose }: { 
 
 /* ---------------- Faturas dos cartões ---------------- */
 
-type BillItem = { description: string | null; amountCents: number; source: string; day: string };
-type Bill = { cardId: string; dueDate: string; totalCents: number; paidAt: string | null; overdue: boolean; paidCents: number | null; items: BillItem[] };
+type BillRef = { kind: "fin" | "entry" | "sale"; id: string };
+type BillItem = { description: string | null; amountCents: number; source: string; category: string | null; day: string; ref: BillRef | null; accountId: string };
+type BillPay = { id: string; paidAt: string; amountCents: number; accountId: string | null };
+type Bill = {
+  cardId: string; dueDate: string; effectiveDue: string; itemsCents: number; realCents: number | null; adjustCents: number; totalCents: number;
+  paidCents: number; openCents: number; status: "open" | "partial" | "paid"; overdue: boolean; paidAt: string | null; payments: BillPay[]; items: BillItem[];
+};
 type CardBills = { id: string; name: string; last4: string | null; color: string | null; closingDay: number; dueDay: number; openCents: number; overdueCents: number; open: Bill[]; paid: Bill[] };
+type AccOpt = { id: string; name: string };
 const SOURCE_LABEL: Record<string, string> = { purchases: "Extrato", saleCosts: "Venda", manual: "Financeiro" };
+const dueIn = (month: string, dueDay: number) => {
+  const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+  return `${month}-${String(Math.min(dueDay, last)).padStart(2, "0")}`;
+};
+/** Conta sugerida para pagar a fatura: a das despesas do Financeiro lançadas nela, ou a primeira. */
+const suggestedAccount = (bill: Bill | null, accounts: AccOpt[]) => bill?.items.find((i) => i.ref?.kind === "fin" && accounts.some((a) => a.id === i.accountId))?.accountId ?? accounts[0]?.id ?? "";
 
-export function CardBillsClient({ cards }: { cards: CardBills[] }) {
+function BillStatus({ b }: { b: Bill }) {
+  if (b.status === "paid") return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">Paga</span>;
+  if (b.overdue) return <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-300">{b.status === "partial" ? "Vencida · paga em parte" : "Vencida"}</span>;
+  return <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">{b.status === "partial" ? "Paga em parte" : "Em aberto"}</span>;
+}
+
+export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accounts: AccOpt[] }) {
   const router = useRouter();
   const nav = useNav();
   const [busy, setBusy] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  async function pay(card: CardBills, dueDates: string[], paid: boolean, date?: string) {
+  const [editing, setEditing] = useState<{ card: CardBills; bill: Bill | null } | null>(null);
+  const [paying, setPaying] = useState<{ card: CardBills; bill: Bill; payment: BillPay | null } | null>(null);
+  const [item, setItem] = useState<{ card: CardBills; bill: Bill; item: BillItem } | null>(null);
+  // depois de salvar, o diálogo aberto acompanha a fatura atualizada
+  const fresh = (cardId: string, dueDate: string) => cards.find((c) => c.id === cardId)?.open.concat(cards.find((c) => c.id === cardId)!.paid).find((b) => b.dueDate === dueDate) ?? null;
+
+  async function quickPay(card: CardBills, dueDates: string[], date?: string) {
     setBusy(`${card.id}:${dueDates.join(",")}`);
-    const r = await api("/api/finance/card-bills", "POST", { cardId: card.id, dueDates, paid, ...(paid && date ? { date } : {}) });
+    const r = await api("/api/finance/card-bills", "POST", { cardId: card.id, dueDates, paid: true, ...(date ? { date } : {}) });
     setBusy("");
     if (!r.ok) return toast(r.erro, "error");
-    toast(paid ? (dueDates.length > 1 ? `${dueDates.length} faturas marcadas como pagas` : "Fatura marcada como paga") : "Fatura voltou para em aberto");
+    toast(dueDates.length > 1 ? `${dueDates.length} faturas marcadas como pagas` : "Fatura marcada como paga");
     refreshSafe(router);
   }
+  async function reopen(card: CardBills, b: Bill) {
+    if (!(await confirmDialog({ title: "Voltar a fatura para em aberto?", body: `Os pagamentos desta fatura (${fmtBRL(b.paidCents)}) serão apagados.`, confirmLabel: "Voltar para em aberto" }))) return;
+    const r = await api("/api/finance/card-bills", "POST", { cardId: card.id, dueDates: [b.dueDate], paid: false });
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Fatura voltou para em aberto");
+    refreshSafe(router);
+  }
+
   if (cards.length === 0) {
     return (
       <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
@@ -236,11 +268,54 @@ export function CardBillsClient({ cards }: { cards: CardBills[] }) {
   }
   const totalOpen = cards.reduce((t, c) => t + c.openCents, 0);
   const totalOverdue = cards.reduce((t, c) => t + c.overdueCents, 0);
+  const row = (c: CardBills, b: Bill) => {
+    const k = `${c.id}:${b.dueDate}`;
+    return (
+      <li key={b.dueDate} className="py-2.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left" onClick={() => setOpen({ ...open, [k]: !open[k] })} aria-expanded={!!open[k]} aria-label={`Compras da fatura de ${fmtDate(b.effectiveDue)}`}>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted transition-transform ${open[k] ? "rotate-180" : ""}`} aria-hidden />
+            <span className="tabular-nums">{b.status === "paid" ? "Venceu" : "Vence"} {fmtDate(b.effectiveDue)}</span>
+            <BillStatus b={b} />
+            <span className="text-xs text-muted">{b.items.length} {b.items.length === 1 ? "compra" : "compras"}{b.realCents != null ? " · valor real" : ""}{b.effectiveDue !== b.dueDate ? " · vencimento alterado" : ""}</span>
+          </button>
+          <span className="text-right tabular-nums">
+            <span className="font-semibold">{fmtBRL(b.status === "paid" ? b.totalCents : b.openCents)}</span>
+            {b.status === "partial" && <span className="block text-xs text-muted">pago {fmtBRL(b.paidCents)} de {fmtBRL(b.totalCents)}</span>}
+            {b.status === "paid" && b.paidAt && <span className="block text-xs text-emerald-300">paga em {fmtDate(b.paidAt)}</span>}
+          </span>
+          <div className="flex items-center gap-1">
+            {b.status !== "paid" && (
+              <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); quickPay(c, [b.dueDate], String(new FormData(e.currentTarget).get("date") || "")); }}>
+                <input className="input h-8 w-auto py-0 text-xs" type="date" name="date" defaultValue={today()} aria-label={`Data do pagamento da fatura de ${fmtDate(b.effectiveDue)}`} />
+                <button className="btn-primary h-8 px-3 text-xs" disabled={busy === k} title="Paga o que falta da fatura"><CircleCheck className="h-4 w-4" />Paguei</button>
+              </form>
+            )}
+            <button className="btn-subtle h-8 w-8 px-0" onClick={() => setEditing({ card: c, bill: b })} aria-label={`Editar a fatura de ${fmtDate(b.effectiveDue)}`} title="Editar fatura"><Pencil className="h-4 w-4" /></button>
+            {b.status === "paid" && <button className="btn-subtle h-8 w-8 px-0" onClick={() => reopen(c, b)} aria-label={`Voltar a fatura de ${fmtDate(b.effectiveDue)} para em aberto`} title="Voltar para em aberto"><Undo2 className="h-4 w-4" /></button>}
+          </div>
+        </div>
+        {open[k] && (
+          <ul className="mt-2 space-y-1 pl-6 text-sm">
+            {b.items.map((i, n) => (
+              <li key={n} className="flex items-center gap-3">
+                <span className="w-20 shrink-0 tabular-nums text-muted">{fmtDate(i.day)}</span>
+                <span className="min-w-0 flex-1 truncate">{i.description || "Compra"}<span className="text-xs text-muted"> · {SOURCE_LABEL[i.source] ?? i.source}</span></span>
+                <span className="tabular-nums">{fmtBRL(i.amountCents)}</span>
+              </li>
+            ))}
+            {b.adjustCents !== 0 && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? "Outros gastos no cartão (valor real − compras lançadas)" : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
+            {b.payments.map((p) => <li key={p.id} className="flex gap-3 text-emerald-300"><span className="w-20 shrink-0 tabular-nums">{fmtDate(p.paidAt)}</span><span className="min-w-0 flex-1 truncate">Pagamento{p.accountId ? ` · ${accounts.find((a) => a.id === p.accountId)?.name ?? "conta"}` : ""}</span><span className="tabular-nums">−{fmtBRL(p.amountCents)}</span></li>)}
+          </ul>
+        )}
+      </li>
+    );
+  };
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="card card-pad"><p className="kicker">Em aberto nos cartões</p><p className="mt-1 text-2xl font-semibold tabular-nums">{fmtBRL(totalOpen)}</p><p className="text-xs text-muted">tudo que ainda falta pagar, somando as faturas futuras</p></div>
-        <div className="card card-pad"><p className="kicker">Vencido</p><p className={`mt-1 text-2xl font-semibold tabular-nums ${totalOverdue > 0 ? "text-red-300" : ""}`}>{fmtBRL(totalOverdue)}</p><p className="text-xs text-muted">faturas que já venceram e não foram marcadas como pagas</p></div>
+        <div className="card card-pad"><p className="kicker">Vencido</p><p className={`mt-1 text-2xl font-semibold tabular-nums ${totalOverdue > 0 ? "text-red-300" : ""}`}>{fmtBRL(totalOverdue)}</p><p className="text-xs text-muted">o que falta pagar das faturas que já venceram</p></div>
       </div>
       {cards.map((c) => {
         const overdue = c.open.filter((b) => b.overdue);
@@ -250,56 +325,203 @@ export function CardBillsClient({ cards }: { cards: CardBills[] }) {
               <span className="h-3 w-3 rounded-full" style={{ backgroundColor: c.color ?? "#94a3b8" }} aria-hidden />
               <div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{cardLabel(c)}</h2><p className="text-xs text-muted">fecha dia {c.closingDay} · vence dia {c.dueDay}</p></div>
               <div className="text-right"><p className="text-xs text-muted">Em aberto</p><p className="font-semibold tabular-nums">{fmtBRL(c.openCents)}</p>{c.overdueCents > 0 && <p className="text-xs tabular-nums text-red-300">{fmtBRL(c.overdueCents)} vencido</p>}</div>
+              <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setEditing({ card: c, bill: null })} title="Lançar a fatura de um mês com o valor que veio no banco"><Plus className="h-4 w-4" />Fatura</button>
             </header>
-            {c.open.length === 0 ? <p className="py-3 text-sm text-muted">Nada em aberto neste cartão.</p> : (
-              <ul className="divide-y divide-line">
-                {c.open.map((b) => {
-                  const k = `${c.id}:${b.dueDate}`;
-                  return (
-                    <li key={b.dueDate} className="py-2.5">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen({ ...open, [k]: !open[k] })} aria-expanded={!!open[k]} aria-label={`Compras da fatura de ${fmtDate(b.dueDate)}`}>
-                          <ChevronDown className={`h-4 w-4 shrink-0 text-muted transition-transform ${open[k] ? "rotate-180" : ""}`} aria-hidden />
-                          <span className="tabular-nums">Vence {fmtDate(b.dueDate)}</span>
-                          {b.overdue ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-300">Vencida</span> : <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">Em aberto</span>}
-                          <span className="text-xs text-muted">{b.items.length} {b.items.length === 1 ? "compra" : "compras"}</span>
-                        </button>
-                        <span className="font-semibold tabular-nums">{fmtBRL(b.totalCents)}</span>
-                        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); pay(c, [b.dueDate], true, String(new FormData(e.currentTarget).get("date") || "")); }}>
-                          <input className="input h-8 w-auto py-0 text-xs" type="date" name="date" defaultValue={today()} aria-label={`Data do pagamento da fatura de ${fmtDate(b.dueDate)}`} />
-                          <button className="btn-primary h-8 px-3 text-xs" disabled={busy === k}><CircleCheck className="h-4 w-4" />Paguei</button>
-                        </form>
-                      </div>
-                      {open[k] && (
-                        <ul className="mt-2 space-y-1 pl-6 text-sm">
-                          {b.items.map((i, n) => <li key={n} className="flex gap-3"><span className="w-20 shrink-0 tabular-nums text-muted">{fmtDate(i.day)}</span><span className="min-w-0 flex-1 truncate">{i.description || "Compra"}<span className="text-xs text-muted"> · {SOURCE_LABEL[i.source] ?? i.source}</span></span><span className="tabular-nums">{fmtBRL(i.amountCents)}</span></li>)}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {overdue.length > 1 && <button className="btn-ghost mt-2 h-8 text-xs" disabled={!!busy} onClick={() => pay(c, overdue.map((b) => b.dueDate), true)}><CircleCheck className="h-4 w-4" />Marcar as {overdue.length} vencidas como pagas hoje</button>}
+            {c.open.length === 0 ? <p className="py-3 text-sm text-muted">Nada em aberto neste cartão.</p> : <ul className="divide-y divide-line">{c.open.map((b) => row(c, b))}</ul>}
+            {overdue.length > 1 && <button className="btn-ghost mt-2 h-8 text-xs" disabled={!!busy} onClick={() => quickPay(c, overdue.map((b) => b.dueDate))}><CircleCheck className="h-4 w-4" />Marcar as {overdue.length} vencidas como pagas hoje</button>}
             {c.paid.length > 0 && (
               <details className="mt-3 text-sm">
                 <summary className="cursor-pointer text-xs text-muted">Pagas recentemente</summary>
-                <ul className="mt-2 divide-y divide-line">
-                  {c.paid.map((b) => (
-                    <li key={b.dueDate} className="flex flex-wrap items-center gap-3 py-2">
-                      <span className="flex-1 tabular-nums">Venceu {fmtDate(b.dueDate)} · <span className="text-emerald-300">paga em {fmtDate(b.paidAt!)}</span>{b.paidCents != null && b.paidCents !== b.totalCents && <span className="block text-xs text-amber-300">Paga com {fmtBRL(b.paidCents)}; hoje a fatura soma {fmtBRL(b.totalCents)} (mudaram as compras)</span>}</span>
-                      <span className="tabular-nums">{fmtBRL(b.totalCents)}</span>
-                      <button className="btn-subtle h-8 w-8 px-0" disabled={!!busy} onClick={() => pay(c, [b.dueDate], false)} aria-label={`Voltar a fatura de ${fmtDate(b.dueDate)} para em aberto`} title="Voltar para em aberto"><Undo2 className="h-4 w-4" /></button>
-                    </li>
-                  ))}
-                </ul>
+                <ul className="mt-2 divide-y divide-line">{c.paid.map((b) => row(c, b))}</ul>
               </details>
             )}
           </section>
         );
       })}
-      <p className="text-xs text-muted">A fatura soma sozinha o que você passou em cada cartão: compras e custos do Extrato com o cartão escolhido na linha de custo, custos das vendas pagos no cartão e despesas do Financeiro marcadas como &quot;no cartão&quot;. Compra parcelada cai uma parcela em cada fatura. Comprou antes do dia do fechamento, vai para a fatura do mês; no dia do fechamento ou depois, para a seguinte. Marcar como paga tira a fatura de Contas a pagar e do Passivo e conta como realizado no Fluxo de Caixa.</p>
+      <p className="text-xs text-muted">A fatura soma sozinha o que você passou em cada cartão: compras e custos do Extrato com o cartão escolhido na linha de custo, custos das vendas pagos no cartão e despesas do Financeiro marcadas como &quot;no cartão&quot;. Em ✎ você informa o valor real que veio no banco (a diferença vira &quot;outros gastos no cartão&quot;), muda o vencimento, registra pagamentos (inclusive parciais) e corrige as compras. Comprou antes do dia do fechamento, vai para a fatura do mês; no dia do fechamento ou depois, para a seguinte.</p>
+      {editing && (() => {
+        const bill = editing.bill ? fresh(editing.card.id, editing.bill.dueDate) ?? editing.bill : null;
+        return <BillDialog card={editing.card} bill={bill} accounts={accounts} cards={cards} onClose={() => setEditing(null)} onPay={(b, p) => { setEditing(null); setPaying({ card: editing.card, bill: b, payment: p }); }} onItem={(b, i) => { setEditing(null); setItem({ card: editing.card, bill: b, item: i }); }} />;
+      })()}
+      {paying && <PaymentDialog card={paying.card} bill={fresh(paying.card.id, paying.bill.dueDate) ?? paying.bill} payment={paying.payment} accounts={accounts} onClose={() => setPaying(null)} />}
+      {item && <BillItemDialog card={item.card} item={item.item} cards={cards} onClose={() => setItem(null)} />}
     </div>
+  );
+}
+
+/** Editar a fatura: valor real, vencimento, pagamentos e compras. Sem fatura: lança a de um mês. */
+function BillDialog({ card, bill, accounts, onClose, onPay, onItem }: { card: CardBills; bill: Bill | null; accounts: AccOpt[]; cards: CardBills[]; onClose: () => void; onPay: (b: Bill, p: BillPay | null) => void; onItem: (b: Bill, i: BillItem) => void }) {
+  const router = useRouter();
+  const [month, setMonth] = useState(today().slice(0, 7));
+  const [real, setReal] = useState(bill?.realCents != null ? money(bill.realCents) : "");
+  const [due, setDue] = useState(bill?.effectiveDue ?? "");
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  const key = bill?.dueDate ?? dueIn(month, card.dueDay);
+  const realCents = real.trim() ? parseBRLToCents(real) : null;
+  const diff = bill && realCents != null ? realCents - bill.itemsCents : 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (real.trim() && realCents == null) return setErro("Valor real inválido");
+    if (!bill && realCents == null) return setErro("Informe o valor da fatura");
+    setBusy(true);
+    const r = await api("/api/finance/card-bills/edit", "PUT", { cardId: card.id, dueDate: key, realCents, dueOverride: bill && due && due !== bill.dueDate ? due : null });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast(bill ? "Fatura atualizada" : "Fatura lançada");
+    onClose();
+    refreshSafe(router);
+  }
+  async function removePayment(p: BillPay) {
+    if (!(await confirmDialog({ title: "Apagar pagamento?", body: `${fmtDate(p.paidAt)} · ${fmtBRL(p.amountCents)}`, confirmLabel: "Apagar", danger: true }))) return;
+    const r = await api(`/api/finance/card-bills/payments/${p.id}`, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Pagamento apagado");
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title={bill ? `Fatura ${cardLabel(card)} · ${fmtDate(bill.effectiveDue)}` : `Nova fatura · ${cardLabel(card)}`}
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Fechar</button><button form="bill-form" className="btn-primary" disabled={busy}>Salvar</button></>}>
+      <form id="bill-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {bill ? (
+            <Field label="Vencimento" hint={due !== bill.dueDate ? `O normal deste cartão seria ${fmtDate(bill.dueDate)}` : "Mude só se o banco mudou o dia nesta fatura"}>
+              <input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Vencimento da fatura" />
+            </Field>
+          ) : (
+            <Field label="Mês do vencimento" required hint={`Vence ${fmtDate(key)} (dia ${card.dueDay})`}>
+              <input className="input" type="month" value={month} onChange={(e) => setMonth(e.target.value)} required aria-label="Mês do vencimento" />
+            </Field>
+          )}
+          <Field label="Valor real da fatura (R$)" required={!bill} hint={bill ? (realCents == null ? `Vazio = soma das compras lançadas (${fmtBRL(bill.itemsCents)})` : diff > 0 ? `${fmtBRL(diff)} a mais que as compras lançadas: entra como outros gastos no cartão` : diff < 0 ? `${fmtBRL(-diff)} a menos: entra como crédito/estorno` : "Igual às compras lançadas") : "O total que veio no app do banco"}>
+            <input className="input tabular-nums" inputMode="decimal" value={real} onChange={(e) => setReal(e.target.value)} placeholder={bill ? fmtBRL(bill.itemsCents) : "0,00"} aria-label="Valor real da fatura" />
+          </Field>
+        </div>
+      </form>
+      {bill && (
+        <div className="mt-5 space-y-4 text-sm">
+          <section aria-label="Pagamentos da fatura">
+            <div className="mb-2 flex items-center justify-between"><h3 className="font-semibold">Pagamentos</h3><span className="text-xs text-muted">pago {fmtBRL(bill.paidCents)} de {fmtBRL(bill.totalCents)}{bill.openCents > 0 ? ` · falta ${fmtBRL(bill.openCents)}` : ""}</span></div>
+            {bill.payments.length === 0 ? <p className="text-muted">Nenhum pagamento.</p> : (
+              <ul className="divide-y divide-line">
+                {bill.payments.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 py-1.5">
+                    <span className="w-24 tabular-nums">{fmtDate(p.paidAt)}</span>
+                    <span className="min-w-0 flex-1 truncate text-muted">{accounts.find((a) => a.id === p.accountId)?.name ?? "sem conta"}</span>
+                    <span className="tabular-nums">{fmtBRL(p.amountCents)}</span>
+                    <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => onPay(bill, p)} aria-label={`Editar pagamento de ${fmtDate(p.paidAt)}`}><Pencil className="h-4 w-4" /></button>
+                    <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => removePayment(p)} aria-label={`Apagar pagamento de ${fmtDate(p.paidAt)}`}><Trash2 className="h-4 w-4" /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button type="button" className="btn-ghost mt-2 h-8 text-xs" onClick={() => onPay(bill, null)}><Plus className="h-4 w-4" />Registrar pagamento</button>
+          </section>
+          <section aria-label="Compras da fatura">
+            <h3 className="mb-2 font-semibold">Compras ({fmtBRL(bill.itemsCents)})</h3>
+            {bill.items.length === 0 ? <p className="text-muted">Nenhuma compra lançada neste cartão para esta fatura.</p> : (
+              <ul className="divide-y divide-line">
+                {bill.items.map((i, n) => (
+                  <li key={n} className="flex items-center gap-3 py-1.5">
+                    <span className="w-24 shrink-0 tabular-nums text-muted">{fmtDate(i.day)}</span>
+                    <span className="min-w-0 flex-1 truncate">{i.description || "Compra"}<span className="text-xs text-muted"> · {SOURCE_LABEL[i.source] ?? i.source}</span></span>
+                    <span className="tabular-nums">{fmtBRL(i.amountCents)}</span>
+                    {i.ref?.kind === "sale"
+                      ? <a className="btn-subtle h-8 px-2 text-xs" href={`/app/sales?edit=${encodeURIComponent(i.ref.id)}&periodo=tudo`}>Abrir venda</a>
+                      : i.ref ? <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => onItem(bill, i)} aria-label={`Editar compra ${i.description ?? ""}`}><Pencil className="h-4 w-4" /></button> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Registrar ou corrigir um pagamento da fatura (inteiro ou parte). */
+function PaymentDialog({ card, bill, payment, accounts, onClose }: { card: CardBills; bill: Bill; payment: BillPay | null; accounts: AccOpt[]; onClose: () => void }) {
+  const router = useRouter();
+  const [f, setF] = useState({ date: payment?.paidAt ?? today(), amount: money(payment?.amountCents ?? (bill.openCents || bill.totalCents)), accountId: payment ? payment.accountId ?? "" : suggestedAccount(bill, accounts) });
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const amountCents = parseBRLToCents(f.amount);
+    if (!amountCents || amountCents <= 0) return setErro("Informe o valor pago");
+    setBusy(true);
+    const body = { paidAt: f.date, amountCents, accountId: f.accountId || null };
+    const r = payment ? await api(`/api/finance/card-bills/payments/${payment.id}`, "PUT", body) : await api("/api/finance/card-bills/payments", "POST", { cardId: card.id, dueDate: bill.dueDate, ...body });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast(payment ? "Pagamento corrigido" : amountCents < bill.openCents ? "Pagamento parcial registrado" : "Pagamento registrado");
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title={payment ? "Corrigir pagamento" : "Registrar pagamento"}
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button><button form="bill-pay-form" className="btn-primary" disabled={busy}>Salvar</button></>}>
+      <form id="bill-pay-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <p className="text-sm text-muted">Fatura {cardLabel(card)} que vence {fmtDate(bill.effectiveDue)} · total {fmtBRL(bill.totalCents)}{bill.paidCents > 0 ? ` · já pago ${fmtBRL(bill.paidCents)}` : ""}</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Data do pagamento" required><input className="input" type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} required aria-label="Data do pagamento" /></Field>
+          <Field label="Valor pago (R$)" required hint="Menos que o total = pagamento parcial; o resto continua em aberto"><input className="input tabular-nums" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} aria-label="Valor pago" /></Field>
+          <Field label="Conta de onde saiu" className="sm:col-span-2" hint="O pagamento sai do saldo desta conta do Financeiro">
+            <select className="input" value={f.accountId} onChange={(e) => setF({ ...f, accountId: e.target.value })} aria-label="Conta do pagamento">
+              <option value="">Nenhuma</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Corrigir uma compra da fatura: valor, data e cartão (ou tirar do cartão). */
+function BillItemDialog({ card, item, cards, onClose }: { card: CardBills; item: BillItem; cards: CardBills[]; onClose: () => void }) {
+  const router = useRouter();
+  const [f, setF] = useState({ amount: money(item.amountCents), day: item.day, cardId: card.id });
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  const installment = /\(\d+\/\d+\)$/.test(item.description ?? "");
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const amountCents = parseBRLToCents(f.amount);
+    if (!installment && (!amountCents || amountCents <= 0)) return setErro("Informe o valor");
+    setBusy(true);
+    const r = await api("/api/finance/card-bills/items", "PATCH", {
+      kind: item.ref!.kind, id: item.ref!.id, cardId: card.id, newCardId: f.cardId || null,
+      ...(installment ? {} : { amountCents }), ...(f.day !== item.day ? { day: f.day } : {}),
+    });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast(f.cardId === card.id ? "Compra atualizada" : f.cardId ? "Compra passada para outro cartão" : "Compra tirada do cartão");
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title="Corrigir compra da fatura"
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button><button form="bill-item-form" className="btn-primary" disabled={busy}>Salvar</button></>}>
+      <form id="bill-item-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <p className="text-sm text-muted">{item.description || "Compra"} · {SOURCE_LABEL[item.source] ?? item.source}{item.ref?.kind === "entry" ? " (muda o lançamento do Extrato)" : " (muda a despesa do Financeiro)"}</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Valor (R$)" required={!installment} hint={installment ? "Compra parcelada: o valor se muda no Extrato" : undefined}><input className="input tabular-nums" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} disabled={installment} aria-label="Valor da compra" /></Field>
+          <Field label="Data da compra" required><input className="input" type="date" value={f.day} onChange={(e) => setF({ ...f, day: e.target.value })} required aria-label="Data da compra" /></Field>
+          <Field label="Cartão" className="sm:col-span-2" hint="Outro cartão leva a compra para a fatura dele; nenhum tira do cartão">
+            <select className="input" value={f.cardId} onChange={(e) => setF({ ...f, cardId: e.target.value })} aria-label="Cartão da compra">
+              {cards.map((c) => <option key={c.id} value={c.id}>{cardLabel(c)}</option>)}
+              <option value="">Nenhum (tirar do cartão)</option>
+            </select>
+          </Field>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
