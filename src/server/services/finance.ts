@@ -151,18 +151,20 @@ export async function listFinTx(userId: string, month: string, regime: Regime, f
 
 /* ---------------- Visão geral ---------------- */
 
-/** Receitas e despesas do mês, resultado (lucro das vendas − despesas operacionais), balanço e contas a pagar/receber. */
+/** Receitas e despesas do mês (as do Financeiro + vendas e custos do Extrato, que entram sozinhos), resultado
+ *  (lucro das vendas − despesas operacionais), balanço e contas a pagar/receber. */
 export async function financeOverview(userId: string, month: string, regime: Regime) {
   const from = utc(`${month}-01`), to = new Date(utc(`${addMonths(month, 1)}-01`).getTime() - 1);
-  const [txRows, accounts, sales, milesAcc, unpaidSales] = await Promise.all([
+  const [txRows, accounts, sales, milesAcc, unpaidSales, automatic] = await Promise.all([
     prisma.finTransaction.findMany({ where: { userId } }),
     listFinAccounts(userId),
     listSales(userId, { from, to: utc(day(to)) }),
     prisma.account.aggregate({ where: { userId, archived: false }, _sum: { costCents: true } }),
     prisma.sale.findMany({ where: { userId, paidAt: null }, select: { totalCents: true, refundedAt: true, refundFeeCents: true } }),
+    automaticCashTxs(userId),
   ]);
   const txs = txRows.map(toTx);
-  const p = periodTotals(txs, month, regime);
+  const p = periodTotals([...txs, ...automatic], month, regime);
   const salesProfit = sales.reduce((t, s) => t + s.resultCents, 0);
   const pendingIn = txs.filter((t) => t.type === "INCOME" && !t.paidAt);
   const pendingOut = txs.filter((t) => t.type === "EXPENSE" && !t.paidAt);
@@ -170,7 +172,9 @@ export async function financeOverview(userId: string, month: string, regime: Reg
   const cash = accounts.filter((a) => !a.archived).reduce((t, a) => t + a.balanceCents, 0);
   const miles = milesAcc._sum.costCents ?? 0;
   const receivable = pendingIn.reduce((t, x) => t + x.amountCents, 0) + toReceiveSales;
-  const payable = pendingOut.reduce((t, x) => t + x.amountCents, 0);
+  // parcelas de compras de pontos e custos de emissão que ainda vão vencer (cartão, parcelado): também são dívida
+  const toPayPurchases = automatic.filter((t) => t.type === "EXPENSE" && !t.paidAt).reduce((t, x) => t + x.amountCents, 0);
+  const payable = pendingOut.reduce((t, x) => t + x.amountCents, 0) + toPayPurchases;
   const today = brDay();
   const upcoming = async (type: "INCOME" | "EXPENSE") =>
     (await prisma.finTransaction.findMany({ where: { userId, type, paidAt: null }, orderBy: { dueDate: "asc" }, take: 8, select: { id: true, description: true, category: true, amountCents: true, dueDate: true, counterpart: true } }))
@@ -179,7 +183,7 @@ export async function financeOverview(userId: string, month: string, regime: Reg
   return {
     period: p,
     result: { salesProfit, salesCount: sales.filter((s) => !s.refund).length, operational: p.operational, net: salesProfit - p.operational },
-    balance: { cash, miles, receivable, toReceiveSales, payable, assets: cash + miles + receivable, equity: cash + miles + receivable - payable },
+    balance: { cash, miles, receivable, toReceiveSales, payable, toPayPurchases, assets: cash + miles + receivable, equity: cash + miles + receivable - payable },
     accounts: accounts.filter((a) => !a.archived),
     toPay, toReceive,
   };

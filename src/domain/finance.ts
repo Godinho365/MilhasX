@@ -33,6 +33,9 @@ export const NOT_OPERATIONAL = ["Compra de pontos e milhas", "Custos da emissão
 /** De onde vem o valor no fluxo de caixa: lançamento do próprio Financeiro, ou puxado sozinho das vendas
  *  (o que o cliente paga e os custos da emissão) e dos custos dos lançamentos do Extrato (compra de pontos, clube...). */
 export type TxSource = "manual" | "sales" | "saleCosts" | "purchases";
+/** Categoria com que os valores puxados sozinhos aparecem nos totais por categoria (compra de pontos e custos da
+ *  emissão já estão descontados no lucro das vendas, por isso ficam fora das despesas operacionais). */
+const AUTO_CATEGORY: Record<Exclude<TxSource, "manual">, string> = { sales: "Vendas", saleCosts: "Custos da emissão", purchases: "Compra de pontos e milhas" };
 
 export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource };
 
@@ -84,8 +87,8 @@ export type CardDays = { closingDay: number; dueDay: number };
 export type PaidCost = { amountCents: number; card: CardDays | null };
 
 /** Saída que não tem "pago" marcado (custos do Extrato e da emissão): realizada quando a data já passou. */
-const outflow = (due: string, amountCents: number, source: TxSource, competence: string, today: string): Tx => ({
-  type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: null, competence, dueDate: due, paidAt: due <= today ? due : null, source,
+const outflow = (due: string, amountCents: number, source: "purchases" | "saleCosts", competence: string, today: string): Tx => ({
+  type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY[source], competence, dueDate: due, paidAt: due <= today ? due : null, source,
 });
 
 /** Custos de um lançamento do Extrato no fluxo de caixa: à vista, na data; parcelado, uma parcela por mês; com as
@@ -111,7 +114,7 @@ export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: 
  *  taxas repassadas, comissão) saem na data da venda, ou na fatura do cartão. */
 export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[] }, today: string): Tx[] {
   const amountCents = s.refunded ? s.refundFeeCents : s.totalCents;
-  const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: null, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
+  const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY.sales, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
   if (s.refunded) return income; // milhas e taxas voltaram: os custos da emissão se desfazem
   return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today))];
 }

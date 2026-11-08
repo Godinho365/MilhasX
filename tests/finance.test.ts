@@ -15,6 +15,7 @@ import * as salePayment from "@/app/api/sales/[id]/payment/route";
 import { accountBalance, cardDueDay, cashflow, periodTotals, purchaseTxs, saleTxs, categoryOptions, type Tx } from "@/domain/finance";
 import { financeCashflow, financeOverview, listFinAccounts } from "@/server/services/finance";
 import { prisma } from "@/server/db";
+import { brDay } from "@/domain/brasilia";
 
 const tx = (o: Partial<Tx>): Tx => ({ type: "EXPENSE", accountId: "a", toAccountId: null, amountCents: 100, category: null, competence: "2026-11-01", dueDate: "2026-11-05", paidAt: null, ...o });
 
@@ -85,6 +86,8 @@ describe("contas do financeiro (domínio)", () => {
     const today = "2026-11-07";
     const card = { closingDay: 10, dueDay: 17 };
     const sale = { day: "2026-11-05", paidAt: null, totalCents: 45_000, refunded: false, refundFeeCents: 0, costs: [{ amountCents: 5_000, card }, { amountCents: 2_000, card: null }, { amountCents: 0, card: null }] };
+    expect(saleTxs(sale, today).map((t) => t.category)).toEqual(["Vendas", "Custos da emissão", "Custos da emissão"]);
+    expect(purchaseTxs({ day: "2026-11-04", costs: [{ amountCents: 100, card: null }] }, today)[0]!.category).toBe("Compra de pontos e milhas");
     expect(saleTxs(sale, today).map((t) => [t.type, t.source, t.dueDate, t.amountCents, t.paidAt])).toEqual([
       ["INCOME", "sales", "2026-11-05", 45_000, null],
       ["EXPENSE", "saleCosts", "2026-11-17", 5_000, null],
@@ -181,6 +184,19 @@ describe("fluxo de caixa com vendas e compras de pontos", () => {
       ["2026-04", 0, 0, 0, 0, 9_000],
     ]);
     expect(months[2]!.parts).toMatchObject({ sales: { planned: 45_000 }, purchases: { planned: 10_000 }, saleCosts: { planned: 5_000 }, manualExpense: { planned: 0 } });
+
+    // a Visão Geral mostra as mesmas receitas e despesas, por categoria; compra de pontos e custos da emissão
+    // ficam fora das despesas operacionais (já estão no lucro das vendas)
+    const feb = await financeOverview(userId, "2026-02", "caixa");
+    expect(feb.period).toMatchObject({ income: 45_000, incomePaid: 45_000, expense: 15_000, expensePaid: 15_000, balance: 30_000, operational: 0 });
+    expect(feb.period.incomeByCategory).toEqual([{ name: "Vendas", value: 45_000 }]);
+    expect(feb.period.expenseByCategory).toEqual([{ name: "Compra de pontos e milhas", value: 10_000 }, { name: "Custos da emissão", value: 5_000 }]);
+    // competência: a compra parcelada pertence toda ao mês da compra
+    expect((await financeOverview(userId, "2026-01", "competencia")).period.expense).toBe(30_000);
+    expect(feb.balance).toMatchObject({ payable: 0, toPayPurchases: 0 });
+    // compra de hoje em 12x: as 11 parcelas que ainda vão vencer entram no passivo
+    await c.call(entries.POST, "POST", "/e", { accountId: lat, type: "PURCHASE", points: 12_000, occurredAt: brDay(), costs: [{ type: "PONTOS", amountCents: 120_000 }], details: { payment: { installments: 12, anticipated: false, nominalCents: 120_000, paidCents: 120_000, discountCents: 0 } } });
+    expect((await financeOverview(userId, "2026-02", "caixa")).balance).toMatchObject({ payable: 110_000, toPayPurchases: 110_000 });
 
     // outro usuário não vê nada disso
     const o = new Client();

@@ -79,13 +79,14 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
   );
   return (
     <div className="space-y-5">
-      <section aria-label="Lançamentos do período">
-        <h2 className="kicker mb-2">Lançamentos do período</h2>
+      <section aria-label="Receitas e despesas do período">
+        <h2 className="kicker mb-2">Receitas e despesas do período</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat icon={<TrendingUp className="h-4 w-4" />} label="Receitas" value={fmtBRL(o.period.income)} hint={`${fmtBRL(o.period.incomePaid)} recebidas`} />
           <Stat icon={<TrendingDown className="h-4 w-4" />} label="Despesas" value={fmtBRL(o.period.expense)} hint={`${fmtBRL(o.period.expensePaid)} pagas`} />
           <Stat icon={<Scale className="h-4 w-4" />} label="Saldo do período" value={fmtBRL(o.period.balance)} accent={o.period.balance >= 0} negative={o.period.balance < 0} />
         </div>
+        <p className="mt-2 text-xs text-muted">Inclui sozinho as vendas, as compras de pontos e clube e os custos das vendas (como no Fluxo de Caixa), além do que você lança no Financeiro.</p>
       </section>
       <section aria-label="Resultado do período">
         <h2 className="kicker mb-2">Resultado do período</h2>
@@ -100,7 +101,7 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
         <h2 className="kicker mb-2">Balanço patrimonial</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat icon={<Landmark className="h-4 w-4" />} label="Ativo" value={fmtBRL(o.balance.assets)} hint={`caixa ${fmtBRL(o.balance.cash)} · milhas ${fmtBRL(o.balance.miles)} · a receber ${fmtBRL(o.balance.receivable)}`} />
-          <Stat icon={<TrendingDown className="h-4 w-4" />} label="Passivo" value={fmtBRL(o.balance.payable)} hint="despesas pendentes" />
+          <Stat icon={<TrendingDown className="h-4 w-4" />} label="Passivo" value={fmtBRL(o.balance.payable)} hint={o.balance.toPayPurchases > 0 ? `despesas pendentes · ${fmtBRL(o.balance.toPayPurchases)} de parcelas a vencer` : "despesas pendentes"} />
           <Stat icon={<Wallet className="h-4 w-4" />} label="Patrimônio líquido" value={fmtBRL(o.balance.equity)} accent={o.balance.equity >= 0} negative={o.balance.equity < 0} />
         </div>
         <p className="mt-2 text-xs text-muted">O que você tem (saldo das contas, o custo das milhas em estoque e o que vão te pagar, inclusive as vendas ainda não pagas) menos o que você deve. Não muda com o mês escolhido.</p>
@@ -119,7 +120,7 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
         </section>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card card-pad" aria-label="Contas a pagar"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a pagar</span><span className="tabular-nums text-red-300">{fmtBRL(o.balance.payable)}</span></h2>{due(o.toPay, "Nenhuma conta a pagar.", "pagar")}</section>
+        <section className="card card-pad" aria-label="Contas a pagar"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a pagar</span><span className="tabular-nums text-red-300">{fmtBRL(o.balance.payable - o.balance.toPayPurchases)}</span></h2>{due(o.toPay, "Nenhuma conta a pagar.", "pagar")}{o.balance.toPayPurchases > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/financeiro?aba=fluxo" className="text-accent-light hover:underline">+ {fmtBRL(o.balance.toPayPurchases)} de parcelas de compras e custos de emissão a vencer</Link></p>}</section>
         <section className="card card-pad" aria-label="Contas a receber"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a receber</span><span className="tabular-nums text-emerald-300">{fmtBRL(o.balance.receivable - o.balance.toReceiveSales)}</span></h2>{due(o.toReceive, "Nenhuma conta a receber.", "receber")}{o.balance.toReceiveSales > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/sales?pago=nao&periodo=tudo" className="text-accent-light hover:underline">+ {fmtBRL(o.balance.toReceiveSales)} de vendas ainda não pagas</Link></p>}</section>
       </div>
     </div>
