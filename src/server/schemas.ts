@@ -573,7 +573,10 @@ export const finTxSchema = z.object({
   dueDate: dateStr,
   paid: z.boolean(),
   repeatMonths: z.number().int().min(1).max(36).optional(),
+  cardId: id.nullable().optional(), // despesa no cartão: vai para a fatura
 });
+/** Marca faturas do cartão (pelo vencimento) como pagas ou volta a em aberto. */
+export const cardBillsPaySchema = z.object({ cardId: id, dueDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")).min(1).max(60), paid: z.boolean(), date: dateStr.optional() });
 export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
 export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });
 
