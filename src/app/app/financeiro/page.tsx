@@ -128,9 +128,18 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
 
 async function Cashflow({ userId, month }: { userId: string; month: string }) {
   const { months } = await financeCashflow(userId, month);
-  const rows: [string, (m: (typeof months)[number]) => [number | null, number | null], string][] = [
+  type M = (typeof months)[number];
+  type Row = [string, (m: M) => [number | null, number | null], string, boolean?];
+  // detalhe de onde vem cada valor (só as origens que têm algo nestes 5 meses)
+  const part = (label: string, k: keyof M["parts"]): Row[] => (months.some((m) => m.parts[k].planned !== 0) ? [[label, (m) => [m.parts[k].planned, m.parts[k].done], "", true]] : []);
+  const rows: Row[] = [
     ["Receitas", (m) => [m.incomePlanned, m.incomeDone], "text-emerald-300"],
+    ...part("Vendas", "sales"),
+    ...part("Lançamentos do Financeiro", "manualIncome"),
     ["Despesas", (m) => [m.expensePlanned, m.expenseDone], "text-red-300"],
+    ...part("Compras de pontos e clube", "purchases"),
+    ...part("Custos das vendas", "saleCosts"),
+    ...part("Lançamentos do Financeiro", "manualExpense"),
     ["Saldo do mês", (m) => [m.net, m.incomeDone - m.expenseDone], ""],
     ["Saldo acumulado", (m) => [m.running, null], "font-semibold"],
   ];
@@ -144,9 +153,9 @@ async function Cashflow({ userId, month }: { userId: string; month: string }) {
               <tr><th />{months.map((m) => [<th key={`${m.month}p`} className="text-right text-[11px]">Previsto</th>, <th key={`${m.month}r`} className="text-right text-[11px]">Realizado</th>])}</tr>
             </thead>
             <tbody>
-              {rows.map(([label, get, cls]) => (
-                <tr key={label}>
-                  <td className="font-medium">{label}</td>
+              {rows.map(([label, get, cls, sub], i) => (
+                <tr key={`${i}-${label}`} className={sub ? "text-xs text-muted" : ""}>
+                  <td className={sub ? "pl-8" : "font-medium"}>{label}</td>
                   {months.map((m) => { const [p, r] = get(m); return [<td key={`${m.month}p`} className={`text-right tabular-nums ${cls}`}>{p == null ? "" : fmtBRL(p)}</td>, <td key={`${m.month}r`} className={`text-right tabular-nums text-muted`}>{r == null ? "" : fmtBRL(r)}</td>]; })}
                 </tr>
               ))}
@@ -155,6 +164,7 @@ async function Cashflow({ userId, month }: { userId: string; month: string }) {
         </div>
       </div>
       <p className="text-xs text-muted">Previsto = tudo que vence no mês (pago ou não); realizado = o que já foi pago ou recebido. O saldo acumulado parte dos saldos iniciais das contas e soma o previsto mês a mês. Transferências entre contas não entram.</p>
+      <p className="text-xs text-muted">Entram sozinhos, sem lançar aqui: as <b>vendas</b> (o que o cliente paga, na data da venda; realizado quando a venda está paga) e o que você pagou nos <b>lançamentos do Extrato</b> (compra de pontos, clube, taxas) e na <b>emissão</b> (taxas repassadas, fornecedor, emissão em dinheiro, comissão). Compra parcelada vira uma parcela por mês (antecipada, tudo no mês da compra) e, no cartão, cai no vencimento da fatura. Para não contar duas vezes, não lance essas compras e vendas de novo no Financeiro.</p>
       <div className="flex items-center gap-2 text-xs text-muted"><Coins className="h-3.5 w-3.5" />Para ver os lançamentos de um mês, troque o mês no topo e abra a aba Lançamentos.</div>
     </div>
   );
