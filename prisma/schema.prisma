@@ -125,6 +125,7 @@ model User {
   finAccounts         FinAccount[]
   finTransactions     FinTransaction[]
   cardBillPayments    CardBillPayment[]
+  cardBills           CardBill[]
   teamMembers         TeamMember[]
   taskBoards          TaskBoard[]
   partners            Partner[]
@@ -619,6 +620,7 @@ model CreditCard {
   activity        CardActivity[]
   finTransactions FinTransaction[]
   billPayments    CardBillPayment[]
+  bills           CardBill[]
 
   @@index([userId])
 }
@@ -1167,17 +1169,18 @@ model ViajeFacil {
 
 // Financeiro: contas (banco, caixa) e lançamentos de receita, despesa e transferência entre contas.
 model FinAccount {
-  id           String           @id @default(cuid())
+  id           String            @id @default(cuid())
   userId       String
-  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name         String
-  kind         String           @default("BANK") // BANK | CASH | WALLET | OTHER
-  initialCents Int              @default(0) // saldo no dia em que a conta foi cadastrada
-  color        String           @default("#60a5fa")
-  archived     Boolean          @default(false)
-  createdAt    DateTime         @default(now())
-  outgoing     FinTransaction[] @relation("FinFrom")
-  incoming     FinTransaction[] @relation("FinTo")
+  kind         String            @default("BANK") // BANK | CASH | WALLET | OTHER
+  initialCents Int               @default(0) // saldo no dia em que a conta foi cadastrada
+  color        String            @default("#60a5fa")
+  archived     Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  outgoing     FinTransaction[]  @relation("FinFrom")
+  incoming     FinTransaction[]  @relation("FinTo")
+  billPayments CardBillPayment[]
 
   @@index([userId])
 }
@@ -1208,18 +1211,38 @@ model FinTransaction {
   @@index([cardId])
 }
 
-/// Fatura do cartão marcada como paga. A fatura em si é calculada: a soma do que foi comprado no cartão
-/// (custos do Extrato, custos das vendas e despesas do Financeiro) que vence naquele dia.
+/// Pagamento de uma fatura do cartão (pode haver vários: pagamento parcial). A fatura em si é calculada: a soma do
+/// que foi comprado no cartão (custos do Extrato, custos das vendas e despesas do Financeiro) que vence naquele dia.
 model CardBillPayment {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId      String
+  card        CreditCard  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  dueDate     DateTime // vencimento calculado da fatura (a chave dela)
+  paidAt      DateTime // quando foi pago
+  amountCents Int // quanto foi pago
+  accountId   String? // conta do Financeiro de onde saiu o dinheiro
+  account     FinAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+
+  @@index([cardId, dueDate])
+  @@index([userId])
+}
+
+/// Ajustes de uma fatura: o valor real que veio no banco (a diferença para as compras lançadas vira "outros gastos
+/// no cartão") e o vencimento, quando o banco muda o dia só naquele mês. dueDate é o vencimento calculado (a chave).
+model CardBill {
   id          String     @id @default(cuid())
   userId      String
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   cardId      String
   card        CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  dueDate     DateTime // vencimento da fatura
-  paidAt      DateTime // quando foi paga
-  amountCents Int // valor da fatura quando foi marcada paga
+  dueDate     DateTime
+  realCents   Int? // valor real da fatura; vazio = a soma das compras
+  dueOverride DateTime? // vencimento desta fatura, quando não é o dia normal do cartão
   createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   @@unique([cardId, dueDate])
   @@index([userId])

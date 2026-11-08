@@ -14,7 +14,11 @@ import * as sales from "@/app/api/sales/route";
 import * as salePayment from "@/app/api/sales/[id]/payment/route";
 import * as cardsRoute from "@/app/api/cards/route";
 import * as cardBillsRoute from "@/app/api/finance/card-bills/route";
-import { accountBalance, billKey, cardBills, cardDueDay, cashflow, periodTotals, purchaseTxs, saleTxs, withBillPayments, categoryOptions, type Tx } from "@/domain/finance";
+import * as billEdit from "@/app/api/finance/card-bills/edit/route";
+import * as billPayments from "@/app/api/finance/card-bills/payments/route";
+import * as billPayment from "@/app/api/finance/card-bills/payments/[id]/route";
+import * as billItems from "@/app/api/finance/card-bills/items/route";
+import { accountBalance, billAdjustTxs, billCashTxs, billKey, cardBills, cardDueDay, cashflow, periodTotals, purchaseTxs, saleTxs, categoryOptions, type Tx } from "@/domain/finance";
 import { financeCashflow, financeOverview, listFinAccounts } from "@/server/services/finance";
 import { prisma } from "@/server/db";
 import { brDay } from "@/domain/brasilia";
@@ -57,7 +61,7 @@ describe("contas do financeiro (domínio)", () => {
     const mixed = [...txs, tx({ type: "INCOME", amountCents: 45_000, dueDate: "2026-11-05", paidAt: null, source: "sales" }), tx({ amountCents: 9_000, dueDate: "2026-11-05", paidAt: "2026-11-05", source: "purchases" })];
     expect(cashflow(mixed, ["2026-11"], 0)[0]!.parts).toEqual({
       sales: { planned: 45_000, done: 0 }, manualIncome: { planned: 10_000, done: 10_000 },
-      purchases: { planned: 9_000, done: 9_000 }, saleCosts: { planned: 0, done: 0 }, manualExpense: { planned: 0, done: 0 },
+      purchases: { planned: 9_000, done: 9_000 }, saleCosts: { planned: 0, done: 0 }, cardOther: { planned: 0, done: 0 }, manualExpense: { planned: 0, done: 0 },
     });
   });
 
@@ -98,21 +102,39 @@ describe("contas do financeiro (domínio)", () => {
     expect(saleTxs({ ...sale, paidAt: "2026-11-06", refunded: true, refundFeeCents: 3_000 }, today).map((t) => [t.type, t.amountCents, t.paidAt])).toEqual([["INCOME", 3_000, "2026-11-06"]]);
   });
 
-  it("faturas: compras no cartão agrupadas por vencimento; ficam em aberto até a fatura ser paga", () => {
+  it("faturas: compras no cartão por vencimento; valor real, vencimento alterado e pagamento parcial", () => {
     const today = "2026-11-07";
     const card = { closingDay: 10, dueDay: 17 };
-    const txs = [
-      ...purchaseTxs({ day: "2026-10-01", costs: [{ amountCents: 30_000, card, cardId: "c1" }], installments: 3, description: "Livelo" }, today),
-      ...saleTxs({ day: "2026-10-05", paidAt: null, totalCents: 0, refunded: false, refundFeeCents: 0, costs: [{ amountCents: 2_000, card, cardId: "c1" }], description: "Custos da venda" }, today),
+    const charges = [
+      ...purchaseTxs({ day: "2026-10-01", costs: [{ amountCents: 30_000, card, cardId: "c1" }], installments: 3, description: "Livelo", ref: { kind: "entry", id: "e1" } }, today),
+      ...saleTxs({ day: "2026-10-05", paidAt: null, totalCents: 0, refunded: false, refundFeeCents: 0, costs: [{ amountCents: 2_000, card, cardId: "c1" }], description: "Custos da venda", ref: { kind: "sale", id: "s1" } }, today),
     ];
     // no cartão, a data passar não basta: só fica paga com a fatura
-    expect(txs.every((t) => t.cardId === "c1" && t.paidAt === null)).toBe(true);
-    expect(txs.map((t) => t.description)).toEqual(["Livelo (1/3)", "Livelo (2/3)", "Livelo (3/3)", "Custos da venda"]);
-    expect(cardBills(txs, today).map((b) => [b.dueDate, b.totalCents, b.overdue])).toEqual([["2026-10-17", 12_000, true], ["2026-11-17", 10_000, false], ["2026-12-17", 10_000, false]]);
-    const paid = cardBills(withBillPayments(txs, new Map([[billKey("c1", "2026-10-17"), "2026-10-16"]])), today);
-    expect(paid[0]).toMatchObject({ paidAt: "2026-10-16", overdue: false });
-    expect(paid[0]!.items.map((i) => [i.day, i.amountCents, i.source])).toEqual([["2026-10-01", 10_000, "purchases"], ["2026-10-05", 2_000, "saleCosts"]]);
-    expect(paid.slice(1).every((b) => b.paidAt === null)).toBe(true);
+    expect(charges.every((t) => t.cardId === "c1" && t.paidAt === null)).toBe(true);
+    expect(charges.map((t) => t.description)).toEqual(["Livelo (1/3)", "Livelo (2/3)", "Livelo (3/3)", "Custos da venda"]);
+    let bills = cardBills(charges, today);
+    expect(bills.map((b) => [b.dueDate, b.totalCents, b.status, b.overdue])).toEqual([["2026-10-17", 12_000, "open", true], ["2026-11-17", 10_000, "open", false], ["2026-12-17", 10_000, "open", false]]);
+    expect(bills[0]!.items.map((i) => [i.day, i.amountCents, i.source, i.ref?.kind])).toEqual([["2026-10-01", 10_000, "purchases", "entry"], ["2026-10-05", 2_000, "saleCosts", "sale"]]);
+
+    // valor real R$ 150 (R$ 30 de outros gastos), vencimento adiado para 20/10 e R$ 50 pagos em 18/10
+    const k = billKey("c1", "2026-10-17");
+    bills = cardBills(charges, today, new Map([[k, { realCents: 15_000, dueOverride: "2026-10-20" }]]), new Map([[k, [{ id: "p1", paidAt: "2026-10-18", amountCents: 5_000, accountId: "bank" }]]]));
+    expect(bills[0]).toMatchObject({ dueDate: "2026-10-17", effectiveDue: "2026-10-20", itemsCents: 12_000, adjustCents: 3_000, totalCents: 15_000, paidCents: 5_000, openCents: 10_000, status: "partial", overdue: true, paidAt: null });
+    // caixa: o pagamento sai na data dele (da conta escolhida) e o resto no vencimento, pela origem das compras
+    const cash = billCashTxs([bills[0]!]);
+    expect(cash.filter((t) => t.paidAt).map((t) => [t.source, t.amountCents, t.paidAt, t.accountId])).toEqual([["purchases", 3_333, "2026-10-18", "bank"], ["saleCosts", 666, "2026-10-18", "bank"], ["cardOther", 1_001, "2026-10-18", "bank"]]);
+    expect(cash.filter((t) => !t.paidAt).reduce((s, t) => s + t.amountCents, 0)).toBe(10_000);
+    expect(cash.filter((t) => !t.paidAt).every((t) => t.dueDate === "2026-10-20")).toBe(true);
+    // competência: a diferença vira "Outras despesas"
+    expect(billAdjustTxs([bills[0]!])).toMatchObject([{ type: "EXPENSE", amountCents: 3_000, category: "Outras despesas", source: "cardOther" }]);
+    // quitada com o segundo pagamento
+    const paid = cardBills(charges, today, new Map([[k, { realCents: 15_000, dueOverride: null }]]), new Map([[k, [{ id: "p1", paidAt: "2026-10-18", amountCents: 5_000, accountId: null }, { id: "p2", paidAt: "2026-10-25", amountCents: 10_000, accountId: null }]]]));
+    expect(paid[0]).toMatchObject({ status: "paid", openCents: 0, paidAt: "2026-10-25", overdue: false });
+    // fatura lançada só com o valor real (sem compras) e valor real menor que as compras (estorno: "Outras receitas")
+    const only = cardBills([], today, new Map([[billKey("c1", "2027-01-17"), { realCents: 8_000, dueOverride: null }]]));
+    expect(only).toMatchObject([{ dueDate: "2027-01-17", itemsCents: 0, totalCents: 8_000, status: "open" }]);
+    expect(billCashTxs(only).map((t) => [t.source, t.category, t.amountCents])).toEqual([["cardOther", "Outras despesas", 8_000]]);
+    expect(billAdjustTxs(cardBills(charges.slice(0, 1), today, new Map([[k, { realCents: 9_000, dueOverride: null }]])))).toMatchObject([{ type: "INCOME", amountCents: 1_000, category: "Outras receitas" }]);
   });
 
   it("categorias em grupo › item", () => {
@@ -286,5 +308,65 @@ describe("faturas dos cartões", () => {
     list = await bills();
     expect(list.find((x) => x.id === cardA)).toMatchObject({ openCents: 0, overdueCents: 0 });
     expect(await prisma.cardBillPayment.findMany({ where: { cardId: cardA }, select: { amountCents: true } })).toEqual(expect.arrayContaining([{ amountCents: 10_000 }]));
+  });
+
+  it("edita a fatura: valor real, vencimento, pagamento parcial, compras e fatura lançada à mão", async () => {
+    const p = await seedPrograms();
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana" })).data.item.id;
+    const lat = (await c.call(milesAccounts.POST, "POST", "/a", { holderId: h, programId: p.latam.id })).data.item.id;
+    const bank = (await c.call(accountsRoute.POST, "POST", "/x", { name: "Banco", kind: "BANK", initialCents: 100_000 })).data.id;
+    const cardA = (await c.call(cardsRoute.POST, "POST", "/c", { accountId: lat, name: "Cartão A", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10 })).data.item.id;
+    const cardB = (await c.call(cardsRoute.POST, "POST", "/c", { accountId: lat, name: "Cartão B", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 25, dueDay: 5 })).data.item.id;
+    // à vista no cartão A em 05/01 (fatura de 10/02) e despesa do Financeiro no cartão B em 20/01 (fatura de 05/02)
+    const buy = (await c.call(entries.POST, "POST", "/e", { accountId: lat, type: "PURCHASE", points: 10_000, occurredAt: "2026-01-05", costs: [{ type: "PONTOS", amountCents: 10_000, cardId: cardA }] })).data;
+    await c.call(txRoute.POST, "POST", "/x", { type: "EXPENSE", accountId: bank, amountCents: 5_000, description: "Assinatura", competence: "2026-01-20", dueDate: "2026-01-20", paid: false, cardId: cardB });
+    const assinatura = await prisma.finTransaction.findFirstOrThrow({ where: { userId, cardId: cardB } });
+    const bill = async (cardId: string, dueDate: string) => ((await c.call(cardBillsRoute.GET, "GET", "/x")).data.items as { id: string; open: Record<string, unknown>[]; paid: Record<string, unknown>[] }[])
+      .find((x) => x.id === cardId)!.open.concat((await c.call(cardBillsRoute.GET, "GET", "/x")).data.items.find((x: { id: string }) => x.id === cardId).paid).find((b) => b.dueDate === dueDate);
+    const balance = async () => (await listFinAccounts(userId)).find((x) => x.id === bank)!.balanceCents;
+
+    // valor real R$ 120 (R$ 20 de outros gastos) e vencimento adiado para 12/02
+    expect((await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-02-10", realCents: 12_000, dueOverride: "2026-02-12" })).status).toBe(200);
+    expect(await bill(cardA, "2026-02-10")).toMatchObject({ effectiveDue: "2026-02-12", itemsCents: 10_000, totalCents: 12_000, adjustCents: 2_000, openCents: 12_000, status: "open" });
+    expect((await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-02-11", realCents: 1, dueOverride: null })).status).toBe(400); // não é o dia do cartão
+
+    // pagamento parcial de R$ 50 do Banco, depois corrigido para R$ 120 (quita) e apagado
+    const pay = await c.call(billPayments.POST, "POST", "/x", { cardId: cardA, dueDate: "2026-02-10", paidAt: "2026-02-11", amountCents: 5_000, accountId: bank });
+    expect(pay.status).toBe(201);
+    expect(await bill(cardA, "2026-02-10")).toMatchObject({ status: "partial", paidCents: 5_000, openCents: 7_000 });
+    expect(await balance()).toBe(95_000);
+    expect((await c.call(billPayment.PUT, "PUT", "/x", { paidAt: "2026-02-12", amountCents: 12_000, accountId: bank }, { id: pay.data.id })).status).toBe(200);
+    expect(await bill(cardA, "2026-02-10")).toMatchObject({ status: "paid", paidAt: "2026-02-12", openCents: 0 });
+    expect(await balance()).toBe(88_000);
+    // fluxo de caixa: os R$ 120 saem em fevereiro, R$ 20 como outros gastos no cartão
+    const feb = (await financeCashflow(userId, "2026-02")).months.find((m) => m.month === "2026-02")!;
+    expect(feb.parts).toMatchObject({ purchases: { done: 10_000 }, cardOther: { done: 2_000 } });
+    // competência: a compra em janeiro e os outros gastos no mês do vencimento
+    expect((await financeOverview(userId, "2026-01", "competencia")).period.expenseByCategory).toEqual(expect.arrayContaining([{ name: "Compra de pontos e milhas", value: 10_000 }]));
+    expect((await financeOverview(userId, "2026-02", "competencia")).period.expenseByCategory).toEqual(expect.arrayContaining([{ name: "Outras despesas", value: 2_000 }]));
+    expect((await c.call(billPayment.DELETE, "DELETE", "/x", undefined, { id: pay.data.id })).status).toBe(200);
+    expect(await balance()).toBe(100_000);
+
+    // compras: a despesa do Financeiro passa do cartão B para o A (vai para a fatura de 10/02) e depois sai do cartão
+    expect((await c.call(billItems.PATCH, "PATCH", "/x", { kind: "fin", id: assinatura.id, cardId: cardB, newCardId: cardA })).status).toBe(200);
+    expect(await bill(cardB, "2026-02-05")).toBeUndefined();
+    expect(((await bill(cardA, "2026-02-10")) as { items: unknown[] }).items).toHaveLength(2);
+    expect((await c.call(billItems.PATCH, "PATCH", "/x", { kind: "fin", id: assinatura.id, cardId: cardA, amountCents: 6_000, newCardId: null })).status).toBe(200);
+    expect(await prisma.finTransaction.findUniqueOrThrow({ where: { id: assinatura.id } })).toMatchObject({ cardId: null, amountCents: 6_000, paidAt: null });
+    // a compra do Extrato muda de valor e de cartão (vai para a fatura de 05/02 do B)
+    expect((await c.call(billItems.PATCH, "PATCH", "/x", { kind: "entry", id: buy.item.id, cardId: cardA, amountCents: 11_000, newCardId: cardB })).status).toBe(200);
+    expect(await bill(cardB, "2026-02-05")).toMatchObject({ itemsCents: 11_000 });
+    expect(await prisma.entry.findUniqueOrThrow({ where: { id: buy.item.id }, select: { inputCostCents: true } })).toEqual({ inputCostCents: 11_000 });
+    expect((await c.call(billItems.PATCH, "PATCH", "/x", { kind: "entry", id: buy.item.id, cardId: cardA, newCardId: null })).status).toBe(404); // já não está no A
+
+    // fatura de um mês sem compras lançadas: só o valor que veio no banco
+    expect((await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardB, dueDate: "2026-05-05", realCents: 7_000, dueOverride: null })).status).toBe(200);
+    expect(await bill(cardB, "2026-05-05")).toMatchObject({ itemsCents: 0, totalCents: 7_000, openCents: 7_000 });
+    // outro usuário não mexe
+    const o2 = new Client();
+    await o2.call(register.POST, "POST", "/r", { name: "Outro", email: "o4@x.test", password: "senha-forte-4" });
+    expect((await o2.call(billEdit.PUT, "PUT", "/x", { cardId: cardB, dueDate: "2026-05-05", realCents: null, dueOverride: null })).status).toBe(404);
+    expect((await o2.call(billPayments.POST, "POST", "/x", { cardId: cardB, dueDate: "2026-05-05", paidAt: "2026-05-05", amountCents: 1 })).status).toBe(404);
+    expect((await o2.call(billItems.PATCH, "PATCH", "/x", { kind: "fin", id: assinatura.id, cardId: cardA, newCardId: null })).status).toBe(404);
   });
 });

@@ -575,8 +575,18 @@ export const finTxSchema = z.object({
   repeatMonths: z.number().int().min(1).max(36).optional(),
   cardId: id.nullable().optional(), // despesa no cartão: vai para a fatura
 });
+/** Vencimento calculado da fatura (AAAA-MM-DD): a chave dela, junto com o cartão. */
+const billDue = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida");
+const payCents = z.number({ invalid_type_error: "Informe o valor pago" }).int().positive("Informe o valor pago").max(100_000_000_00);
 /** Marca faturas do cartão (pelo vencimento) como pagas ou volta a em aberto. */
-export const cardBillsPaySchema = z.object({ cardId: id, dueDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")).min(1).max(60), paid: z.boolean(), date: dateStr.optional() });
+export const cardBillsPaySchema = z.object({ cardId: id, dueDates: z.array(billDue).min(1).max(60), paid: z.boolean(), date: dateStr.optional(), accountId: id.nullable().optional() });
+/** Valor real e vencimento de uma fatura (null = o calculado). */
+export const cardBillEditSchema = z.object({ cardId: id, dueDate: billDue, realCents: cents.nullable(), dueOverride: dateStr.nullable() });
+/** Pagamento (inteiro ou parte) de uma fatura. */
+export const billPaymentSchema = z.object({ cardId: id, dueDate: billDue, paidAt: dateStr, amountCents: payCents, accountId: id.nullable().optional() });
+export const billPaymentUpdateSchema = z.object({ paidAt: dateStr, amountCents: payCents, accountId: id.nullable().optional() });
+/** Editar uma compra a partir da fatura: valor, data e cartão (null tira do cartão). */
+export const billItemEditSchema = z.object({ kind: z.enum(["fin", "entry"]), id, cardId: id, amountCents: payCents.optional(), day: dateStr.optional(), newCardId: id.nullable() });
 export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
 export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });
 

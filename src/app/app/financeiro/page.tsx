@@ -39,7 +39,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       {tab === "visao" && <Overview userId={user.id} month={month} regime={regime} />}
       {tab === "fluxo" && <Cashflow userId={user.id} month={month} />}
       {tab === "lancamentos" && <TransactionsClient month={month} regime={regime} items={await listFinTx(user.id, month, regime, { type: sp.tipo, status: sp.status === "pago" || sp.status === "pendente" ? sp.status : undefined })} accounts={(await listFinAccounts(user.id)).filter((a) => !a.archived)} filters={{ tipo: sp.tipo ?? "", status: sp.status ?? "" }} cards={await listCardOptions(user.id)} />}
-      {tab === "faturas" && <CardBillsClient cards={await listCardBills(user.id)} />}
+      {tab === "faturas" && <CardBillsClient cards={await listCardBills(user.id)} accounts={(await listFinAccounts(user.id)).filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name }))} />}
       {tab === "contas" && <AccountsClient accounts={await listFinAccounts(user.id)} />}
     </>
   );
@@ -141,6 +141,7 @@ async function Cashflow({ userId, month }: { userId: string; month: string }) {
     ["Despesas", (m) => [m.expensePlanned, m.expenseDone], "text-red-300"],
     ...part("Compras de pontos e clube", "purchases"),
     ...part("Custos das vendas", "saleCosts"),
+    ...part("Outros gastos no cartão", "cardOther"),
     ...part("Lançamentos do Financeiro", "manualExpense"),
     ["Saldo do mês", (m) => [m.net, m.incomeDone - m.expenseDone], ""],
     ["Saldo acumulado", (m) => [m.running, null], "font-semibold"],
