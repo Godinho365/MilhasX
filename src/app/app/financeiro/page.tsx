@@ -1,18 +1,18 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Scale, Wallet, Coins, ReceiptText, Landmark, PiggyBank } from "lucide-react";
 import { requirePageUser } from "@/server/session";
-import { financeCashflow, financeOverview, listFinAccounts, listFinTx } from "@/server/services/finance";
+import { financeCashflow, financeOverview, listCardBills, listCardOptions, listFinAccounts, listFinTx } from "@/server/services/finance";
 import { PageHeader, Stat } from "@/components/stat";
 import { Segmented } from "@/components/ui";
 import { fmtBRL, fmtDate } from "@/lib/format";
 import { brDay } from "@/domain/brasilia";
 import { addMonths, type Regime } from "@/domain/finance";
-import { TransactionsClient, AccountsClient } from "./client";
+import { TransactionsClient, AccountsClient, CardBillsClient } from "./client";
 
 const MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 const short = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]!.slice(0, 3)}/${m.slice(2, 4)}`;
-const TABS = [["visao", "Visão Geral"], ["fluxo", "Fluxo de Caixa"], ["lancamentos", "Lançamentos"], ["contas", "Contas"]] as const;
+const TABS = [["visao", "Visão Geral"], ["fluxo", "Fluxo de Caixa"], ["lancamentos", "Lançamentos"], ["faturas", "Faturas"], ["contas", "Contas"]] as const;
 
 export default async function FinancePage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const user = await requirePageUser();
@@ -38,7 +38,8 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       <Segmented active={tab} items={TABS.map(([k, l]) => ({ key: k, label: l, href: href({ aba: k }) }))} />
       {tab === "visao" && <Overview userId={user.id} month={month} regime={regime} />}
       {tab === "fluxo" && <Cashflow userId={user.id} month={month} />}
-      {tab === "lancamentos" && <TransactionsClient month={month} regime={regime} items={await listFinTx(user.id, month, regime, { type: sp.tipo, status: sp.status === "pago" || sp.status === "pendente" ? sp.status : undefined })} accounts={(await listFinAccounts(user.id)).filter((a) => !a.archived)} filters={{ tipo: sp.tipo ?? "", status: sp.status ?? "" }} />}
+      {tab === "lancamentos" && <TransactionsClient month={month} regime={regime} items={await listFinTx(user.id, month, regime, { type: sp.tipo, status: sp.status === "pago" || sp.status === "pendente" ? sp.status : undefined })} accounts={(await listFinAccounts(user.id)).filter((a) => !a.archived)} filters={{ tipo: sp.tipo ?? "", status: sp.status ?? "" }} cards={await listCardOptions(user.id)} />}
+      {tab === "faturas" && <CardBillsClient cards={await listCardBills(user.id)} />}
       {tab === "contas" && <AccountsClient accounts={await listFinAccounts(user.id)} />}
     </>
   );
@@ -101,7 +102,7 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
         <h2 className="kicker mb-2">Balanço patrimonial</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat icon={<Landmark className="h-4 w-4" />} label="Ativo" value={fmtBRL(o.balance.assets)} hint={`caixa ${fmtBRL(o.balance.cash)} · milhas ${fmtBRL(o.balance.miles)} · a receber ${fmtBRL(o.balance.receivable)}`} />
-          <Stat icon={<TrendingDown className="h-4 w-4" />} label="Passivo" value={fmtBRL(o.balance.payable)} hint={o.balance.toPayPurchases > 0 ? `despesas pendentes · ${fmtBRL(o.balance.toPayPurchases)} de parcelas a vencer` : "despesas pendentes"} />
+          <Stat icon={<TrendingDown className="h-4 w-4" />} label="Passivo" value={fmtBRL(o.balance.payable)} hint={["despesas pendentes", o.balance.toPayBills > 0 ? `${fmtBRL(o.balance.toPayBills)} em faturas de cartão` : "", o.balance.toPayPurchases > 0 ? `${fmtBRL(o.balance.toPayPurchases)} de parcelas a vencer` : ""].filter(Boolean).join(" · ")} />
           <Stat icon={<Wallet className="h-4 w-4" />} label="Patrimônio líquido" value={fmtBRL(o.balance.equity)} accent={o.balance.equity >= 0} negative={o.balance.equity < 0} />
         </div>
         <p className="mt-2 text-xs text-muted">O que você tem (saldo das contas, o custo das milhas em estoque e o que vão te pagar, inclusive as vendas ainda não pagas) menos o que você deve. Não muda com o mês escolhido.</p>
@@ -120,7 +121,7 @@ async function Overview({ userId, month, regime }: { userId: string; month: stri
         </section>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="card card-pad" aria-label="Contas a pagar"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a pagar</span><span className="tabular-nums text-red-300">{fmtBRL(o.balance.payable - o.balance.toPayPurchases)}</span></h2>{due(o.toPay, "Nenhuma conta a pagar.", "pagar")}{o.balance.toPayPurchases > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/financeiro?aba=fluxo" className="text-accent-light hover:underline">+ {fmtBRL(o.balance.toPayPurchases)} de parcelas de compras e custos de emissão a vencer</Link></p>}</section>
+        <section className="card card-pad" aria-label="Contas a pagar"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a pagar</span><span className="tabular-nums text-red-300">{fmtBRL(o.balance.payable - o.balance.toPayPurchases)}</span></h2>{due(o.toPay, "Nenhuma conta a pagar.", "pagar")}{o.balance.toPayBills > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/financeiro?aba=faturas" className="text-accent-light hover:underline">Ver faturas dos cartões ({fmtBRL(o.balance.toPayBills)} em aberto)</Link></p>}{o.balance.toPayPurchases > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/financeiro?aba=fluxo" className="text-accent-light hover:underline">+ {fmtBRL(o.balance.toPayPurchases)} de parcelas de compras e custos de emissão a vencer (fora do cartão)</Link></p>}</section>
         <section className="card card-pad" aria-label="Contas a receber"><h2 className="mb-2 flex justify-between font-semibold"><span>Contas a receber</span><span className="tabular-nums text-emerald-300">{fmtBRL(o.balance.receivable - o.balance.toReceiveSales)}</span></h2>{due(o.toReceive, "Nenhuma conta a receber.", "receber")}{o.balance.toReceiveSales > 0 && <p className="mt-2 text-xs text-muted"><Link href="/app/sales?pago=nao&periodo=tudo" className="text-accent-light hover:underline">+ {fmtBRL(o.balance.toReceiveSales)} de vendas ainda não pagas</Link></p>}</section>
       </div>
     </div>

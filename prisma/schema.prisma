@@ -124,6 +124,7 @@ model User {
   viajeFacil          ViajeFacil[]
   finAccounts         FinAccount[]
   finTransactions     FinTransaction[]
+  cardBillPayments    CardBillPayment[]
   teamMembers         TeamMember[]
   taskBoards          TaskBoard[]
   partners            Partner[]
@@ -611,11 +612,13 @@ model CreditCard {
   notes           String?
   createdAt       DateTime @default(now())
 
-  invoices    CardInvoice[]
-  entryCosts  EntryCost[]
-  reminders   CardReminder[]
-  attachments CardAttachment[]
-  activity    CardActivity[]
+  invoices        CardInvoice[]
+  entryCosts      EntryCost[]
+  reminders       CardReminder[]
+  attachments     CardAttachment[]
+  activity        CardActivity[]
+  finTransactions FinTransaction[]
+  billPayments    CardBillPayment[]
 
   @@index([userId])
 }
@@ -1196,10 +1199,30 @@ model FinTransaction {
   dueDate     DateTime // vencimento / data prevista do pagamento (regime de caixa)
   paidAt      DateTime? // pago ou recebido; vazio = pendente (não mexe no saldo)
   repeatGroup String? // lançamentos criados juntos pela repetição mensal
+  cardId      String? // despesa no cartão: dueDate é a data da compra; vence na fatura e fica paga quando a fatura é paga
+  card        CreditCard? @relation(fields: [cardId], references: [id], onDelete: SetNull)
   createdAt   DateTime    @default(now())
 
   @@index([userId, dueDate])
   @@index([userId, competence])
+  @@index([cardId])
+}
+
+/// Fatura do cartão marcada como paga. A fatura em si é calculada: a soma do que foi comprado no cartão
+/// (custos do Extrato, custos das vendas e despesas do Financeiro) que vence naquele dia.
+model CardBillPayment {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId      String
+  card        CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  dueDate     DateTime // vencimento da fatura
+  paidAt      DateTime // quando foi paga
+  amountCents Int // valor da fatura quando foi marcada paga
+  createdAt   DateTime   @default(now())
+
+  @@unique([cardId, dueDate])
+  @@index([userId])
 }
 
 // Equipe: pessoas da operação (responsáveis por tarefas e metas). O login de membros vem depois.
@@ -1223,9 +1246,9 @@ model TeamMember {
 // Tarefas em quadro (A fazer, Fazendo, Feito)
 // Tarefas em quadros (colunas por pessoa ou por situação), com checklist, anexos, comentários e recorrência
 model TaskBoard {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   description String?
   columns     Json     @default("[]") // [{ id, name }]: a primeira é "pendente", a última "concluída"

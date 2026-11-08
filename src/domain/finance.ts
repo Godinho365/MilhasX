@@ -37,7 +37,8 @@ export type TxSource = "manual" | "sales" | "saleCosts" | "purchases";
  *  emissão já estão descontados no lucro das vendas, por isso ficam fora das despesas operacionais). */
 const AUTO_CATEGORY: Record<Exclude<TxSource, "manual">, string> = { sales: "Vendas", saleCosts: "Custos da emissão", purchases: "Compra de pontos e milhas" };
 
-export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource };
+/** cardId: compra no cartão (dueDate = vencimento da fatura, paga quando a fatura é paga); chargeDay: dia da compra. */
+export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource; cardId?: string | null; chargeDay?: string; description?: string | null };
 
 /** Saldo da conta: saldo inicial + o que já foi pago/recebido (pendente não conta), com as transferências. */
 export function accountBalance(accountId: string, initialCents: number, txs: Tx[]) {
@@ -83,40 +84,75 @@ export function splitInstallments(totalCents: number, n: number) {
 }
 
 export type CardDays = { closingDay: number; dueDay: number };
-/** Valor pago e, se foi no cartão, os dias de fechamento e vencimento dele. */
-export type PaidCost = { amountCents: number; card: CardDays | null };
+/** Valor pago e, se foi no cartão, qual cartão (cardId) e os dias de fechamento e vencimento dele. */
+export type PaidCost = { amountCents: number; card: CardDays | null; cardId?: string | null };
 
-/** Saída que não tem "pago" marcado (custos do Extrato e da emissão): realizada quando a data já passou. */
-const outflow = (due: string, amountCents: number, source: "purchases" | "saleCosts", competence: string, today: string): Tx => ({
-  type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY[source], competence, dueDate: due, paidAt: due <= today ? due : null, source,
+/** Saída que não tem "pago" próprio (custos do Extrato e da emissão): sem cartão, realizada quando a data já passou;
+ *  num cartão cadastrado, fica em aberto até a fatura ser marcada como paga (withBillPayments). */
+const outflow = (due: string, amountCents: number, source: "purchases" | "saleCosts", competence: string, today: string, extra: { cardId?: string | null; description?: string | null } = {}): Tx => ({
+  type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY[source], competence, dueDate: due,
+  paidAt: extra.cardId ? null : due <= today ? due : null, source,
+  ...(extra.cardId ? { cardId: extra.cardId, chargeDay: competence } : {}), description: extra.description ?? null,
 });
 
 /** Custos de um lançamento do Extrato no fluxo de caixa: à vista, na data; parcelado, uma parcela por mês; com as
  *  parcelas restantes antecipadas, tudo no mês da compra. No cartão, cada parcela vence numa fatura. */
-export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: number | null; anticipated?: boolean | null }, today: string): Tx[] {
+export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: number | null; anticipated?: boolean | null; description?: string | null }, today: string): Tx[] {
   const n = p.anticipated ? 1 : Math.max(1, p.installments ?? 1);
-  const groups = new Map<string, { card: CardDays | null; cents: number }>();
+  const groups = new Map<string, { card: CardDays | null; cardId: string | null; cents: number }>();
   for (const c of p.costs) {
     if (c.amountCents <= 0) continue;
-    const key = c.card ? `${c.card.closingDay}/${c.card.dueDay}` : "";
-    const g = groups.get(key) ?? { card: c.card, cents: 0 };
+    const key = c.cardId ?? (c.card ? `${c.card.closingDay}/${c.card.dueDay}` : "");
+    const g = groups.get(key) ?? { card: c.card, cardId: c.cardId ?? null, cents: 0 };
     g.cents += c.amountCents;
     groups.set(key, g);
   }
   return [...groups.values()].flatMap((g) => {
     const first = g.card ? cardDueDay(p.day, g.card) : p.day;
-    return splitInstallments(g.cents, n).map((cents, i) => outflow(g.card ? dayIn(addMonths(monthOf(first), i), g.card.dueDay) : dayIn(addMonths(monthOf(first), i), Number(first.slice(8, 10))), cents, "purchases", p.day, today));
+    return splitInstallments(g.cents, n).map((cents, i) => outflow(
+      g.card ? dayIn(addMonths(monthOf(first), i), g.card.dueDay) : dayIn(addMonths(monthOf(first), i), Number(first.slice(8, 10))), cents, "purchases", p.day, today,
+      { cardId: g.cardId, description: p.description ? (n > 1 ? `${p.description} (${i + 1}/${n})` : p.description) : null },
+    ));
   });
 }
 
 /** Venda no fluxo de caixa: entra o que o cliente paga, na data da venda (realizado quando a venda está paga);
  *  reembolsada, só a taxa de administração que fica. Os custos pagos na emissão (fornecedor, emissão em dinheiro,
  *  taxas repassadas, comissão) saem na data da venda, ou na fatura do cartão. */
-export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[] }, today: string): Tx[] {
+export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[]; description?: string | null }, today: string): Tx[] {
   const amountCents = s.refunded ? s.refundFeeCents : s.totalCents;
   const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY.sales, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
   if (s.refunded) return income; // milhas e taxas voltaram: os custos da emissão se desfazem
-  return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today))];
+  return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today, { cardId: c.cardId, description: s.description }))];
+}
+
+/* ---------------- Faturas do cartão ---------------- */
+
+export const billKey = (cardId: string, dueDate: string) => `${cardId}|${dueDate}`;
+
+/** Compras no cartão ficam pagas quando a fatura delas (cartão + vencimento) foi marcada como paga; as outras, em aberto. */
+export const withBillPayments = (txs: Tx[], paid: Map<string, string>): Tx[] =>
+  txs.map((t) => (t.cardId && t.type === "EXPENSE" ? { ...t, paidAt: paid.get(billKey(t.cardId, t.dueDate)) ?? null } : t));
+
+export type Bill = {
+  cardId: string; dueDate: string; totalCents: number; paidAt: string | null; overdue: boolean;
+  items: { description: string | null; amountCents: number; source: TxSource; day: string }[];
+};
+
+/** Faturas: as compras no cartão (Extrato, custos das vendas e despesas do Financeiro) agrupadas por cartão e vencimento. */
+export function cardBills(txs: Tx[], today: string): Bill[] {
+  const bills = new Map<string, Bill>();
+  for (const t of txs) {
+    if (!t.cardId || t.type !== "EXPENSE") continue;
+    const key = billKey(t.cardId, t.dueDate);
+    const b = bills.get(key) ?? { cardId: t.cardId, dueDate: t.dueDate, totalCents: 0, paidAt: t.paidAt, overdue: false, items: [] };
+    b.totalCents += t.amountCents;
+    b.items.push({ description: t.description ?? null, amountCents: t.amountCents, source: t.source ?? "manual", day: t.chargeDay ?? t.competence });
+    bills.set(key, b);
+  }
+  return [...bills.values()]
+    .map((b) => ({ ...b, overdue: !b.paidAt && b.dueDate < today, items: b.items.sort((x, y) => x.day.localeCompare(y.day)) }))
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
 /** Receitas e despesas do mês (sem transferências), realizadas e previstas, e por categoria. */

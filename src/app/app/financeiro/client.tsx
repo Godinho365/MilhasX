@@ -1,16 +1,18 @@
 "use client";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, Pencil, Trash2, CircleCheck, Undo2, ArrowRightLeft, Repeat, Landmark } from "lucide-react";
+import { Plus, Pencil, Trash2, CircleCheck, Undo2, ArrowRightLeft, Repeat, Landmark, CreditCard, ChevronDown } from "lucide-react";
 import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, parseBRLToCents } from "@/lib/format";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
-import { categoryOptions, type FinType, type Regime } from "@/domain/finance";
+import { cardDueDay, categoryOptions, type FinType, type Regime } from "@/domain/finance";
 
 type Account = { id: string; name: string; kind: string; color: string; archived: boolean; initialCents: number; balanceCents: number };
-type Tx = { id: string; type: string; category: string | null; amountCents: number; description: string | null; counterpart: string | null; accountId: string; account: string; accountColor: string; toAccountId: string | null; toAccount: string | null; competence: string; dueDate: string; paidAt: string | null; repeat: boolean; overdue: boolean };
+type Tx = { id: string; type: string; category: string | null; amountCents: number; description: string | null; counterpart: string | null; accountId: string; account: string; accountColor: string; toAccountId: string | null; toAccount: string | null; competence: string; dueDate: string; paidAt: string | null; repeat: boolean; overdue: boolean; cardId: string | null; card: string | null; billDue: string | null };
+type CardOpt = { id: string; name: string; last4: string | null; closingDay: number; dueDay: number };
+const cardLabel = (c: { name: string; last4: string | null }) => (c.last4 ? `${c.name} •••• ${c.last4}` : c.name);
 
 const TYPE_LABEL: Record<string, string> = { INCOME: "Receita", EXPENSE: "Despesa", TRANSFER: "Transferência" };
 const KIND_LABEL: Record<string, string> = { BANK: "Conta bancária", CASH: "Caixa / dinheiro", WALLET: "Carteira digital", OTHER: "Outra" };
@@ -19,7 +21,7 @@ const money = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 
 /* ---------------- Lançamentos ---------------- */
 
-export function TransactionsClient({ month, regime, items, accounts, filters }: { month: string; regime: Regime; items: Tx[]; accounts: Account[]; filters: { tipo: string; status: string } }) {
+export function TransactionsClient({ month, regime, items, accounts, filters, cards = [] }: { month: string; regime: Regime; items: Tx[]; accounts: Account[]; filters: { tipo: string; status: string }; cards?: CardOpt[] }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
@@ -82,13 +84,13 @@ export function TransactionsClient({ month, regime, items, accounts, filters }: 
                   <tr key={t.id}>
                     <td>{t.paidAt ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">{t.type === "INCOME" ? "Recebido" : "Pago"}</span> : <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${t.overdue ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>{t.overdue ? "Atrasado" : "Pendente"}</span>}</td>
                     <td className="whitespace-nowrap tabular-nums">{fmtDate(t.paidAt ?? t.dueDate)}{regime === "competencia" && <span className="block text-xs text-muted">comp. {t.competence.slice(5, 7)}/{t.competence.slice(0, 4)}</span>}</td>
-                    <td className="max-w-[260px]"><span className="flex items-center gap-1.5 truncate">{t.repeat && <Repeat className="h-3 w-3 shrink-0 text-muted" aria-label="Repete" />}{t.description || TYPE_LABEL[t.type]}</span>{t.counterpart && <span className="block truncate text-xs text-muted">{t.counterpart}</span>}</td>
+                    <td className="max-w-[260px]"><span className="flex items-center gap-1.5 truncate">{t.repeat && <Repeat className="h-3 w-3 shrink-0 text-muted" aria-label="Repete" />}{t.description || TYPE_LABEL[t.type]}</span>{t.counterpart && <span className="block truncate text-xs text-muted">{t.counterpart}</span>}{t.card && t.billDue && <span className="flex items-center gap-1 truncate text-xs text-muted"><CreditCard className="h-3 w-3 shrink-0" aria-hidden />{t.card} · fatura de {fmtDate(t.billDue)}</span>}</td>
                     <td className="max-w-[220px] truncate text-sm text-muted">{t.type === "TRANSFER" ? "Transferência" : t.category ?? "-"}</td>
                     <td className="whitespace-nowrap text-sm"><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.accountColor }} aria-hidden />{t.account}{t.toAccount && ` → ${t.toAccount}`}</span></td>
                     <td className={`text-right font-semibold tabular-nums ${t.type === "INCOME" ? "text-ok" : t.type === "EXPENSE" ? "text-bad" : ""}`}>{t.type === "EXPENSE" ? "−" : t.type === "INCOME" ? "+" : ""}{fmtBRL(t.amountCents)}</td>
                     <td className="text-right">
                       <div className="inline-flex gap-1">
-                        {t.paidAt
+                        {t.card ? null : t.paidAt
                           ? <button className="btn-subtle h-8 w-8 px-0" onClick={() => paid(t, false)} aria-label={`Voltar a pendente: ${t.description ?? TYPE_LABEL[t.type]}`} title="Voltar a pendente"><Undo2 className="h-4 w-4" /></button>
                           : <button className="btn-subtle h-8 w-8 px-0 text-emerald-300" onClick={() => paid(t, true)} aria-label={`Marcar como ${t.type === "INCOME" ? "recebido" : "pago"}: ${t.description ?? TYPE_LABEL[t.type]}`} title={t.type === "INCOME" ? "Recebido hoje" : "Pago hoje"}><CircleCheck className="h-4 w-4" /></button>}
                         <button className="btn-subtle h-8 w-8 px-0" onClick={() => setEditing(t)} aria-label={`Editar ${t.description ?? TYPE_LABEL[t.type]}`}><Pencil className="h-4 w-4" /></button>
@@ -103,12 +105,12 @@ export function TransactionsClient({ month, regime, items, accounts, filters }: 
         )}
       </div>
       {items.length > 0 && <p className="mt-2 text-right text-sm text-muted">Receitas <span className="tabular-nums text-emerald-300">{fmtBRL(income)}</span> · Despesas <span className="tabular-nums text-red-300">{fmtBRL(expense)}</span> · Saldo <span className="tabular-nums font-semibold text-white">{fmtBRL(income - expense)}</span></p>}
-      {editing && <TxDialog tx={typeof editing === "string" ? null : editing} type={typeof editing === "string" ? editing : (editing.type as FinType)} month={month} accounts={accounts} onClose={() => setEditing(null)} />}
+      {editing && <TxDialog tx={typeof editing === "string" ? null : editing} type={typeof editing === "string" ? editing : (editing.type as FinType)} month={month} accounts={accounts} cards={cards} onClose={() => setEditing(null)} />}
     </>
   );
 }
 
-function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx | null; type: FinType; month: string; accounts: Account[]; onClose: () => void }) {
+function TxDialog({ tx, type: initialType, month, accounts, cards, onClose }: { tx: Tx | null; type: FinType; month: string; accounts: Account[]; cards: CardOpt[]; onClose: () => void }) {
   const router = useRouter();
   const t0 = today();
   const defDay = t0.slice(0, 7) === month ? t0 : `${month}-01`;
@@ -124,11 +126,14 @@ function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx 
     competence: tx?.competence ?? defDay,
     paid: tx ? !!tx.paidAt : false,
     repeat: "1",
+    cardId: tx?.cardId ?? "",
   });
   const [erro, setErro] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
   const cats = type === "TRANSFER" ? [] : categoryOptions(type);
+  // despesa no cartão: a data é a da compra; vence na fatura e fica paga quando a fatura é paga
+  const card = type === "EXPENSE" ? cards.find((c) => c.id === f.cardId) : undefined;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -137,7 +142,8 @@ function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx 
     setBusy(true);
     const body = {
       type, accountId: f.accountId, toAccountId: type === "TRANSFER" ? f.toAccountId : null, category: type === "TRANSFER" ? null : f.category || null,
-      amountCents, description: f.description || null, counterpart: f.counterpart || null, dueDate: f.dueDate, competence: f.competence, paid: f.paid,
+      amountCents, description: f.description || null, counterpart: f.counterpart || null, dueDate: f.dueDate, competence: f.competence, paid: card ? false : f.paid,
+      cardId: card ? card.id : null,
       ...(tx ? {} : { repeatMonths: Number(f.repeat) || 1 }),
     };
     const r = tx ? await api(`/api/finance/transactions/${tx.id}`, "PUT", body) : await api<{ created: number }>("/api/finance/transactions", "POST", body);
@@ -158,7 +164,7 @@ function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx 
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Valor (R$)" required><input className="input" inputMode="decimal" value={f.amount} onChange={(e) => set({ amount: e.target.value })} placeholder="0,00" aria-label="Valor" autoFocus /></Field>
-          <Field label={type === "TRANSFER" ? "Da conta" : "Conta"} required>
+          <Field label={type === "TRANSFER" ? "Da conta" : card ? "Conta que paga a fatura" : "Conta"} required>
             <select className="input" value={f.accountId} onChange={(e) => set({ accountId: e.target.value })} aria-label="Conta">{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           </Field>
           {type === "TRANSFER" ? (
@@ -175,10 +181,18 @@ function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx 
           )}
           <Field label={type === "INCOME" ? "Cliente (opcional)" : "Fornecedor (opcional)"}><input className="input" value={f.counterpart} onChange={(e) => set({ counterpart: e.target.value })} maxLength={120} aria-label="Fornecedor ou cliente" /></Field>
           <Field label="Descrição" className="sm:col-span-2"><input className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} maxLength={200} placeholder="Ex.: Aluguel do escritório" aria-label="Descrição" /></Field>
-          <Field label={type === "INCOME" ? "Data do recebimento" : "Data do pagamento"} required hint="Vencimento, se ainda não foi pago"><input className="input" type="date" value={f.dueDate} onChange={(e) => set({ dueDate: e.target.value })} required aria-label="Data do pagamento" /></Field>
+          {type === "EXPENSE" && cards.length > 0 && (
+            <Field label="Pagou no cartão?" className="sm:col-span-2" hint={card ? "Entra na fatura do cartão e fica paga quando você marca a fatura como paga em Faturas" : "Escolha o cartão para a despesa entrar na fatura"}>
+              <select className="input" value={f.cardId} onChange={(e) => set({ cardId: e.target.value })} aria-label="Cartão">
+                <option value="">Não, sai direto da conta</option>
+                {cards.map((c) => <option key={c.id} value={c.id}>{cardLabel(c)}</option>)}
+              </select>
+            </Field>
+          )}
+          <Field label={card ? "Data da compra" : type === "INCOME" ? "Data do recebimento" : "Data do pagamento"} required hint={card ? (/^\d{4}-\d{2}-\d{2}$/.test(f.dueDate) ? `Vai para a fatura que vence em ${fmtDate(cardDueDay(f.dueDate, card))}` : "") : "Vencimento, se ainda não foi pago"}><input className="input" type="date" value={f.dueDate} onChange={(e) => set({ dueDate: e.target.value })} required aria-label="Data do pagamento" /></Field>
           <Field label="Competência" required hint="Mês a que pertence"><input className="input" type="date" value={f.competence} onChange={(e) => set({ competence: e.target.value })} required aria-label="Competência" /></Field>
         </div>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.paid} onChange={(e) => set({ paid: e.target.checked })} />{type === "INCOME" ? "Já recebido" : type === "EXPENSE" ? "Já pago" : "Já transferido"}<span className="text-xs text-muted">(pendente não mexe no saldo)</span></label>
+        {!card && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.paid} onChange={(e) => set({ paid: e.target.checked })} />{type === "INCOME" ? "Já recebido" : type === "EXPENSE" ? "Já pago" : "Já transferido"}<span className="text-xs text-muted">(pendente não mexe no saldo)</span></label>}
         {!tx && (
           <Field label="Repetir" hint="Cria um lançamento por mês; os seguintes entram pendentes">
             <select className="input" value={f.repeat} onChange={(e) => set({ repeat: e.target.value })} aria-label="Repetir">
@@ -189,6 +203,103 @@ function TxDialog({ tx, type: initialType, month, accounts, onClose }: { tx: Tx 
         )}
       </form>
     </Modal>
+  );
+}
+
+/* ---------------- Faturas dos cartões ---------------- */
+
+type BillItem = { description: string | null; amountCents: number; source: string; day: string };
+type Bill = { cardId: string; dueDate: string; totalCents: number; paidAt: string | null; overdue: boolean; paidCents: number | null; items: BillItem[] };
+type CardBills = { id: string; name: string; last4: string | null; color: string | null; closingDay: number; dueDay: number; openCents: number; overdueCents: number; open: Bill[]; paid: Bill[] };
+const SOURCE_LABEL: Record<string, string> = { purchases: "Extrato", saleCosts: "Venda", manual: "Financeiro" };
+
+export function CardBillsClient({ cards }: { cards: CardBills[] }) {
+  const router = useRouter();
+  const nav = useNav();
+  const [busy, setBusy] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  async function pay(card: CardBills, dueDates: string[], paid: boolean, date?: string) {
+    setBusy(`${card.id}:${dueDates.join(",")}`);
+    const r = await api("/api/finance/card-bills", "POST", { cardId: card.id, dueDates, paid, ...(paid && date ? { date } : {}) });
+    setBusy("");
+    if (!r.ok) return toast(r.erro, "error");
+    toast(paid ? (dueDates.length > 1 ? `${dueDates.length} faturas marcadas como pagas` : "Fatura marcada como paga") : "Fatura voltou para em aberto");
+    refreshSafe(router);
+  }
+  if (cards.length === 0) {
+    return (
+      <Empty title="Nenhum cartão cadastrado" icon={<CreditCard className="h-5 w-5" />}>
+        <p className="max-w-md text-sm text-muted">Cadastre seus cartões com o dia de fechamento e de vencimento. Depois, escolha o cartão na linha de custo das compras do Extrato ou nas despesas do Financeiro: elas entram sozinhas na fatura certa.</p>
+        <button className="btn-primary" onClick={() => nav("/app/credit-cards")}>Ir para Cartões</button>
+      </Empty>
+    );
+  }
+  const totalOpen = cards.reduce((t, c) => t + c.openCents, 0);
+  const totalOverdue = cards.reduce((t, c) => t + c.overdueCents, 0);
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="card card-pad"><p className="kicker">Em aberto nos cartões</p><p className="mt-1 text-2xl font-semibold tabular-nums">{fmtBRL(totalOpen)}</p><p className="text-xs text-muted">tudo que ainda falta pagar, somando as faturas futuras</p></div>
+        <div className="card card-pad"><p className="kicker">Vencido</p><p className={`mt-1 text-2xl font-semibold tabular-nums ${totalOverdue > 0 ? "text-red-300" : ""}`}>{fmtBRL(totalOverdue)}</p><p className="text-xs text-muted">faturas que já venceram e não foram marcadas como pagas</p></div>
+      </div>
+      {cards.map((c) => {
+        const overdue = c.open.filter((b) => b.overdue);
+        return (
+          <section key={c.id} className="card card-pad" aria-label={`Faturas do cartão ${c.name}`}>
+            <header className="mb-3 flex flex-wrap items-center gap-3">
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: c.color ?? "#94a3b8" }} aria-hidden />
+              <div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{cardLabel(c)}</h2><p className="text-xs text-muted">fecha dia {c.closingDay} · vence dia {c.dueDay}</p></div>
+              <div className="text-right"><p className="text-xs text-muted">Em aberto</p><p className="font-semibold tabular-nums">{fmtBRL(c.openCents)}</p>{c.overdueCents > 0 && <p className="text-xs tabular-nums text-red-300">{fmtBRL(c.overdueCents)} vencido</p>}</div>
+            </header>
+            {c.open.length === 0 ? <p className="py-3 text-sm text-muted">Nada em aberto neste cartão.</p> : (
+              <ul className="divide-y divide-line">
+                {c.open.map((b) => {
+                  const k = `${c.id}:${b.dueDate}`;
+                  return (
+                    <li key={b.dueDate} className="py-2.5">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setOpen({ ...open, [k]: !open[k] })} aria-expanded={!!open[k]} aria-label={`Compras da fatura de ${fmtDate(b.dueDate)}`}>
+                          <ChevronDown className={`h-4 w-4 shrink-0 text-muted transition-transform ${open[k] ? "rotate-180" : ""}`} aria-hidden />
+                          <span className="tabular-nums">Vence {fmtDate(b.dueDate)}</span>
+                          {b.overdue ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-300">Vencida</span> : <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">Em aberto</span>}
+                          <span className="text-xs text-muted">{b.items.length} {b.items.length === 1 ? "compra" : "compras"}</span>
+                        </button>
+                        <span className="font-semibold tabular-nums">{fmtBRL(b.totalCents)}</span>
+                        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); pay(c, [b.dueDate], true, String(new FormData(e.currentTarget).get("date") || "")); }}>
+                          <input className="input h-8 w-auto py-0 text-xs" type="date" name="date" defaultValue={today()} aria-label={`Data do pagamento da fatura de ${fmtDate(b.dueDate)}`} />
+                          <button className="btn-primary h-8 px-3 text-xs" disabled={busy === k}><CircleCheck className="h-4 w-4" />Paguei</button>
+                        </form>
+                      </div>
+                      {open[k] && (
+                        <ul className="mt-2 space-y-1 pl-6 text-sm">
+                          {b.items.map((i, n) => <li key={n} className="flex gap-3"><span className="w-20 shrink-0 tabular-nums text-muted">{fmtDate(i.day)}</span><span className="min-w-0 flex-1 truncate">{i.description || "Compra"}<span className="text-xs text-muted"> · {SOURCE_LABEL[i.source] ?? i.source}</span></span><span className="tabular-nums">{fmtBRL(i.amountCents)}</span></li>)}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {overdue.length > 1 && <button className="btn-ghost mt-2 h-8 text-xs" disabled={!!busy} onClick={() => pay(c, overdue.map((b) => b.dueDate), true)}><CircleCheck className="h-4 w-4" />Marcar as {overdue.length} vencidas como pagas hoje</button>}
+            {c.paid.length > 0 && (
+              <details className="mt-3 text-sm">
+                <summary className="cursor-pointer text-xs text-muted">Pagas recentemente</summary>
+                <ul className="mt-2 divide-y divide-line">
+                  {c.paid.map((b) => (
+                    <li key={b.dueDate} className="flex flex-wrap items-center gap-3 py-2">
+                      <span className="flex-1 tabular-nums">Venceu {fmtDate(b.dueDate)} · <span className="text-emerald-300">paga em {fmtDate(b.paidAt!)}</span>{b.paidCents != null && b.paidCents !== b.totalCents && <span className="block text-xs text-amber-300">Paga com {fmtBRL(b.paidCents)}; hoje a fatura soma {fmtBRL(b.totalCents)} (mudaram as compras)</span>}</span>
+                      <span className="tabular-nums">{fmtBRL(b.totalCents)}</span>
+                      <button className="btn-subtle h-8 w-8 px-0" disabled={!!busy} onClick={() => pay(c, [b.dueDate], false)} aria-label={`Voltar a fatura de ${fmtDate(b.dueDate)} para em aberto`} title="Voltar para em aberto"><Undo2 className="h-4 w-4" /></button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </section>
+        );
+      })}
+      <p className="text-xs text-muted">A fatura soma sozinha o que você passou em cada cartão: compras e custos do Extrato com o cartão escolhido na linha de custo, custos das vendas pagos no cartão e despesas do Financeiro marcadas como &quot;no cartão&quot;. Compra parcelada cai uma parcela em cada fatura. Comprou antes do dia do fechamento, vai para a fatura do mês; no dia do fechamento ou depois, para a seguinte. Marcar como paga tira a fatura de Contas a pagar e do Passivo e conta como realizado no Fluxo de Caixa.</p>
+    </div>
   );
 }
 
