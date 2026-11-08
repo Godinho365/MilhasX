@@ -430,6 +430,7 @@ export const dealSchema = z.object({
   profitCents: z.number().int().min(-100_000_000_00).max(100_000_000_00).nullable().optional(),
   passengers: z.number().int().min(1).max(99).nullable().optional(),
   taxesCents: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  taxesCardId: z.string().max(40).nullable().optional(), // cartão em que as taxas foram pagas
   orderLink: z.string().trim().url("Link inválido").max(1000).nullable().optional().or(z.literal("")),
   locator: optText(20),
   notes: optText(2000),
@@ -586,6 +587,8 @@ export const cardBillEditSchema = z.object({ cardId: id, dueDate: billDue, realC
 export const billPaymentSchema = z.object({ cardId: id, dueDate: billDue, paidAt: dateStr, amountCents: payCents, accountId: id.nullable().optional() });
 export const billPaymentUpdateSchema = z.object({ paidAt: dateStr, amountCents: payCents, accountId: id.nullable().optional() });
 /** Editar uma compra a partir da fatura: valor, data e cartão (null tira do cartão). */
+/** Adicionar uma compra na fatura (despesa do Financeiro no cartão); addToReal soma ao valor real, se houver. */
+export const billItemAddSchema = z.object({ cardId: id, dueDate: billDue, amountCents: z.number({ invalid_type_error: "Informe o valor" }).int().positive("Informe o valor").max(100_000_000_00), day: dateStr, description: z.string().trim().max(200).nullable().optional(), category: z.string().trim().max(120).nullable().optional(), accountId: id, addToReal: z.boolean().default(true) });
 export const billItemEditSchema = z.object({ kind: z.enum(["fin", "entry"]), id, cardId: id, amountCents: payCents.optional(), day: dateStr.optional(), newCardId: id.nullable() });
 export const finPaidSchema = z.object({ paid: z.boolean(), date: dateStr.optional() });
 export const saleInvoiceSchema = z.object({ number: z.string().trim().max(40).nullable(), date: dateStr.optional() });

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
-import { createSale } from "./sales";
+import { createSale, type SaleCost } from "./sales";
 import { brDay } from "@/domain/brasilia";
 import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
@@ -23,6 +23,7 @@ export type DealInput = {
   profitCents?: number | null; // lucro informado à mão; vazio = estimado pelo CPM da conta
   passengers?: number | null;
   taxesCents?: number | null; // taxas da emissão, pagas por mim e cobradas do comprador
+  taxesCardId?: string | null; // cartão em que as taxas foram pagas (vão para a fatura dele)
   orderLink?: string | null;
   locator?: string | null;
   notes?: string | null;
@@ -32,13 +33,23 @@ const include = {
   account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true, phone: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
   receipt: { select: { name: true, size: true, createdAt: true } },
-  sale: { select: { occurredAt: true, paidAt: true } }, // datas da venda e do pagamento (dashboard e quadro)
+  sale: { select: { occurredAt: true, paidAt: true, items: { where: { issuedWith: "POINTS" }, select: { costs: true } } } }, // datas da venda e do pagamento (dashboard e quadro)
 } as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
+
+/** Cartão da taxa de embarque na venda que a negociação lançou (pode ter sido mudado em Vendas); undefined = sem
+ *  venda ou sem esse custo nela. */
+const saleTaxCard = (d: Row) => {
+  const items = d.sale?.items ?? [];
+  if (items.length !== 1) return undefined;
+  const tax = ((Array.isArray(items[0]!.costs) ? items[0]!.costs : []) as SaleCost[]).find((c) => c.type === "TAXA_EMBARQUE");
+  return tax ? tax.cardId ?? null : undefined;
+};
 
 const view = (d: Row) => {
   const costCpmCents = d.account && d.account.balance > 0 ? Math.round((d.account.costCents * 1000) / d.account.balance) : null;
   const estimatedProfitCents = dealProfitCents(d.points, d.saleCpmCents, costCpmCents);
+  const saleCard = saleTaxCard(d);
   return {
     id: d.id,
     number: d.number,
@@ -54,6 +65,7 @@ const view = (d: Row) => {
     saleCpmCents: d.saleCpmCents,
     passengers: d.passengers,
     taxesCents: d.taxesCents,
+    taxesCardId: saleCard === undefined ? d.taxesCardId : saleCard,
     orderLink: d.orderLink,
     locator: d.locator,
     // verificação antes da emissão (validação facial do titular)
@@ -89,6 +101,7 @@ async function checkRefs(userId: string, input: DealInput) {
   if (!input.customerName.trim()) throw new DomainError(400, "Informe o comprador");
   if (input.customerId && !(await prisma.customer.findFirst({ where: { id: input.customerId, userId }, select: { id: true } }))) throw new DomainError(404, "Cliente não encontrado");
   if (input.accountId && !(await prisma.account.findFirst({ where: { id: input.accountId, userId }, select: { id: true } }))) throw new DomainError(404, "Conta não encontrada");
+  if (input.taxesCardId && !(await prisma.creditCard.count({ where: { id: input.taxesCardId, userId } }))) throw new DomainError(404, "Cartão não encontrado");
 }
 const data = (input: DealInput) => ({
   buyerType: input.buyerType,
@@ -101,6 +114,7 @@ const data = (input: DealInput) => ({
   profitCents: input.profitCents ?? null,
   passengers: input.passengers || null,
   taxesCents: input.taxesCents ?? null,
+  ...(input.taxesCardId !== undefined ? { taxesCardId: input.taxesCardId || null } : {}), // sem o campo, fica como está
   orderLink: input.orderLink?.trim() || null,
   locator: input.locator?.trim().toUpperCase() || null,
   notes: input.notes?.trim() || null,
@@ -206,6 +220,8 @@ export async function updateDeal(userId: string, id: string, input: DealInput) {
   }
   const saved = await prisma.milesDeal.update({ where: { id }, data: next, include });
   if (dealCpfs(saved) !== dealCpfs(d)) await syncSaleCpfs(userId, saved);
+  const saleCard = saleTaxCard(saved);
+  if (input.taxesCardId !== undefined && saleCard !== undefined && saleCard !== saved.taxesCardId) return view(await syncSaleTaxCard(userId, saved));
   return view(saved);
 }
 
@@ -231,7 +247,8 @@ async function closeAsSale(userId: string, d: Awaited<ReturnType<typeof own>>) {
       // CPFs da emissão (ao menos 1): contam no lucro por CPF
       passengers: dealCpfs(d),
       // Taxas pagas na emissão e cobradas do comprador: entram no total como custo repassado
-      costs: d.taxesCents ? [{ type: "TAXA_EMBARQUE", amountCents: d.taxesCents }] : [],
+      // no cartão escolhido, a taxa vai para a fatura dele
+      costs: d.taxesCents ? [{ type: "TAXA_EMBARQUE", amountCents: d.taxesCents, cardId: d.taxesCardId }] : [],
       reservation: d.locator ?? undefined,
       description: `Venda de milhas · CRM Milhas #${d.number} · ${d.customerName}`,
       observation: d.notes ?? undefined,
@@ -257,6 +274,19 @@ async function passengersAsBeneficiaries(userId: string, d: Awaited<ReturnType<t
     prisma.accountBeneficiary.deleteMany({ where: { saleId, userId } }),
     prisma.accountBeneficiary.createMany({ data: rows.map((r) => ({ userId, accountId: d.accountId!, saleId, ...r, usedAt: sale.occurredAt })) }),
   ]);
+}
+
+/** Negociação já lançada: mudou o cartão da taxa, o custo "taxa de embarque" da venda acompanha (e a taxa muda de
+ *  fatura). Só com um item em milhas (o que a negociação criou); editada em Vendas com mais itens, fica como está. */
+async function syncSaleTaxCard(userId: string, d: Row) {
+  const items = await prisma.saleItem.findMany({ where: { saleId: d.saleId!, issuedWith: "POINTS", sale: { userId } }, select: { id: true, costs: true } });
+  const costs = (items.length === 1 && Array.isArray(items[0]!.costs) ? items[0]!.costs : []) as SaleCost[];
+  if (!costs.some((c) => c.type === "TAXA_EMBARQUE")) return d;
+  await prisma.saleItem.update({
+    where: { id: items[0]!.id },
+    data: { costs: costs.map((c) => (c.type === "TAXA_EMBARQUE" ? { ...c, cardId: d.taxesCardId } : c)) as unknown as Prisma.InputJsonValue },
+  });
+  return prisma.milesDeal.findUniqueOrThrow({ where: { id: d.id }, include });
 }
 
 /** Negociação já lançada: mudou a quantidade de CPFs ou os passageiros, a venda e o limite da conta acompanham.

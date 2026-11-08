@@ -16,11 +16,14 @@ import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPaylo
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
 import { priceOptions, roeOf } from "@/domain/pricing";
 import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
+import { cardDueDay } from "@/domain/finance";
+import { brDay } from "@/domain/brasilia";
 
 type Customer = { id: string; name: string; phone: string | null };
 // "2026-11-30" → "30/11/2026" sem passar por fuso (a data da tela não tem horário)
 const ymdBR = (v: string) => v.split("-").reverse().join("/");
 type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
+type CardOpt = { id: string; name: string; last4: string | null; closingDay: number; dueDay: number };
 
 const STAGE_COLOR: Record<DealStageKey, string> = { NEW: "#60a5fa", NEGOTIATION: "#f59e0b", AWAITING: "#a78bfa", ISSUED: "#22c55e", PAID: "#94a3b8" };
 const BUYER_CLS: Record<BuyerType, string> = { AGENCY: "bg-blue-500/15 text-blue-300", BALCAO: "bg-amber-500/15 text-amber-300", FINAL: "bg-green-500/15 text-green-300" };
@@ -29,7 +32,7 @@ const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((
 
 /* ---------------- Nova / editar negociação ---------------- */
 
-function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSaleCpmCents = null }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void; avgSaleCpmCents?: number | null }) {
+function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove, avgSaleCpmCents = null }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; cards: CardOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [buyerType, setBuyerType] = useState<BuyerType>(deal?.buyerType ?? "FINAL");
   const [customerId, setCustomerId] = useState(deal?.customerId ?? "");
@@ -41,6 +44,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
   const [profitIn, setProfitIn] = useState(deal?.profitManual && deal.profitCents != null ? fmtBRL(deal.profitCents) : ""); // lucro informado à mão
   const [passengers, setPassengers] = useState(deal?.passengers ? String(deal.passengers) : "");
   const [taxes, setTaxes] = useState(deal?.taxesCents != null ? fmtBRL(deal.taxesCents) : "");
+  const [taxesCardId, setTaxesCardId] = useState(deal?.taxesCardId ?? "");
   const [orderLink, setOrderLink] = useState(deal?.orderLink ?? "");
   const [locator, setLocator] = useState(deal?.locator ?? "");
   const [paste, setPaste] = useState("");
@@ -124,7 +128,7 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
     if (taxes.trim() && taxesCents === null) return setErro("Taxas inválidas");
     setBusy(true);
     const balcao = buyerType === "BALCAO";
-    const body = { buyerType, customerId: balcao ? null : customerId || null, customerName: name, customerPhone: balcao ? null : phone || null, accountId: accountId || null, points: nPoints, saleCpmCents: cpmCents, profitCents: manualProfit, passengers: Number(passengers) || null, taxesCents, orderLink: orderLink.trim() || null, locator: locator.trim() || null, notes: notes || null };
+    const body = { buyerType, customerId: balcao ? null : customerId || null, customerName: name, customerPhone: balcao ? null : phone || null, accountId: accountId || null, points: nPoints, saleCpmCents: cpmCents, profitCents: manualProfit, passengers: Number(passengers) || null, taxesCents, taxesCardId: taxesCardId || null, orderLink: orderLink.trim() || null, locator: locator.trim() || null, notes: notes || null };
     const r = deal ? await api(`/api/miles-deals/${deal.id}`, "PUT", body) : await api("/api/miles-deals", "POST", body);
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
@@ -244,6 +248,14 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
           </Field>
           <Field label="Localizador"><input className="input uppercase" value={locator} onChange={(e) => setLocator(e.target.value)} maxLength={20} placeholder="Após emitir" /></Field>
         </div>
+        {cards.length > 0 && (
+          <Field label="Cartão que pagou as taxas" hint={taxCardHint(cards.find((c) => c.id === taxesCardId), deal, taxesCents)}>
+            <select className="input" value={taxesCardId} onChange={(e) => setTaxesCardId(e.target.value)} aria-label="Cartão que pagou as taxas">
+              <option value="">Nenhum (pago à vista, fora do cartão)</option>
+              {cards.map((c) => <option key={c.id} value={c.id}>{c.last4 ? `${c.name} •••• ${c.last4}` : c.name}</option>)}
+            </select>
+          </Field>
+        )}
         <p className="text-sm text-muted">
           {total != null ? <>Total a cobrar: <span className="font-semibold text-zinc-100 tabular-nums">{fmtBRL(total)}</span>{taxesCents ? <span className="text-xs"> (com {fmtBRL(taxesCents)} de taxas)</span> : null}</> : manualProfit == null ? "Informe pontos e milheiro para ver o total, ou digite o lucro." : null}
           {profit != null && <> · {manualProfit != null ? "Lucro" : "Lucro estimado"}: <span className={`font-semibold tabular-nums ${profit >= 0 ? "text-green-300" : "text-red-300"}`}>{fmtBRL(profit)}</span>{manualProfit == null && acc?.cpmCents ? <span className="text-xs"> (CPM da conta {fmtBRL(acc.cpmCents)})</span> : null}</>}
@@ -259,6 +271,15 @@ function DealDialog({ deal, customers, accounts, balcoes, onClose, onMove, avgSa
       </form>
     </Modal>
   );
+}
+
+/** Em que fatura a taxa entra: a do dia da venda (lançada com o bilhete); antes disso, a de hoje é uma previsão. */
+function taxCardHint(card: CardOpt | undefined, deal: DealView | null, taxesCents: number | null) {
+  if (!card) return "Escolha o cartão para a taxa entrar na fatura dele em Financeiro › Faturas";
+  if (!taxesCents) return "Informe as taxas para elas entrarem na fatura";
+  const day = deal?.soldAt ? brDay(new Date(deal.soldAt)) : brDay();
+  const due = ymdBR(cardDueDay(day, card));
+  return deal?.saleId ? `Entra na fatura que vence em ${due}` : `Entra na fatura quando a venda for lançada (com o bilhete); hoje iria para a que vence em ${due}`;
 }
 
 /* ---------------- Bilhete e comprovante ---------------- */
@@ -449,7 +470,7 @@ function AccountSuggestion({ dealId, points, cpfs, accountId, orderLink, chosen,
 /* ---------------- Lista ---------------- */
 
 /** Negociações ativas e arquivadas em tabela; clicar abre a negociação. */
-export function DealsList({ active, archived, customers, accounts, avgSaleCpmCents = null }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
+export function DealsList({ active, archived, customers, accounts, cards = [], avgSaleCpmCents = null }: { active: DealView[]; archived: DealView[]; customers: Customer[]; accounts: AccountOpt[]; cards?: CardOpt[]; avgSaleCpmCents?: number | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const all = [...active, ...archived];
   const deal = all.find((d) => d.id === open) ?? null;
@@ -482,7 +503,7 @@ export function DealsList({ active, archived, customers, accounts, avgSaleCpmCen
     <div className="space-y-4">
       <section className="card overflow-hidden" aria-label="Negociações ativas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações ativas <span className="text-muted">{active.length}</span></h2>{table(active, "Nenhuma negociação ativa.")}</section>
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
-      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
+      {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} cards={cards} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -863,7 +884,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
   );
 }
 
-export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; avgSaleCpmCents?: number | null }) {
+export function DealsKanban({ deals, customers, accounts, cards = [], avgSaleCpmCents = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; cards?: CardOpt[]; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [list, setList] = useState(deals);
   const [over, setOver] = useState<DealStageKey | null>(null);
@@ -949,8 +970,8 @@ export function DealsKanban({ deals, customers, accounts, avgSaleCpmCents = null
           })}
         </div>
       </div>
-      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setCreating(false)} />}
-      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
+      {creating && <DealDialog deal={null} customers={customers} accounts={accounts} cards={cards} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setCreating(false)} />}
+      {openDeal && <DealDialog key={openDeal.id + openDeal.stage} deal={openDeal} customers={customers} accounts={accounts} cards={cards} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} onMove={(stage) => move(openDeal.id, stage)} />}
     </>
   );
 }

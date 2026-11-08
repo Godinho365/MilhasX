@@ -3,6 +3,7 @@ import { requirePageUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { listDeals, milesDealsDashboard } from "@/server/services/miles-deals";
 import { emissionAverage } from "@/server/services/capacity";
+import { listCardOptions } from "@/server/services/finance";
 import { PageHeader, Stat } from "@/components/stat";
 import { Segmented } from "@/components/ui";
 import { fmtBRL, fmtPts } from "@/lib/format";
@@ -15,10 +16,11 @@ export default async function CrmMilhasPage({ searchParams }: { searchParams: Pr
   const user = await requirePageUser();
   const sp = await searchParams;
   const view = sp.view === "lista" ? "lista" : sp.view === "dashboard" ? "dashboard" : "kanban";
-  const [customers, accounts, avg] = await Promise.all([
+  const [customers, accounts, avg, cards] = await Promise.all([
     prisma.customer.findMany({ where: { userId: user.id }, select: { id: true, name: true, phone: true }, orderBy: { name: "asc" } }),
     prisma.account.findMany({ where: { userId: user.id, archived: false }, select: { id: true, nickname: true, balance: true, costCents: true, program: { select: { name: true } }, holder: { select: { name: true } } }, orderBy: [{ program: { name: "asc" } }, { holder: { name: "asc" } }] }),
     emissionAverage(user.id),
+    listCardOptions(user.id),
   ]);
   const accountOpts = accounts.map((a) => ({ id: a.id, label: a.nickname || `${a.program.name} · ${a.holder.name}`, balance: a.balance, cpmCents: a.balance > 0 ? Math.round((a.costCents * 1000) / a.balance) : null }));
   const subtitle = {
@@ -34,8 +36,8 @@ export default async function CrmMilhasPage({ searchParams }: { searchParams: Pr
         { key: "kanban", label: "Kanban", href: "/app/crm-milhas" },
         { key: "lista", label: "Lista", href: "/app/crm-milhas?view=lista" },
       ]} />
-      {view === "kanban" && <DealsKanban deals={await listDeals(user.id)} customers={customers} accounts={accountOpts} avgSaleCpmCents={avg.saleCpmCents} />}
-      {view === "lista" && <DealsList active={await listDeals(user.id)} archived={await listDeals(user.id, { archived: true })} customers={customers} accounts={accountOpts} avgSaleCpmCents={avg.saleCpmCents} />}
+      {view === "kanban" && <DealsKanban deals={await listDeals(user.id)} customers={customers} accounts={accountOpts} cards={cards} avgSaleCpmCents={avg.saleCpmCents} />}
+      {view === "lista" && <DealsList active={await listDeals(user.id)} archived={await listDeals(user.id, { archived: true })} customers={customers} accounts={accountOpts} cards={cards} avgSaleCpmCents={avg.saleCpmCents} />}
       {view === "dashboard" && <Dashboard userId={user.id} periodo={sp.periodo ?? "30"} />}
     </>
   );

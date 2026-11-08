@@ -222,6 +222,11 @@ const dueIn = (month: string, dueDay: number) => {
   const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
   return `${month}-${String(Math.min(dueDay, last)).padStart(2, "0")}`;
 };
+/** Dias de compra que caem nesta fatura (do dia do fechamento anterior até a véspera do fechamento), em ordem. */
+const billDays = (dueDate: string, card: { closingDay: number; dueDay: number }) => {
+  const end = Date.parse(`${dueDate}T00:00:00Z`);
+  return Array.from({ length: 80 }, (_, i) => new Date(end - i * 86_400_000).toISOString().slice(0, 10)).filter((d) => cardDueDay(d, card) === dueDate).reverse();
+};
 /** Conta sugerida para pagar a fatura: a das despesas do Financeiro lançadas nela, ou a primeira. */
 const suggestedAccount = (bill: Bill | null, accounts: AccOpt[]) => bill?.items.find((i) => i.ref?.kind === "fin" && accounts.some((a) => a.id === i.accountId))?.accountId ?? accounts[0]?.id ?? "";
 
@@ -239,6 +244,7 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
   const [editing, setEditing] = useState<{ card: CardBills; bill: Bill | null } | null>(null);
   const [paying, setPaying] = useState<{ card: CardBills; bill: Bill; payment: BillPay | null } | null>(null);
   const [item, setItem] = useState<{ card: CardBills; bill: Bill; item: BillItem } | null>(null);
+  const [adding, setAdding] = useState<{ card: CardBills; bill: Bill | null } | null>(null);
   // depois de salvar, o diálogo aberto acompanha a fatura atualizada
   const fresh = (cardId: string, dueDate: string) => cards.find((c) => c.id === cardId)?.open.concat(cards.find((c) => c.id === cardId)!.paid).find((b) => b.dueDate === dueDate) ?? null;
 
@@ -306,6 +312,7 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
             ))}
             {b.adjustCents !== 0 && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? "Outros gastos no cartão (valor real − compras lançadas)" : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
             {b.payments.map((p) => <li key={p.id} className="flex gap-3 text-emerald-300"><span className="w-20 shrink-0 tabular-nums">{fmtDate(p.paidAt)}</span><span className="min-w-0 flex-1 truncate">Pagamento{p.accountId ? ` · ${accounts.find((a) => a.id === p.accountId)?.name ?? "conta"}` : ""}</span><span className="tabular-nums">−{fmtBRL(p.amountCents)}</span></li>)}
+            <li><button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setAdding({ card: c, bill: b })}>+ Adicionar compra nesta fatura</button></li>
           </ul>
         )}
       </li>
@@ -325,6 +332,7 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
               <span className="h-3 w-3 rounded-full" style={{ backgroundColor: c.color ?? "#94a3b8" }} aria-hidden />
               <div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{cardLabel(c)}</h2><p className="text-xs text-muted">fecha dia {c.closingDay} · vence dia {c.dueDay}</p></div>
               <div className="text-right"><p className="text-xs text-muted">Em aberto</p><p className="font-semibold tabular-nums">{fmtBRL(c.openCents)}</p>{c.overdueCents > 0 && <p className="text-xs tabular-nums text-red-300">{fmtBRL(c.overdueCents)} vencido</p>}</div>
+              <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setAdding({ card: c, bill: null })} title="Lançar uma compra feita neste cartão: a data da compra decide a fatura"><Plus className="h-4 w-4" />Compra</button>
               <button className="btn-ghost h-8 px-3 text-xs" onClick={() => setEditing({ card: c, bill: null })} title="Lançar a fatura de um mês com o valor que veio no banco"><Plus className="h-4 w-4" />Fatura</button>
             </header>
             {c.open.length === 0 ? <p className="py-3 text-sm text-muted">Nada em aberto neste cartão.</p> : <ul className="divide-y divide-line">{c.open.map((b) => row(c, b))}</ul>}
@@ -338,21 +346,22 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
           </section>
         );
       })}
-      <p className="text-xs text-muted">A fatura soma sozinha o que você passou em cada cartão: compras e custos do Extrato com o cartão escolhido na linha de custo, custos das vendas pagos no cartão e despesas do Financeiro marcadas como &quot;no cartão&quot;. Em ✎ você informa o valor real que veio no banco (a diferença vira &quot;outros gastos no cartão&quot;), muda o vencimento, registra pagamentos (inclusive parciais) e corrige as compras. Comprou antes do dia do fechamento, vai para a fatura do mês; no dia do fechamento ou depois, para a seguinte.</p>
+      <p className="text-xs text-muted">A fatura soma sozinha o que você passou em cada cartão: compras e custos do Extrato com o cartão escolhido na linha de custo, custos das vendas pagos no cartão e despesas do Financeiro marcadas como &quot;no cartão&quot;. Em + Compra você lança outra compra feita no cartão (soma à fatura e, se você informou o valor real, a ele também). Em ✎ você informa o valor real que veio no banco (a diferença vira &quot;outros gastos no cartão&quot;), muda o vencimento, registra pagamentos (inclusive parciais) e corrige as compras. Comprou antes do dia do fechamento, vai para a fatura do mês; no dia do fechamento ou depois, para a seguinte.</p>
       {editing && (() => {
         const bill = editing.bill ? fresh(editing.card.id, editing.bill.dueDate) ?? editing.bill : null;
-        return <BillDialog card={editing.card} bill={bill} accounts={accounts} cards={cards} onClose={() => setEditing(null)} onPay={(b, p) => { setEditing(null); setPaying({ card: editing.card, bill: b, payment: p }); }} onItem={(b, i) => { setEditing(null); setItem({ card: editing.card, bill: b, item: i }); }} />;
+        return <BillDialog card={editing.card} bill={bill} accounts={accounts} cards={cards} onClose={() => setEditing(null)} onPay={(b, p) => { setEditing(null); setPaying({ card: editing.card, bill: b, payment: p }); }} onItem={(b, i) => { setEditing(null); setItem({ card: editing.card, bill: b, item: i }); }} onAdd={(b) => { setEditing(null); setAdding({ card: editing.card, bill: b }); }} />;
       })()}
       {paying && <PaymentDialog card={paying.card} bill={fresh(paying.card.id, paying.bill.dueDate) ?? paying.bill} payment={paying.payment} accounts={accounts} onClose={() => setPaying(null)} />}
       {item && <BillItemDialog card={item.card} item={item.item} cards={cards} onClose={() => setItem(null)} />}
+      {adding && <AddBillItemDialog card={cards.find((x) => x.id === adding.card.id) ?? adding.card} bill={adding.bill ? fresh(adding.card.id, adding.bill.dueDate) ?? adding.bill : null} accounts={accounts} onClose={() => setAdding(null)} />}
     </div>
   );
 }
 
 /** Editar a fatura: valor real, vencimento, pagamentos e compras. Sem fatura: lança a de um mês. */
-function BillDialog({ card, bill, accounts, onClose, onPay, onItem }: { card: CardBills; bill: Bill | null; accounts: AccOpt[]; cards: CardBills[]; onClose: () => void; onPay: (b: Bill, p: BillPay | null) => void; onItem: (b: Bill, i: BillItem) => void }) {
+function BillDialog({ card, bill, accounts, onClose, onPay, onItem, onAdd }: { card: CardBills; bill: Bill | null; accounts: AccOpt[]; cards: CardBills[]; onClose: () => void; onPay: (b: Bill, p: BillPay | null) => void; onItem: (b: Bill, i: BillItem) => void; onAdd: (b: Bill) => void }) {
   const router = useRouter();
-  const [month, setMonth] = useState(today().slice(0, 7));
+  const [month, setMonth] = useState(cardDueDay(today(), card).slice(0, 7)); // a fatura das compras de hoje
   const [real, setReal] = useState(bill?.realCents != null ? money(bill.realCents) : "");
   const [due, setDue] = useState(bill?.effectiveDue ?? "");
   const [erro, setErro] = useState("");
@@ -366,10 +375,10 @@ function BillDialog({ card, bill, accounts, onClose, onPay, onItem }: { card: Ca
     if (real.trim() && realCents == null) return setErro("Valor real inválido");
     if (!bill && realCents == null) return setErro("Informe o valor da fatura");
     setBusy(true);
-    const r = await api("/api/finance/card-bills/edit", "PUT", { cardId: card.id, dueDate: key, realCents, dueOverride: bill && due && due !== bill.dueDate ? due : null });
+    const r = await api<{ movedTo?: string | null }>("/api/finance/card-bills/edit", "PUT", { cardId: card.id, dueDate: key, realCents, dueOverride: bill && due && due !== bill.dueDate ? due : null });
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
-    toast(bill ? "Fatura atualizada" : "Fatura lançada");
+    toast(r.data.movedTo ? `Fatura passada para a que vence em ${fmtDate(r.data.movedTo)}` : bill ? "Fatura atualizada" : "Fatura lançada");
     onClose();
     refreshSafe(router);
   }
@@ -387,7 +396,7 @@ function BillDialog({ card, bill, accounts, onClose, onPay, onItem }: { card: Ca
         {erro && <Alert>{erro}</Alert>}
         <div className="grid gap-3 sm:grid-cols-2">
           {bill ? (
-            <Field label="Vencimento" hint={due !== bill.dueDate ? `O normal deste cartão seria ${fmtDate(bill.dueDate)}` : "Mude só se o banco mudou o dia nesta fatura"}>
+            <Field label="Vencimento" hint={due === bill.dueDate ? "Mude só se o banco mudou o dia nesta fatura" : /^\d{4}-\d{2}-\d{2}$/.test(due) && dueIn(due.slice(0, 7), card.dueDay) === due && !bill.items.length ? `É o vencimento normal de ${due.slice(5, 7)}/${due.slice(0, 4)}: ao salvar, esta passa a ser a fatura desse mês` : `O normal deste cartão seria ${fmtDate(bill.dueDate)}`}>
               <input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Vencimento da fatura" />
             </Field>
           ) : (
@@ -435,9 +444,85 @@ function BillDialog({ card, bill, accounts, onClose, onPay, onItem }: { card: Ca
                 ))}
               </ul>
             )}
+            <button type="button" className="btn-ghost mt-2 h-8 text-xs" onClick={() => onAdd(bill)}><Plus className="h-4 w-4" />Adicionar compra</button>
           </section>
         </div>
       )}
+    </Modal>
+  );
+}
+
+/** Adicionar uma compra no cartão (despesa do Financeiro). Aberta numa fatura, a data fica dentro dela; aberta no cartão,
+ *  a data da compra decide a fatura. Se a fatura tem valor real informado, a compra soma a ele. */
+function AddBillItemDialog({ card, bill: fixed, accounts, onClose }: { card: CardBills; bill: Bill | null; accounts: AccOpt[]; onClose: () => void }) {
+  const router = useRouter();
+  const days = fixed ? billDays(fixed.dueDate, card) : [];
+  const first = days[0] ?? fixed?.dueDate ?? "";
+  const last = days[days.length - 1] ?? fixed?.dueDate ?? "";
+  const t0 = today();
+  const [f, setF] = useState({ amount: "", day: fixed ? (t0 < first ? first : t0 > last ? last : t0) : t0, description: "", category: "", accountId: suggestedAccount(fixed, accounts), addToReal: true });
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (p: Partial<typeof f>) => setF({ ...f, ...p });
+  const amountCents = parseBRLToCents(f.amount) ?? 0;
+  const goesTo = /^\d{4}-\d{2}-\d{2}$/.test(f.day) ? cardDueDay(f.day, card) : null;
+  // sem fatura escolhida, a data da compra decide a fatura (pode ser uma que ainda não existe)
+  const bill = fixed ?? (goesTo ? card.open.concat(card.paid).find((b) => b.dueDate === goesTo) ?? null : null);
+  const dueDate = fixed?.dueDate ?? goesTo;
+  const real = bill?.realCents ?? null;
+  // total da fatura depois: com valor real, só muda se a compra somar a ele
+  const after = real != null ? real + (f.addToReal ? amountCents : 0) : (bill?.itemsCents ?? 0) + amountCents;
+  const paid = bill?.paidCents ?? 0;
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (amountCents <= 0) return setErro("Informe o valor");
+    if (!goesTo || !dueDate) return setErro("Informe a data da compra");
+    if (fixed && goesTo !== fixed.dueDate) return setErro(`Com essa data a compra vai para outra fatura: use um dia entre ${fmtDate(first)} e ${fmtDate(last)}`);
+    setBusy(true);
+    const r = await api("/api/finance/card-bills/items", "POST", {
+      cardId: card.id, dueDate, amountCents, day: f.day, description: f.description || null, category: f.category || null, accountId: f.accountId, addToReal: real != null && f.addToReal,
+    });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    toast(`Compra adicionada: a fatura de ${fmtDate(bill?.effectiveDue ?? dueDate)} foi para ${fmtBRL(after)}`);
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title={fixed ? "Adicionar compra na fatura" : `Nova compra · ${cardLabel(card)}`}
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button><button form="bill-add-form" className="btn-primary" disabled={busy || !accounts.length}>Adicionar</button></>}>
+      <form id="bill-add-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        {!accounts.length && <Alert kind="info">Cadastre antes uma conta em Contas: é dela que sai o pagamento da fatura.</Alert>}
+        {fixed ? (
+          <p className="text-sm text-muted">Fatura {cardLabel(card)} que vence {fmtDate(fixed.effectiveDue)} · hoje {fmtBRL(fixed.totalCents)}</p>
+        ) : goesTo ? (
+          <p className="text-sm text-muted">Vai para a fatura que vence {fmtDate(bill?.effectiveDue ?? goesTo)} · {bill ? `hoje ${fmtBRL(bill.totalCents)}` : "ainda sem compras"}</p>
+        ) : null}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Valor (R$)" required><input className="input tabular-nums" inputMode="decimal" value={f.amount} onChange={(e) => set({ amount: e.target.value })} placeholder="0,00" aria-label="Valor da compra" autoFocus /></Field>
+          <Field label="Data da compra" required hint={fixed ? (goesTo && goesTo !== fixed.dueDate ? `Essa data vai para a fatura que vence em ${fmtDate(goesTo)}` : `Compras de ${fmtDate(first)} a ${fmtDate(last)} caem nesta fatura`) : `Antes do dia ${card.closingDay}, fatura do mês; no dia ${card.closingDay} ou depois, a seguinte`}>
+            <input className="input" type="date" value={f.day} min={fixed ? first : undefined} max={fixed ? last : undefined} onChange={(e) => set({ day: e.target.value })} required aria-label="Data da compra" />
+          </Field>
+          <Field label="Descrição" className="sm:col-span-2"><input className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} maxLength={200} placeholder="Ex.: Taxa de embarque, assinatura, mercado" aria-label="Descrição da compra" /></Field>
+          <Field label="Categoria">
+            <select className="input" value={f.category} onChange={(e) => set({ category: e.target.value })} aria-label="Categoria da compra">
+              <option value="">Sem categoria</option>
+              {categoryOptions("EXPENSE").map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Conta que paga a fatura" required>
+            <select className="input" value={f.accountId} onChange={(e) => set({ accountId: e.target.value })} aria-label="Conta que paga a fatura">{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+          </Field>
+        </div>
+        {real != null && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={f.addToReal} onChange={(e) => set({ addToReal: e.target.checked })} />
+            <span>Somar ao valor real da fatura ({fmtBRL(real)} → {fmtBRL(real + amountCents)})<span className="block text-xs text-muted">Desmarque se esta compra já está dentro do valor real que veio no banco (aí ela só detalha a fatura).</span></span>
+          </label>
+        )}
+        <p className="text-sm">Fatura depois: <span className="font-semibold tabular-nums">{fmtBRL(after)}</span>{paid > 0 && after > paid ? <span className="text-muted"> · falta pagar {fmtBRL(after - paid)}</span> : null}</p>
+      </form>
     </Modal>
   );
 }

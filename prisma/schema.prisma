@@ -621,6 +621,7 @@ model CreditCard {
   finTransactions FinTransaction[]
   billPayments    CardBillPayment[]
   bills           CardBill[]
+  milesDeals      MilesDeal[]
 
   @@index([userId])
 }
@@ -1101,6 +1102,8 @@ model MilesDeal {
   passengers      Int?
   notes           String?
   taxesCents      Int? // taxas da emissão, pagas por mim e cobradas do comprador
+  taxesCardId     String? // cartão em que as taxas foram pagas: vão para a fatura dele (na venda, no custo "taxa de embarque")
+  taxesCard       CreditCard?       @relation(fields: [taxesCardId], references: [id], onDelete: SetNull)
   orderLink       String? // link do pedido no programa (ex.: passageiros da LATAM)
   shareToken      String?           @unique // link da página do comprador
   passengersData  Json? // [{ name, cpf, birthDate, email, phone }] preenchido pelo comprador
