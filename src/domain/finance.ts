@@ -30,7 +30,11 @@ export const categoryGroup = (c: string | null | undefined) => (c ? c.split(SEP)
 /** Compra de pontos já está descontada no lucro de cada venda: não entra de novo nas despesas operacionais. */
 export const NOT_OPERATIONAL = ["Compra de pontos e milhas", "Custos da emissão"];
 
-export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null };
+/** De onde vem o valor no fluxo de caixa: lançamento do próprio Financeiro, ou puxado sozinho das vendas
+ *  (o que o cliente paga e os custos da emissão) e dos custos dos lançamentos do Extrato (compra de pontos, clube...). */
+export type TxSource = "manual" | "sales" | "saleCosts" | "purchases";
+
+export type Tx = { type: FinType; accountId: string; toAccountId: string | null; amountCents: number; category: string | null; competence: string; dueDate: string; paidAt: string | null; source?: TxSource };
 
 /** Saldo da conta: saldo inicial + o que já foi pago/recebido (pendente não conta), com as transferências. */
 export function accountBalance(accountId: string, initialCents: number, txs: Tx[]) {
@@ -55,6 +59,61 @@ export function addMonths(month: string, n: number) {
   const [y, m] = month.split("-").map(Number) as [number, number];
   const d = new Date(Date.UTC(y, m - 1 + n, 1));
   return d.toISOString().slice(0, 7);
+}
+const daysIn = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+/** O dia d do mês (no mês mais curto, o último dia: 31 em fevereiro vira 28 ou 29). */
+const dayIn = (month: string, d: number) => `${month}-${String(Math.min(d, daysIn(month))).padStart(2, "0")}`;
+
+/** Vencimento da fatura em que cai uma compra no cartão. Antes do dia do fechamento, entra na fatura que fecha
+ *  naquele mês; no dia do fechamento ou depois, na seguinte. Vencimento depois do fechamento é no mesmo mês
+ *  do fechamento; antes dele, no mês seguinte. */
+export function cardDueDay(day: string, card: CardDays) {
+  const closes = Number(day.slice(8, 10)) < card.closingDay ? monthOf(day) : addMonths(monthOf(day), 1);
+  return dayIn(card.dueDay > card.closingDay ? closes : addMonths(closes, 1), card.dueDay);
+}
+
+/** n parcelas iguais; a 1ª fica com os centavos que sobram (como na compra parcelada). */
+export function splitInstallments(totalCents: number, n: number) {
+  const k = Math.max(1, Math.floor(n));
+  const part = Math.floor(totalCents / k);
+  return Array.from({ length: k }, (_, i) => (i === 0 ? totalCents - part * (k - 1) : part));
+}
+
+export type CardDays = { closingDay: number; dueDay: number };
+/** Valor pago e, se foi no cartão, os dias de fechamento e vencimento dele. */
+export type PaidCost = { amountCents: number; card: CardDays | null };
+
+/** Saída que não tem "pago" marcado (custos do Extrato e da emissão): realizada quando a data já passou. */
+const outflow = (due: string, amountCents: number, source: TxSource, competence: string, today: string): Tx => ({
+  type: "EXPENSE", accountId: "", toAccountId: null, amountCents, category: null, competence, dueDate: due, paidAt: due <= today ? due : null, source,
+});
+
+/** Custos de um lançamento do Extrato no fluxo de caixa: à vista, na data; parcelado, uma parcela por mês; com as
+ *  parcelas restantes antecipadas, tudo no mês da compra. No cartão, cada parcela vence numa fatura. */
+export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: number | null; anticipated?: boolean | null }, today: string): Tx[] {
+  const n = p.anticipated ? 1 : Math.max(1, p.installments ?? 1);
+  const groups = new Map<string, { card: CardDays | null; cents: number }>();
+  for (const c of p.costs) {
+    if (c.amountCents <= 0) continue;
+    const key = c.card ? `${c.card.closingDay}/${c.card.dueDay}` : "";
+    const g = groups.get(key) ?? { card: c.card, cents: 0 };
+    g.cents += c.amountCents;
+    groups.set(key, g);
+  }
+  return [...groups.values()].flatMap((g) => {
+    const first = g.card ? cardDueDay(p.day, g.card) : p.day;
+    return splitInstallments(g.cents, n).map((cents, i) => outflow(g.card ? dayIn(addMonths(monthOf(first), i), g.card.dueDay) : dayIn(addMonths(monthOf(first), i), Number(first.slice(8, 10))), cents, "purchases", p.day, today));
+  });
+}
+
+/** Venda no fluxo de caixa: entra o que o cliente paga, na data da venda (realizado quando a venda está paga);
+ *  reembolsada, só a taxa de administração que fica. Os custos pagos na emissão (fornecedor, emissão em dinheiro,
+ *  taxas repassadas, comissão) saem na data da venda, ou na fatura do cartão. */
+export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[] }, today: string): Tx[] {
+  const amountCents = s.refunded ? s.refundFeeCents : s.totalCents;
+  const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: null, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
+  if (s.refunded) return income; // milhas e taxas voltaram: os custos da emissão se desfazem
+  return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today))];
 }
 
 /** Receitas e despesas do mês (sem transferências), realizadas e previstas, e por categoria. */
@@ -81,7 +140,7 @@ export function periodTotals(txs: Tx[], month: string, regime: Regime) {
   };
 }
 
-/** Fluxo de caixa: para cada mês, receitas e despesas previstas (tudo) e realizadas (pagas), e o saldo acumulado previsto. */
+/** Fluxo de caixa: para cada mês, receitas e despesas previstas (tudo) e realizadas (pagas), por origem, e o saldo acumulado previsto. */
 export function cashflow(txs: Tx[], months: string[], startBalance: number) {
   let running = startBalance;
   return months.map((month) => {
@@ -94,7 +153,12 @@ export function cashflow(txs: Tx[], months: string[], startBalance: number) {
       expensePlanned: s((x) => x.type === "EXPENSE"),
       expenseDone: s((x) => x.type === "EXPENSE" && !!x.paidAt),
     };
+    const part = (type: FinType, src: TxSource) => {
+      const of = (x: Tx) => x.type === type && (x.source ?? "manual") === src;
+      return { planned: s(of), done: s((x) => of(x) && !!x.paidAt) };
+    };
+    const parts = { sales: part("INCOME", "sales"), manualIncome: part("INCOME", "manual"), purchases: part("EXPENSE", "purchases"), saleCosts: part("EXPENSE", "saleCosts"), manualExpense: part("EXPENSE", "manual") };
     running += row.incomePlanned - row.expensePlanned;
-    return { ...row, net: row.incomePlanned - row.expensePlanned, running };
+    return { ...row, net: row.incomePlanned - row.expensePlanned, running, parts };
   });
 }

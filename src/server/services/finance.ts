@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { prisma, DomainError } from "../db";
 import { brDay } from "@/domain/brasilia";
-import { accountBalance, addMonths, cashflow, periodTotals, type Regime, type Tx } from "@/domain/finance";
+import { accountBalance, addMonths, cashflow, periodTotals, purchaseTxs, saleTxs, type CardDays, type Regime, type Tx } from "@/domain/finance";
 import { listSales } from "./sales";
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
@@ -185,11 +185,45 @@ export async function financeOverview(userId: string, month: string, regime: Reg
   };
 }
 
-/** Fluxo de caixa de 5 meses centrado no mês escolhido (2 antes, 2 depois). */
+/** Vendas e custos do Extrato que entram sozinhos no fluxo de caixa (não precisam ser lançados no Financeiro). */
+async function automaticCashTxs(userId: string): Promise<Tx[]> {
+  const today = brDay();
+  const [cards, entries, sales] = await Promise.all([
+    prisma.creditCard.findMany({ where: { userId }, select: { id: true, closingDay: true, dueDay: true } }),
+    // custo informado nos créditos (compra de pontos, clube, taxa de transferência...): o que saiu do bolso
+    prisma.entry.findMany({ where: { userId, ignored: false, inputCostCents: { gt: 0 } }, select: { occurredAt: true, inputCostCents: true, details: true, costs: { select: { amountCents: true, cardId: true } } } }),
+    prisma.sale.findMany({
+      where: { userId },
+      select: { occurredAt: true, paidAt: true, totalCents: true, refundedAt: true, refundFeeCents: true, origin: true, partnerCommissionCents: true, items: { select: { issuedWith: true, points: true, cashCostCents: true, supplierCpmCents: true, costs: true } } },
+    }),
+  ]);
+  const cardById = new Map(cards.map((c) => [c.id, { closingDay: c.closingDay, dueDay: c.dueDay }]));
+  const card = (id: unknown): CardDays | null => (typeof id === "string" ? cardById.get(id) ?? null : null);
+  const fromEntries = entries.flatMap((e) => {
+    const pay = (e.details as { payment?: { installments?: number; anticipated?: boolean } } | null)?.payment;
+    // lançamentos em lote guardam só o total, sem as linhas de custo
+    const costs = e.costs.length ? e.costs.map((c) => ({ amountCents: c.amountCents, card: card(c.cardId) })) : [{ amountCents: e.inputCostCents, card: null }];
+    return purchaseTxs({ day: day(e.occurredAt), costs, installments: pay?.installments, anticipated: pay?.anticipated }, today);
+  });
+  const fromSales = sales.flatMap((s) => saleTxs({
+    day: day(s.occurredAt), paidAt: s.paidAt ? day(s.paidAt) : null, totalCents: s.totalCents, refunded: !!s.refundedAt, refundFeeCents: s.refundFeeCents,
+    costs: [
+      ...s.items.flatMap((i) => [
+        { amountCents: i.cashCostCents, card: null },
+        { amountCents: s.origin === "SUPPLIER" && i.issuedWith === "POINTS" ? Math.round((i.points * (i.supplierCpmCents ?? 0)) / 1000) : 0, card: null },
+        ...(Array.isArray(i.costs) ? (i.costs as { amountCents?: number; cardId?: string | null }[]) : []).map((c) => ({ amountCents: c.amountCents ?? 0, card: card(c.cardId) })),
+      ]),
+      { amountCents: s.partnerCommissionCents, card: null },
+    ],
+  }, today));
+  return [...fromEntries, ...fromSales];
+}
+
+/** Fluxo de caixa de 5 meses centrado no mês escolhido (2 antes, 2 depois): lançamentos do Financeiro + vendas e custos do Extrato. */
 export async function financeCashflow(userId: string, month: string) {
   const months = [-2, -1, 0, 1, 2].map((n) => addMonths(month, n));
-  const [txRows, accounts] = await Promise.all([prisma.finTransaction.findMany({ where: { userId } }), prisma.finAccount.findMany({ where: { userId }, select: { initialCents: true } })]);
-  const txs = txRows.map(toTx);
+  const [txRows, accounts, automatic] = await Promise.all([prisma.finTransaction.findMany({ where: { userId } }), prisma.finAccount.findMany({ where: { userId }, select: { initialCents: true } }), automaticCashTxs(userId)]);
+  const txs = [...txRows.map(toTx), ...automatic];
   // saldo antes da janela: saldos iniciais + tudo que já foi pago antes do primeiro mês
   const before = txs.filter((t) => t.type !== "TRANSFER" && (t.paidAt ?? t.dueDate).slice(0, 7) < months[0]!);
   const start = accounts.reduce((s, a) => s + a.initialCents, 0) + before.reduce((s, t) => s + (t.type === "INCOME" ? t.amountCents : -t.amountCents), 0);
