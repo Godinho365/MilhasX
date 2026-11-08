@@ -6,6 +6,6 @@ import { editCardBill } from "@/server/services/finance";
 export const PUT = route(async (req) => {
   const u = await requireUser(req);
   const b = await parseBody(req, cardBillEditSchema);
-  await editCardBill(u.id, b.cardId, b.dueDate, { realCents: b.realCents, dueOverride: b.dueOverride });
-  return json({ ok: true });
+  // movedTo: a fatura passou para outro mês (vencimento no dia normal do cartão naquele mês)
+  return json({ ok: true, ...(await editCardBill(u.id, b.cardId, b.dueDate, { realCents: b.realCents, dueOverride: b.dueOverride })) });
 });

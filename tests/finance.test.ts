@@ -369,4 +369,58 @@ describe("faturas dos cartões", () => {
     expect((await o2.call(billPayments.POST, "POST", "/x", { cardId: cardB, dueDate: "2026-05-05", paidAt: "2026-05-05", amountCents: 1 })).status).toBe(404);
     expect((await o2.call(billItems.PATCH, "PATCH", "/x", { kind: "fin", id: assinatura.id, cardId: cardA, newCardId: null })).status).toBe(404);
   });
+
+  it("adiciona compra na fatura: soma às compras e, se houver, ao valor real", async () => {
+    const p = await seedPrograms();
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana" })).data.item.id;
+    const lat = (await c.call(milesAccounts.POST, "POST", "/a", { holderId: h, programId: p.latam.id })).data.item.id;
+    const bank = (await c.call(accountsRoute.POST, "POST", "/x", { name: "Banco", kind: "BANK", initialCents: 100_000 })).data.id;
+    const cardA = (await c.call(cardsRoute.POST, "POST", "/c", { accountId: lat, name: "Cartão A", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 3, dueDay: 10 })).data.item.id;
+    const cardB = (await c.call(cardsRoute.POST, "POST", "/c", { accountId: lat, name: "Cartão B", pointsPerDollar: 220, dollarRateCents: 550, closingDay: 25, dueDay: 5 })).data.item.id;
+    const bill = async (cardId: string, dueDate: string) => {
+      const card = ((await c.call(cardBillsRoute.GET, "GET", "/x")).data.items as { id: string; open: Record<string, unknown>[]; paid: Record<string, unknown>[] }[]).find((x) => x.id === cardId)!;
+      return card.open.concat(card.paid).find((b) => b.dueDate === dueDate);
+    };
+    const add = (body: Record<string, unknown>) => c.call(billItems.POST, "POST", "/x", { accountId: bank, ...body });
+
+    // fatura de 05/05 do cartão B lançada com o valor do banco (R$ 70); compra de 10/04 soma a ele
+    await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardB, dueDate: "2026-05-05", realCents: 7_000, dueOverride: null });
+    expect((await add({ cardId: cardB, dueDate: "2026-05-05", amountCents: 1_500, day: "2026-04-10", description: "Taxa de embarque", category: "Custos da emissão › Taxa de embarque" })).status).toBe(201);
+    expect(await bill(cardB, "2026-05-05")).toMatchObject({ itemsCents: 1_500, realCents: 8_500, totalCents: 8_500, openCents: 8_500 });
+    // já dentro do valor real: só detalha a fatura
+    expect((await add({ cardId: cardB, dueDate: "2026-05-05", amountCents: 500, day: "2026-04-24", addToReal: false })).status).toBe(201);
+    expect(await bill(cardB, "2026-05-05")).toMatchObject({ itemsCents: 2_000, realCents: 8_500, totalCents: 8_500 });
+    // dia do fechamento (25) já vai para a fatura seguinte
+    const wrong = await add({ cardId: cardB, dueDate: "2026-05-05", amountCents: 500, day: "2026-04-25" });
+    expect([wrong.status, wrong.data.erro]).toEqual([400, "Com essa data a compra vai para a fatura que vence em 05/06/2026"]);
+    expect((await add({ cardId: cardB, dueDate: "2026-05-06", amountCents: 500, day: "2026-04-10" })).status).toBe(400); // não é o dia do cartão
+
+    // sem valor real: a fatura é a soma das compras (cria a fatura de 10/03 do cartão A)
+    expect((await add({ cardId: cardA, dueDate: "2026-03-10", amountCents: 3_000, day: "2026-02-15" })).status).toBe(201);
+    expect(await bill(cardA, "2026-03-10")).toMatchObject({ itemsCents: 3_000, realCents: null, totalCents: 3_000 });
+    const t = await prisma.finTransaction.findFirstOrThrow({ where: { userId, cardId: cardA } });
+    expect(t).toMatchObject({ type: "EXPENSE", accountId: bank, amountCents: 3_000, paidAt: null });
+    expect(await listFinAccounts(userId).then((a) => a.find((x) => x.id === bank)!.balanceCents)).toBe(100_000); // sai da conta quando a fatura é paga
+
+    // fatura lançada no mês errado (sem compras) e o vencimento mudado para o dia normal do mês seguinte: vira a
+    // fatura desse mês, com os pagamentos, e as compras dele somam nela
+    await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-04-10", realCents: 5_000, dueOverride: null });
+    await c.call(billPayments.POST, "POST", "/x", { cardId: cardA, dueDate: "2026-04-10", paidAt: "2026-04-01", amountCents: 1_000, accountId: bank });
+    const moved = await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-04-10", realCents: 5_000, dueOverride: "2026-05-10" });
+    expect(moved.data).toMatchObject({ ok: true, movedTo: "2026-05-10" });
+    expect(await bill(cardA, "2026-04-10")).toBeUndefined();
+    expect(await bill(cardA, "2026-05-10")).toMatchObject({ effectiveDue: "2026-05-10", realCents: 5_000, paidCents: 1_000, openCents: 4_000 });
+    expect((await add({ cardId: cardA, dueDate: "2026-05-10", amountCents: 700, day: "2026-04-05" })).status).toBe(201);
+    expect(await bill(cardA, "2026-05-10")).toMatchObject({ itemsCents: 700, realCents: 5_700, openCents: 4_700 });
+    // com compras, o vencimento só muda (a fatura continua a do mês dela); já existindo a do outro mês, não junta
+    expect((await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-03-10", realCents: null, dueOverride: "2026-04-10" })).data.movedTo).toBeNull();
+    expect(await bill(cardA, "2026-03-10")).toMatchObject({ effectiveDue: "2026-04-10", itemsCents: 3_000 });
+    await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-07-10", realCents: 100, dueOverride: null });
+    expect((await c.call(billEdit.PUT, "PUT", "/x", { cardId: cardA, dueDate: "2026-07-10", realCents: 100, dueOverride: "2026-05-10" })).status).toBe(409);
+
+    // outro usuário não adiciona no cartão daqui, nem usa conta alheia
+    const o2 = new Client();
+    await o2.call(register.POST, "POST", "/r", { name: "Outro", email: "o5@x.test", password: "senha-forte-5" });
+    expect((await o2.call(billItems.POST, "POST", "/x", { cardId: cardA, dueDate: "2026-03-10", amountCents: 1, day: "2026-02-15", accountId: bank })).status).toBe(404);
+  });
 });

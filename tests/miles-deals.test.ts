@@ -16,6 +16,8 @@ import * as receipt from "@/app/api/miles-deals/[id]/receipt/route";
 import * as archiveRoute from "@/app/api/miles-deals/[id]/archive/route";
 import * as faceRoute from "@/app/api/miles-deals/[id]/face-check/route";
 import { listDeals, milesDealsDashboard } from "@/server/services/miles-deals";
+import * as cardsRoute from "@/app/api/cards/route";
+import { listCardBills } from "@/server/services/finance";
 import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
 import { parseDealPaste } from "@/domain/miles-deals";
@@ -285,6 +287,38 @@ describe("CRM Milhas", () => {
     expect(typed).toMatchObject({ points: 1000, cpfsNeeded: 30 });
     expect(typed.accounts.find((a) => a.id === lat)!.fit.cpfShort).toBe(true);
     expect((await dealAccountFit(userId, null, { points: 1000, cpfs: 2 })).accounts.find((a) => a.id === lat)!.fit).toMatchObject({ cpfShort: false, enough: true, newCpfs: 2 });
+  });
+
+  it("taxas pagas no cartão: vão na venda com o cartão e entram na fatura dele; trocar o cartão depois leva a taxa junto", async () => {
+    const userId = (await prisma.user.findUniqueOrThrow({ where: { email: "ana@x.test" } })).id;
+    const card = async (name: string) => (await c.call(cardsRoute.POST, "POST", "/c", { accountId: lat, name, pointsPerDollar: 220, dollarRateCents: 550, closingDay: 25, dueDay: 5 })).data.item.id as string;
+    const cardA = await card("Cartão A");
+    const cardB = await card("Cartão B");
+    const body = { buyerType: "BALCAO", customerName: "balcao", accountId: lat, points: 10000, saleCpmCents: 3000, taxesCents: 17808 };
+    expect((await newDeal({ ...body, taxesCardId: "nao-existe" })).status).toBe(404);
+    const d = (await newDeal({ ...body, taxesCardId: cardA })).data.item;
+    expect(d.taxesCardId).toBe(cardA);
+
+    await sendFile(receipt.POST, d.id, Buffer.from("%PDF-1.4\n"), "comprovante.pdf");
+    const paid = (await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
+    const costs = async () => (await prisma.saleItem.findFirstOrThrow({ where: { saleId: paid.saleId } })).costs;
+    expect(await costs()).toEqual([{ type: "TAXA_EMBARQUE", amountCents: 17808, cardId: cardA }]);
+    const billOf = async (id: string) => (await listCardBills(userId)).find((x) => x.id === id)!;
+    expect((await billOf(cardA)).openCents).toBe(17808);
+
+    // venda lançada: a taxa não muda, mas o cartão sim (a taxa muda de fatura)
+    const moved = await c.call(deal.PUT, "PUT", "/x", { ...body, taxesCardId: cardB }, { id: d.id });
+    expect(moved.status).toBe(200);
+    expect(moved.data.item.taxesCardId).toBe(cardB);
+    expect(await costs()).toEqual([{ type: "TAXA_EMBARQUE", amountCents: 17808, cardId: cardB }]);
+    expect([(await billOf(cardA)).openCents, (await billOf(cardB)).openCents]).toEqual([0, 17808]);
+    // salvar sem o campo não mexe no cartão; nenhum tira a taxa do cartão
+    expect((await c.call(deal.PUT, "PUT", "/x", body, { id: d.id })).data.item.taxesCardId).toBe(cardB);
+    expect((await c.call(deal.PUT, "PUT", "/x", { ...body, taxesCardId: null }, { id: d.id })).data.item.taxesCardId).toBeNull();
+    expect(await costs()).toEqual([{ type: "TAXA_EMBARQUE", amountCents: 17808, cardId: null }]);
+    // mudado em Vendas, a negociação mostra o cartão da venda
+    await prisma.saleItem.updateMany({ where: { saleId: paid.saleId }, data: { costs: [{ type: "TAXA_EMBARQUE", amountCents: 17808, cardId: cardA }] } });
+    expect((await listDeals(userId)).find((x) => x.id === d.id)!.taxesCardId).toBe(cardA);
   });
 
   it("isola por usuário", async () => {

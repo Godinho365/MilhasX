@@ -113,6 +113,7 @@ const findBill = (book: Book, cardId: string, dueDate: string) => {
   if (!b) throw new DomainError(404, "Fatura não encontrada");
   return b;
 };
+const brDate = (ymd: string) => ymd.split("-").reverse().join("/");
 /** Conta que paga a fatura, quando não foi escolhida: a das despesas do Financeiro lançadas nela. */
 const billAccount = (b: Bill) => b.items.find((i) => i.ref?.kind === "fin" && i.accountId)?.accountId ?? null;
 
@@ -140,11 +141,27 @@ export async function editCardBill(userId: string, cardId: string, dueDate: stri
   if (billDueIn(monthOf(dueDate), card) !== dueDate) throw new DomainError(400, `O vencimento deste cartão é no dia ${card.dueDay}`);
   const where = { cardId_dueDate: { cardId, dueDate: utc(dueDate) } };
   const dueOverride = input.dueOverride && day(input.dueOverride) !== dueDate ? input.dueOverride : null;
+  // Vencimento no dia normal do cartão em outro mês, numa fatura sem compras: é a fatura daquele mês (o mês foi
+  // escolhido errado ao lançar). Ela muda de mês, com os pagamentos, e as compras daquele mês passam a somar nela.
+  const target = dueOverride ? day(dueOverride) : null;
+  if (target && billDueIn(monthOf(target), card) === target) {
+    const current = (await financeBook(userId)).billOf.get(billKey(cardId, dueDate));
+    if (!current?.items.length) {
+      if (await prisma.cardBill.count({ where: { userId, cardId, dueDate: utc(target) } })) throw new DomainError(409, `Já existe a fatura que vence em ${brDate(target)}: edite ela`);
+      await prisma.$transaction([
+        prisma.cardBill.deleteMany({ where: { userId, cardId, dueDate: utc(dueDate) } }),
+        ...(input.realCents != null ? [prisma.cardBill.create({ data: { userId, cardId, dueDate: utc(target), realCents: input.realCents } })] : []),
+        prisma.cardBillPayment.updateMany({ where: { userId, cardId, dueDate: utc(dueDate) }, data: { dueDate: utc(target) } }),
+      ]);
+      return { movedTo: target };
+    }
+  }
   if (input.realCents == null && !dueOverride) {
     await prisma.cardBill.deleteMany({ where: { userId, cardId, dueDate: utc(dueDate) } });
-    return;
+    return { movedTo: null };
   }
   await prisma.cardBill.upsert({ where, create: { userId, cardId, dueDate: utc(dueDate), realCents: input.realCents, dueOverride }, update: { realCents: input.realCents, dueOverride } });
+  return { movedTo: null };
 }
 
 /** Pagamento de uma fatura (inteiro ou parte). */
@@ -168,6 +185,33 @@ export async function updateBillPayment(userId: string, id: string, input: { pai
 export async function deleteBillPayment(userId: string, id: string) {
   const { count } = await prisma.cardBillPayment.deleteMany({ where: { id, userId } });
   if (!count) throw new DomainError(404, "Pagamento não encontrado");
+}
+
+/**
+ * Adiciona uma compra na fatura (despesa do Financeiro no cartão, na data da compra). A data precisa cair nesta
+ * fatura. Com o valor real informado, a compra soma a ele (addToReal); sem, a fatura já é a soma das compras.
+ */
+export async function addBillItem(userId: string, input: { cardId: string; dueDate: string; amountCents: number; day: Date; description?: string | null; category?: string | null; accountId: string; addToReal: boolean }) {
+  const card = await ownCard(userId, input.cardId);
+  if (billDueIn(monthOf(input.dueDate), card) !== input.dueDate) throw new DomainError(400, `O vencimento deste cartão é no dia ${card.dueDay}`);
+  const goesTo = cardDueDay(day(input.day), card);
+  if (goesTo !== input.dueDate) throw new DomainError(400, `Com essa data a compra vai para a fatura que vence em ${brDate(goesTo)}`);
+  if (!(await prisma.finAccount.count({ where: { id: input.accountId, userId } }))) throw new DomainError(404, "Conta não encontrada");
+  await prisma.$transaction(async (tx) => {
+    const t = await tx.finTransaction.create({
+      data: {
+        userId, type: "EXPENSE", accountId: input.accountId, cardId: card.id, amountCents: input.amountCents,
+        category: input.category?.trim() || null, description: input.description?.trim() || null, competence: input.day, dueDate: input.day,
+      },
+      select: { id: true },
+    });
+    if (input.addToReal) {
+      const where = { cardId_dueDate: { cardId: card.id, dueDate: utc(input.dueDate) } };
+      const b = await tx.cardBill.findUnique({ where, select: { realCents: true } });
+      if (b?.realCents != null) await tx.cardBill.update({ where, data: { realCents: b.realCents + input.amountCents } });
+    }
+    return t.id;
+  });
 }
 
 /**
