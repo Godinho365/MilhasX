@@ -554,6 +554,13 @@ export const telegramCrmSchema = z.object({
 });
 export const telegramClearSchema =z.object({ upTo: z.number().int().positive().nullable() }); // null = mostrar tudo de novo
 export const telegramDmOpenSchema = z.object({ messageId: z.number().int().positive() });
+// contraproposta no privado do autor do pedido: encaminha o pedido e manda a contraproposta como resposta a ele
+export const telegramOfferDmSchema = z.object({
+  messageId: z.number().int().positive(),
+  text: z.string().trim().min(1, "Escreva a contraproposta").max(4096, "Mensagem longa demais (até 4.096 caracteres)"),
+  adText: z.string().max(4096).optional(), // o texto do pedido (para a conversa mostrar mesmo se o grupo não deixa encaminhar)
+});
+export const telegramSeenSchema = z.object({ upTo: z.number().int().positive() });
 const optInt = (min: number, max: number, msg: string) => z.number({ invalid_type_error: msg }).int(msg).min(min, msg).max(max, msg).nullable().optional();
 export const telegramAlertSchema = z
   .object({
@@ -564,6 +571,8 @@ export const telegramAlertSchema = z
     minMiles: optInt(0, 100_000_000, "Milhas inválidas"),
     maxMiles: optInt(1, 100_000_000, "Milhas inválidas"),
     minCpmCents: optInt(1, 1_000_000, "Milheiro inválido"),
+    minProfitCents: optInt(1, 100_000_000, "Lucro inválido"),
+    minProfitPerCpfCents: optInt(1, 100_000_000, "Lucro por CPF inválido"),
     active: z.boolean().optional(),
   })
   .refine((a) => a.minMiles == null || a.maxMiles == null || a.minMiles <= a.maxMiles, { message: "As milhas mínimas passam das máximas", path: ["minMiles"] });

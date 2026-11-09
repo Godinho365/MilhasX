@@ -31,6 +31,10 @@ import * as clearRoute from "@/app/api/telegram/chats/[id]/clear/route";
 import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
 import * as msgRoute from "@/app/api/telegram/chats/[id]/messages/[msgId]/route";
 import * as dmMsgRoute from "@/app/api/telegram/dms/[id]/messages/[msgId]/route";
+import * as offerDmRoute from "@/app/api/telegram/chats/[id]/offer-dm/route";
+import * as unreadRoute from "@/app/api/telegram/dms/unread/route";
+import * as seenRoute from "@/app/api/telegram/dms/[id]/seen/route";
+import * as groupSeenRoute from "@/app/api/telegram/chats/[id]/seen/route";
 import * as holders from "@/app/api/holders/route";
 import * as milesAccounts from "@/app/api/accounts/route";
 import * as entries from "@/app/api/entries/route";
@@ -113,6 +117,15 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
         if (!(SENT[peer.id] ?? []).some((x) => x.id === id)) throw rpc("MESSAGE_DELETE_FORBIDDEN");
         calls.push(`remove ${peer.kind}:${peer.id} #${id}`);
         SENT[peer.id] = SENT[peer.id]!.filter((x) => x.id !== id);
+      },
+      forward: async (from, messageId, to) => {
+        if (from.id === "5678") throw rpc("CHAT_FORWARDS_RESTRICTED"); // grupo que não deixa encaminhar
+        const o = (MSGS[from.id] ?? []).find((x) => x.id === messageId);
+        if (!o) throw rpc("MESSAGE_ID_INVALID");
+        calls.push(`forward ${from.id}#${messageId} → ${to.kind}:${to.id}`);
+        const m: TgMessage = { ...o, id: 100 + calls.length, sender: "Você", out: true, fwd: true, replyTo: null };
+        (SENT[to.id] ??= []).push(m);
+        return m;
       },
       author: async (group, messageId) => {
         const m = (MSGS[group.id] ?? []).find((x) => x.id === messageId);
@@ -462,6 +475,94 @@ describe("contas para emitir os pedidos (lucro)", () => {
     expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accs)).toMatchObject({ profitCents: 25_000, perCpfCents: 12_500 });
     // não cabe no saldo livre: nada
     expect(emissionProfit({ program: "LATAM", miles: 80_000, cpfs: 1 }, 2500, accs)).toBeNull();
+  });
+});
+
+describe("alerta por lucro", () => {
+  const accs = [{ id: "a", label: "Ana LATAM", programCode: "LATAM", available: 200_000, cpfFree: 5, costCpmCents: 2000 }];
+  it("pelo milheiro do pedido com a conta mais barata; sem preço ou sem conta, não dispara", () => {
+    const rules = [
+      { id: "1", name: "Lucro 400", words: [], active: true, minProfitCents: 40_000 },
+      { id: "2", name: "Por CPF 300", words: [], active: true, minProfitPerCpfCents: 30_000 },
+    ];
+    // 100k a R$ 25 com custo R$ 20: lucro R$ 500, 2 CPFs = R$ 250 por CPF
+    expect(matchAlerts("Compro 100k LATAM 2 CPFs 25", rules, undefined, accs)).toEqual(["Lucro 400"]);
+    expect(matchAlerts("Compro 100k LATAM 1 CPF 25", rules, undefined, accs)).toEqual(["Lucro 400", "Por CPF 300"]);
+    expect(matchAlerts("Compro 100k LATAM 1 CPF", rules, undefined, accs)).toEqual([]); // sem preço
+    expect(matchAlerts("Compro 100k LATAM 1 CPF 25", rules)).toEqual([]); // nenhuma conta sua emite
+    expect(matchAlerts("Compro 100k Smiles 1 CPF 25", rules, undefined, accs)).toEqual([]); // conta de outro programa
+  });
+
+  it("cria pela API com o nome descrevendo o lucro", async () => {
+    const r = await c.call(alertsRoute.POST, "POST", "/x", { program: "LATAM", minProfitCents: 30_000, minProfitPerCpfCents: 15_000 });
+    expect([r.status, r.data.items[0]]).toEqual([201, expect.objectContaining({ name: "LATAM · lucro a partir de R$ 300,00 · lucro por CPF a partir de R$ 150,00", minProfitCents: 30_000, minProfitPerCpfCents: 15_000 })]);
+    expect((await c.call(alertsRoute.POST, "POST", "/x", { minProfitCents: -5 })).status).toBe(400);
+  });
+});
+
+describe("contraproposta no privado ligada ao pedido", () => {
+  it("encaminha o pedido, responde com a contraproposta e a conversa volta sozinha quando a pessoa responde", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const r = await c.call(offerDmRoute.POST, "POST", "/x", { messageId: 1, text: "24,50", adText: "Compro 100k LATAM a R$ 25" }, { id: a });
+    expect([r.status, r.data.item.forwarded]).toEqual([201, true]);
+    const dm = r.data.item.dm;
+    expect(dm.offer).toMatchObject({ chatId: a, messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana", group: "Balcão de Milhas ASM", cpmCents: 2450 });
+    const fwd = calls.find((x) => x.startsWith("forward"));
+    expect(fwd).toBe("forward 1234#1 → user:u-Ana");
+    const fwdId = SENT["u-Ana"]![0]!.id;
+    expect(calls).toContain(`send user:u-Ana 24,50 ↩${fwdId}`);
+    // no privado o pedido encaminhado vem lido e a contraproposta responde a ele
+    const msgs = (await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items;
+    expect(msgs).toEqual([
+      expect.objectContaining({ id: fwdId, fwd: true, ad: expect.objectContaining({ program: "LATAM", miles: 100_000, cpmCents: 2500 }) }),
+      expect.objectContaining({ text: "24,50", replyTo: fwdId, ad: null }),
+    ]);
+    // ainda sem resposta: nada não visto
+    expect((await c.call(unreadRoute.GET, "GET", "/x")).data.items).toEqual([expect.objectContaining({ id: dm.id, unread: 0, reopened: false })]);
+
+    // fecha a aba; a Ana responde depois da contraproposta: a conversa volta com 2 não vistas
+    await c.call(dmRoute.DELETE, "DELETE", "/x", undefined, { id: dm.id });
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items).toEqual([]);
+    const now = Date.now();
+    SENT["u-Ana"]!.push({ ...msg(900, 0, "Ana", "Fechado!"), date: new Date(now + 60_000).toISOString() }, { ...msg(901, 0, "Ana", "Mando os dados"), date: new Date(now + 120_000).toISOString() });
+    const un = (await c.call(unreadRoute.GET, "GET", "/x")).data.items;
+    expect(un).toEqual([expect.objectContaining({ id: dm.id, unread: 2, reopened: true, last: expect.objectContaining({ id: 901, text: "Mando os dados" }), dm: expect.objectContaining({ name: "Ana", offer: expect.objectContaining({ cpmCents: 2450 }) }) })]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items.map((d: { id: string }) => d.id)).toEqual([dm.id]);
+    // vista no app: zera (e não volta para trás)
+    expect((await c.call(seenRoute.POST, "POST", "/x", { upTo: 901 }, { id: dm.id })).status).toBe(200);
+    await c.call(seenRoute.POST, "POST", "/x", { upTo: 900 }, { id: dm.id });
+    expect((await c.call(unreadRoute.GET, "GET", "/x")).data.items).toEqual([expect.objectContaining({ id: dm.id, unread: 0, reopened: false })]);
+
+    // outro usuário não mexe
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(seenRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
+    expect((await o.call(offerDmRoute.POST, "POST", "/x", { messageId: 1, text: "20" }, { id: a })).status).toBe(404);
+    expect((await o.call(unreadRoute.GET, "GET", "/x")).data.items).toEqual([]);
+  });
+
+  it("grupo que não deixa encaminhar: manda só a contraproposta e guarda o texto do pedido", async () => {
+    const b = await connected("21977776666", "-1005678");
+    const r = await c.call(offerDmRoute.POST, "POST", "/x", { messageId: 10, text: "Faço 26", adText: "compro latam 30K urgente" }, { id: b });
+    expect([r.status, r.data.item.forwarded, r.data.item.dm.offer.text, r.data.item.dm.offer.cpmCents]).toEqual([201, false, "compro latam 30K urgente", 2600]);
+    expect(calls).toContain("send user:u-Eva Faço 26");
+  });
+});
+
+describe("não vistas em cada grupo", () => {
+  it("começa do zero, conta as mensagens dos outros que chegam e zera ao ver", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const groups = async () => (await c.call(unreadRoute.GET, "GET", "/x")).data.groups;
+    expect(await groups()).toEqual([{ id: a, unread: 0 }]); // nunca visto: a mais nova (4) vira o ponto de partida
+    SENT["1234"] = [msg(50, 16, "Gil", "Compro 80k Smiles 17"), msg(51, 16, "Hugo", "bom dia")];
+    await c.call(messagesRoute.POST, "POST", "/x", { text: "Faço 18" }, { id: a }); // a sua não conta
+    expect(await groups()).toEqual([{ id: a, unread: 2 }]);
+    expect((await c.call(groupSeenRoute.POST, "POST", "/x", { upTo: 51 }, { id: a })).status).toBe(200);
+    await c.call(groupSeenRoute.POST, "POST", "/x", { upTo: 4 }, { id: a }); // não volta para trás
+    expect(await groups()).toEqual([{ id: a, unread: 0 }]);
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(groupSeenRoute.POST, "POST", "/x", { upTo: 1 }, { id: a })).status).toBe(404);
   });
 });
 
