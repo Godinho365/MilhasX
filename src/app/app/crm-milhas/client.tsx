@@ -767,6 +767,15 @@ function IssuedMessage({ deal }: { deal: DealView }) {
     toast("Dados do PIX salvos");
   }
   const wa = whatsappLink(deal.customerPhone, text);
+  // pedido do Chat Balcões: manda a mensagem no privado do Telegram em 1 clique
+  const [sending, setSending] = useState(false);
+  async function sendTelegram() {
+    setSending(true);
+    const r = await api(`/api/miles-deals/${deal.id}/telegram-message`, "POST", { text });
+    setSending(false);
+    if (!r.ok) return toast(r.erro, "error");
+    toast(`Mensagem enviada para ${deal.telegramContact} no Telegram`);
+  }
   // PIX copia e cola com o valor já incluso: o mesmo código que vai na mensagem, mostrado como QR e para copiar
   const code = pix ? pixBrCode({ pix, amountCents: deal.chargeCents }) : null;
   const [qr, setQr] = useState<string | null>(null);
@@ -802,7 +811,8 @@ function IssuedMessage({ deal }: { deal: DealView }) {
       )}
       <textarea className="input min-h-[220px] font-mono text-xs leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} aria-label="Texto da mensagem" />
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-primary h-8 text-xs" onClick={() => navigator.clipboard.writeText(text).then(() => toast("Mensagem copiada"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar mensagem</button>
+        {deal.telegramContact && <button type="button" className="btn-primary h-8 text-xs" onClick={sendTelegram} disabled={sending}><Send className="h-3.5 w-3.5" />{sending ? "Enviando…" : "Enviar no Telegram"}</button>}
+        <button type="button" className={`${deal.telegramContact ? "btn-ghost" : "btn-primary"} h-8 text-xs`} onClick={() => navigator.clipboard.writeText(text).then(() => toast("Mensagem copiada"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar mensagem</button>
         {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Abrir no WhatsApp</a>}
         <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(build(pix))}>Refazer texto</button>
       </div>
@@ -816,7 +826,7 @@ function IssuedMessage({ deal }: { deal: DealView }) {
           </div>
         </div>
       )}
-      <p className="text-xs text-muted">Anexe o bilhete (PDF ou print) na conversa do WhatsApp antes de enviar.</p>
+      <p className="text-xs text-muted">{deal.telegramContact ? "Depois de enviar, anexe o bilhete (PDF ou print) na mesma conversa do Telegram." : "Anexe o bilhete (PDF ou print) na conversa do WhatsApp antes de enviar."}</p>
     </section>
   );
 }

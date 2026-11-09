@@ -23,6 +23,7 @@ import * as dealDmRoute from "@/app/api/miles-deals/[id]/telegram-dm/route";
 import * as dealsRoute from "@/app/api/miles-deals/route";
 import * as dealDataRoute from "@/app/api/miles-deals/[id]/telegram-data/route";
 import * as termsRoute from "@/app/api/miles-deals/[id]/terms/route";
+import * as dealMsgRoute from "@/app/api/miles-deals/[id]/telegram-message/route";
 import * as prefsRoute from "@/app/api/preferences/route";
 import { parsePassengersText } from "@/domain/miles-deals";
 import { DEFAULT_EMISSION_TERMS, emissionTermsText } from "@/domain/emission-terms";
@@ -588,6 +589,18 @@ describe("negociação vinda do Chat Balcões: dados do comprador e termo de emi
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await o.call(termsRoute.POST, "POST", "/x", {}, { id: deal.id })).status).toBe(404);
+  });
+
+  it("manda a mensagem de emissão no privado em 1 clique", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    const r = await c.call(dealMsgRoute.POST, "POST", "/x", { text: "Emissão concluída! Localizador ABC123" }, { id: deal.id });
+    expect(r.status).toBe(200);
+    expect(calls.filter((x) => x.startsWith("send "))).toEqual(["send user:u-Ana Emissão concluída! Localizador ABC123"]);
+    // feita à mão: não tem para quem mandar; vazia: barra
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect((await c.call(dealMsgRoute.POST, "POST", "/x", { text: "oi" }, { id: manual.id })).status).toBe(400);
+    expect((await c.call(dealMsgRoute.POST, "POST", "/x", { text: "  " }, { id: deal.id })).status).toBe(400);
   });
 
   it("o texto do termo: o padrão do MilhasX ou o salvo pelo usuário", async () => {

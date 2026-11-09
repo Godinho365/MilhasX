@@ -219,6 +219,8 @@ export const preferenceSchema = z.object({
 });
 // termo de emissão: com text, manda no privado do Telegram (negociação do Chat Balcões); sem, só marca como enviado
 export const dealTermsSchema = z.object({ text: z.string().trim().min(1, "Escreva o termo").max(4000, "Termo longo demais (até 4.000 caracteres)").optional() });
+// mensagem de emissão enviada em 1 clique no privado do Telegram (negociação do Chat Balcões)
+export const telegramMessageSchema = z.object({ text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)") });
 export const profileSchema = z.object({ name: z.string().trim().min(2, "Informe seu nome").max(100) });
 export const planRequestSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).default("MENSAL") });
 export const adminPlanSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).nullable().default(null) });

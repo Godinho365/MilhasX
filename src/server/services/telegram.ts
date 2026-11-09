@@ -586,10 +586,15 @@ export async function dealBuyerData(userId: string, dealId: string) {
   return { dmId: dm.id, contact: dm.name, since: since.toISOString(), messages: theirs.length, ...buyerDataFromMessages(theirs.map((m) => m.text)) };
 }
 
+/** Manda um texto no privado para quem está negociando (pedido do Chat Balcões), pela conta do grupo. */
+export async function sendDealDm(userId: string, dealId: string, raw: string) {
+  const dm = await openDmFromDeal(userId, dealId);
+  return sendTelegramDm(userId, dm.id, raw);
+}
+
 /** Manda o termo de emissão (o texto que o usuário conferiu) no privado para quem está negociando e anota quando. */
 export async function sendDealTerms(userId: string, dealId: string, raw: string) {
-  const dm = await openDmFromDeal(userId, dealId);
-  await sendTelegramDm(userId, dm.id, raw);
+  await sendDealDm(userId, dealId, raw);
   return markDealTermsSent(userId, dealId);
 }
 
