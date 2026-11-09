@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "db:backup": "node scripts/backup.mjs",
     "db:restore": "node scripts/restore.mjs",
+    "telegram:login": "node scripts/telegram-login.mjs",
     "test:e2e": "playwright test"
   },
   "prisma": {
@@ -34,6 +35,7 @@
     "react-dom": "^19.3.1",
     "recharts": "^2.15.4",
     "server-only": "^0.0.1",
+    "telegram": "^2.26.22",
     "tesseract.js": "^6.0.1",
     "zod": "^3.25.76"
   },
