@@ -1,15 +1,15 @@
-// Telegram: login da conta em etapas (número → código → senha de duas etapas), grupo do balcão e desconectar.
-// Usa um Telegram simulado: nada sai para o Telegram de verdade.
+// Telegram: uma ou mais contas, login em etapas (número → código → senha de duas etapas), grupo do balcão de cada
+// conta e desconectar. Usa um Telegram simulado: nada sai para o Telegram de verdade.
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { randomBytes } from "node:crypto";
 import { resetDb, Client } from "./helpers";
 import * as register from "@/app/api/auth/register/route";
-import * as tg from "@/app/api/telegram/route";
-import * as tgLogin from "@/app/api/telegram/login/route";
-import * as tgCode from "@/app/api/telegram/code/route";
-import * as tgPassword from "@/app/api/telegram/password/route";
-import * as tgGroups from "@/app/api/telegram/groups/route";
-import { setTelegramClientFactory, normalizePhone, maskPhone, type TgClient } from "@/server/services/telegram";
+import * as accounts from "@/app/api/telegram/accounts/route";
+import * as account from "@/app/api/telegram/accounts/[id]/route";
+import * as codeRoute from "@/app/api/telegram/accounts/[id]/code/route";
+import * as passwordRoute from "@/app/api/telegram/accounts/[id]/password/route";
+import * as groupsRoute from "@/app/api/telegram/accounts/[id]/groups/route";
+import { setTelegramClientFactory, normalizePhone, maskPhone, MAX_TELEGRAM_ACCOUNTS, type TgClient } from "@/server/services/telegram";
 import { decrypt } from "@/server/services/accounts";
 import { prisma } from "@/server/db";
 
@@ -19,33 +19,35 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
 let calls: string[] = [];
-/** Telegram simulado: a sessão muda a cada etapa (s-code → s-2fa → s-ok); código certo 12345. */
-function fake(opts: { password?: string; revoked?: boolean } = {}) {
+/** Telegram simulado. Sessão "etapa:número" (code → 2fa → ok); código certo 12345; senha só nos números em
+ *  `withPassword`; `revoked` = sessões encerradas pelo app do Telegram. */
+function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
   return (session: string): TgClient => {
     let s = session;
+    const phone = () => s.split(":")[1] ?? "";
     return {
       connect: async () => {},
       close: async () => {},
       saveSession: () => s,
-      sendCode: async (phone) => { calls.push(`sendCode ${phone}`); s = "s-code"; return { phoneCodeHash: "hash1", viaApp: true }; },
-      signIn: async (_phone, hash, code) => {
-        if (session !== "s-code" || hash !== "hash1") throw rpc("PHONE_CODE_HASH_EMPTY");
+      sendCode: async (p) => { calls.push(`sendCode ${p}`); s = `code:${p}`; return { phoneCodeHash: `hash${p.slice(-4)}`, viaApp: true }; },
+      signIn: async (p, hash, code) => {
+        if (s !== `code:${p}` || hash !== `hash${p.slice(-4)}`) throw rpc("PHONE_CODE_HASH_EMPTY");
         if (code !== "12345") throw rpc("PHONE_CODE_INVALID");
-        s = opts.password ? "s-2fa" : "s-ok";
-        return opts.password ? "PASSWORD_NEEDED" : "OK";
+        const twoStep = opts.withPassword?.includes(p);
+        s = `${twoStep ? "2fa" : "ok"}:${p}`;
+        return twoStep ? "PASSWORD_NEEDED" : "OK";
       },
       checkPassword: async (pw) => {
-        if (session !== "s-2fa") throw rpc("AUTH_KEY_UNREGISTERED");
-        if (pw !== opts.password) throw rpc("PASSWORD_HASH_INVALID");
-        s = "s-ok";
+        if (!s.startsWith("2fa:")) throw rpc("AUTH_KEY_UNREGISTERED");
+        if (pw !== "segredo") throw rpc("PASSWORD_HASH_INVALID");
+        s = `ok:${phone()}`;
       },
-      me: async () => "Rafa Godinho (@rafa)",
+      me: async () => `Conta ${phone().slice(-4)}`,
       groups: async () => {
-        if (opts.revoked) throw rpc("AUTH_KEY_UNREGISTERED");
-        if (session !== "s-ok") throw rpc("AUTH_KEY_UNREGISTERED");
-        return [{ id: "-1001234", title: "Balcão de Milhas ASM", channel: false }, { id: "-1009999", title: "Promoções", channel: true }];
+        if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
+        return [{ id: "-1001234", title: "Balcão de Milhas ASM", channel: false }, { id: "-1005678", title: "Balcão Milhas VIP", channel: false }, { id: "-1009999", title: "Promoções", channel: true }];
       },
-      logOut: async () => { calls.push("logOut"); },
+      logOut: async () => { calls.push(`logOut ${phone()}`); },
     };
   };
 }
@@ -61,7 +63,9 @@ beforeEach(async () => {
 });
 afterAll(() => setTelegramClientFactory());
 
-const status = async () => (await c.call(tg.GET, "GET", "/x")).data.item;
+const status = async () => (await c.call(accounts.GET, "GET", "/x")).data.item;
+const start = (phone: string) => c.call(accounts.POST, "POST", "/x", { phone });
+const idOf = async (last4: string) => (await prisma.telegramLink.findFirstOrThrow({ where: { userId, phone: { endsWith: last4 } } })).id;
 
 describe("Telegram", () => {
   it("número, DDI do Brasil e número escondido", () => {
@@ -72,75 +76,85 @@ describe("Telegram", () => {
     expect(maskPhone("+5511999998888")).toBe("+55 •••• 8888");
   });
 
-  it("entra com código e senha de duas etapas, escolhe o grupo e desconecta", async () => {
-    setTelegramClientFactory(fake({ password: "segredo" }));
-    expect(await status()).toMatchObject({ enabled: true, status: "NONE", group: null });
-    // código antes de pedir
-    expect((await c.call(tgCode.POST, "POST", "/x", { code: "12345" })).status).toBe(409);
+  it("conecta duas contas ao mesmo tempo, cada uma com o seu grupo, e desconecta uma sem mexer na outra", async () => {
+    setTelegramClientFactory(fake({ withPassword: ["+5521977776666"] }));
+    expect(await status()).toEqual({ enabled: true, max: MAX_TELEGRAM_ACCOUNTS, accounts: [] });
 
-    const sent = await c.call(tgLogin.POST, "POST", "/x", { phone: "(11) 99999-8888" });
-    expect([sent.status, sent.data.item]).toEqual([200, expect.objectContaining({ status: "CODE_SENT", phone: "+55 •••• 8888", codeViaApp: true })]);
-    expect(calls).toEqual(["sendCode +5511999998888"]);
+    // as duas pedem código juntas
+    expect((await start("(11) 99999-8888")).data.item.accounts).toEqual([expect.objectContaining({ status: "CODE_SENT", phone: "+55 •••• 8888", codeViaApp: true, accountName: null })]);
+    expect((await start("21 97777-6666")).data.item.accounts.map((a: { phone: string }) => a.phone)).toEqual(["+55 •••• 8888", "+55 •••• 6666"]);
+    expect(calls).toEqual(["sendCode +5511999998888", "sendCode +5521977776666"]);
+    const [a, b] = [await idOf("8888"), await idOf("6666")];
     // a sessão fica criptografada no banco
-    const row = await prisma.telegramLink.findUniqueOrThrow({ where: { userId } });
-    expect(row.sessionEnc).not.toContain("s-code");
-    expect(decrypt(row.sessionEnc)).toBe("s-code");
+    const row = await prisma.telegramLink.findUniqueOrThrow({ where: { id: a } });
+    expect(row.sessionEnc).not.toContain("+5511999998888");
+    expect(decrypt(row.sessionEnc)).toBe("code:+5511999998888");
 
-    expect((await c.call(tgCode.POST, "POST", "/x", { code: "11111" })).data.erro).toMatch(/Código errado/);
-    const code = await c.call(tgCode.POST, "POST", "/x", { code: "12 345" });
-    expect(code.data.item.status).toBe("PASSWORD_NEEDED");
-    expect((await c.call(tgPassword.POST, "POST", "/x", { password: "errada" })).data.erro).toMatch(/Senha de duas etapas errada/);
-    const ok = await c.call(tgPassword.POST, "POST", "/x", { password: "segredo" });
-    expect(ok.data.item).toMatchObject({ status: "ACTIVE", accountName: "Rafa Godinho (@rafa)" });
-    expect(await prisma.telegramLink.findUniqueOrThrow({ where: { userId } })).toMatchObject({ phoneCodeHash: null });
+    // conta A: código direto; conta B: código e senha de duas etapas
+    expect((await c.call(codeRoute.POST, "POST", "/x", { code: "11111" }, { id: a })).data.erro).toMatch(/Código errado/);
+    expect((await c.call(codeRoute.POST, "POST", "/x", { code: "12 345" }, { id: a })).data.item.accounts[0]).toMatchObject({ status: "ACTIVE", accountName: "Conta 8888" });
+    expect((await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id: b })).data.item.accounts[1].status).toBe("PASSWORD_NEEDED");
+    expect((await c.call(passwordRoute.POST, "POST", "/x", { password: "errada" }, { id: b })).data.erro).toMatch(/Senha de duas etapas errada/);
+    expect((await c.call(passwordRoute.POST, "POST", "/x", { password: "segredo" }, { id: b })).data.item.accounts[1]).toMatchObject({ status: "ACTIVE", accountName: "Conta 6666" });
+    expect(await prisma.telegramLink.count({ where: { userId, phoneCodeHash: null, status: "ACTIVE" } })).toBe(2);
 
-    // grupos da conta; só um deles pode ser o do balcão
-    const groups = await c.call(tgGroups.GET, "GET", "/x");
-    expect(groups.data.items.map((g: { title: string }) => g.title)).toEqual(["Balcão de Milhas ASM", "Promoções"]);
-    expect((await c.call(tgGroups.POST, "POST", "/x", { groupId: "-1005555" })).status).toBe(404);
-    expect((await c.call(tgGroups.POST, "POST", "/x", { groupId: "-1001234" })).data.item.group).toEqual({ id: "-1001234", title: "Balcão de Milhas ASM" });
+    // cada conta com o seu grupo do balcão (só um dos grupos dela)
+    expect((await c.call(groupsRoute.GET, "GET", "/x", undefined, { id: a })).data.items).toHaveLength(3);
+    expect((await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1000001" }, { id: a })).status).toBe(404);
+    await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1001234" }, { id: a });
+    const both = (await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1005678" }, { id: b })).data.item.accounts;
+    expect(both.map((x: { group: { title: string } }) => x.group.title)).toEqual(["Balcão de Milhas ASM", "Balcão Milhas VIP"]);
 
-    // conectada: outro login só depois de desconectar
-    expect((await c.call(tgLogin.POST, "POST", "/x", { phone: "11999998888" })).status).toBe(409);
-    const out = await c.call(tg.DELETE, "DELETE", "/x");
-    expect(out.data.item.status).toBe("NONE");
-    expect(calls).toContain("logOut");
-    expect(await prisma.telegramLink.count()).toBe(0);
+    // o mesmo número de novo não duplica
+    expect((await start("+55 11 99999-8888")).status).toBe(409);
+    // desconectar uma: encerra a sessão dela no Telegram; a outra continua
+    const out = await c.call(account.DELETE, "DELETE", "/x", undefined, { id: a });
+    expect(out.data.item.accounts).toEqual([expect.objectContaining({ id: b, status: "ACTIVE" })]);
+    expect(calls).toContain("logOut +5511999998888");
+    expect(calls).not.toContain("logOut +5521977776666");
   });
 
-  it("sem senha de duas etapas entra direto; sessão encerrada no app do Telegram desfaz a conexão", async () => {
-    await c.call(tgLogin.POST, "POST", "/x", { phone: "+55 11 99999-8888" });
-    expect((await c.call(tgCode.POST, "POST", "/x", { code: "12345" })).data.item.status).toBe("ACTIVE");
-    expect((await c.call(tgPassword.POST, "POST", "/x", { password: "x" })).status).toBe(409);
-
+  it("sessão encerrada no app do Telegram tira só aquela conta; cancelar o login não sai de nada no Telegram", async () => {
+    await start("11999998888");
+    await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id: await idOf("8888") });
+    await start("21977776666"); // ainda esperando o código
     setTelegramClientFactory(fake({ revoked: true }));
-    const r = await c.call(tgGroups.GET, "GET", "/x");
-    expect([r.status, r.data.erro]).toEqual([409, expect.stringMatching(/conecte de novo/)]);
-    expect((await status()).status).toBe("NONE");
+    const r = await c.call(groupsRoute.GET, "GET", "/x", undefined, { id: await idOf("8888") });
+    expect([r.status, r.data.erro]).toEqual([409, expect.stringMatching(/\+55 •••• 8888.*conecte de novo/)]);
+    expect((await status()).accounts).toEqual([expect.objectContaining({ phone: "+55 •••• 6666", status: "CODE_SENT" })]);
+
+    await c.call(account.DELETE, "DELETE", "/x", undefined, { id: await idOf("6666") });
+    expect(calls.filter((x) => x.startsWith("logOut"))).toEqual([]);
+    expect(await prisma.telegramLink.count()).toBe(0);
   });
 
-  it("cancelar no meio do login apaga a sessão pendente, sem sair de nada no Telegram", async () => {
-    await c.call(tgLogin.POST, "POST", "/x", { phone: "11999998888" });
-    await c.call(tg.DELETE, "DELETE", "/x");
-    expect(calls).toEqual(["sendCode +5511999998888"]);
-    expect(await prisma.telegramLink.count()).toBe(0);
+  it("limite de contas", async () => {
+    for (let i = 0; i < MAX_TELEGRAM_ACCOUNTS; i++) expect((await start(`1199999${String(i).padStart(4, "0")}`)).status).toBe(200);
+    const r = await start("11988887777");
+    expect([r.status, r.data.erro]).toEqual([409, expect.stringMatching(/Limite de 10 contas/)]);
+    // o mesmo número que está no meio do login recomeça (não conta como outra)
+    expect((await start("11999990003")).status).toBe(200);
   });
 
   it("isola por usuário e exige o servidor configurado", async () => {
-    await c.call(tgLogin.POST, "POST", "/x", { phone: "11999998888" });
+    await start("11999998888");
+    const id = await idOf("8888");
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
-    expect((await o.call(tg.GET, "GET", "/x")).data.item.status).toBe("NONE");
-    expect((await o.call(tgCode.POST, "POST", "/x", { code: "12345" })).status).toBe(409);
-    expect((await o.call(tgGroups.GET, "GET", "/x")).status).toBe(409);
+    expect((await o.call(accounts.GET, "GET", "/x")).data.item.accounts).toEqual([]);
+    expect((await o.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id })).status).toBe(404);
+    expect((await o.call(groupsRoute.GET, "GET", "/x", undefined, { id })).status).toBe(404);
+    expect((await o.call(account.DELETE, "DELETE", "/x", undefined, { id })).status).toBe(404);
+    // o outro usuário pode conectar o mesmo número na conta dele
+    expect((await o.call(accounts.POST, "POST", "/x", { phone: "11999998888" })).status).toBe(200);
 
-    const id = process.env.TELEGRAM_API_ID;
+    const apiId = process.env.TELEGRAM_API_ID;
     delete process.env.TELEGRAM_API_ID;
     try {
-      expect((await o.call(tg.GET, "GET", "/x")).data.item.enabled).toBe(false);
-      expect((await o.call(tgLogin.POST, "POST", "/x", { phone: "11999998888" })).status).toBe(503);
+      expect((await o.call(accounts.GET, "GET", "/x")).data.item.enabled).toBe(false);
+      expect((await o.call(accounts.POST, "POST", "/x", { phone: "11999997777" })).status).toBe(503);
     } finally {
-      process.env.TELEGRAM_API_ID = id;
+      process.env.TELEGRAM_API_ID = apiId;
     }
   });
 });

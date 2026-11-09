@@ -139,14 +139,15 @@ model User {
   flightSearches      FlightSearch[]
   milesLeads          MilesLead[]
   contractSignatures  ContractSignature[]
-  telegramLink        TelegramLink?
+  telegramLinks       TelegramLink[]
 }
 
-/// Conta do Telegram do usuário, conectada para ler o grupo do balcão (só leitura). A sessão dá acesso à conta:
-/// fica criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas etapas) → ativa.
+/// Conta do Telegram do usuário (pode ter várias), conectada para ler o grupo do balcão (só leitura). A sessão dá
+/// acesso à conta: fica criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas
+/// etapas) → ativa. Um número por usuário.
 model TelegramLink {
   id            String   @id @default(cuid())
-  userId        String   @unique
+  userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionEnc    String // sessão do Telegram, criptografada
   status        String   @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
@@ -158,6 +159,9 @@ model TelegramLink {
   groupTitle    String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@unique([userId, phone])
+  @@index([userId])
 }
 
 enum Plan {

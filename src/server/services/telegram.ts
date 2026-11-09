@@ -127,108 +127,120 @@ export function normalizePhone(raw: string) {
 /** Número com o meio escondido: +55 •••• 8888. */
 export const maskPhone = (p: string) => `${p.slice(0, 3)} •••• ${p.slice(-4)}`;
 
-async function link(userId: string) {
-  return prisma.telegramLink.findUnique({ where: { userId } });
+/** Até quantas contas do Telegram um usuário conecta. */
+export const MAX_TELEGRAM_ACCOUNTS = 10;
+
+type Link = NonNullable<Awaited<ReturnType<typeof prisma.telegramLink.findFirst>>>;
+async function own(userId: string, id: string): Promise<Link> {
+  const l = await prisma.telegramLink.findFirst({ where: { id, userId } });
+  if (!l) throw new DomainError(404, "Conta do Telegram não encontrada");
+  return l;
 }
 function requireEnabled() {
   if (!apiCredentials()) throw new DomainError(503, "Telegram desativado: defina TELEGRAM_API_ID e TELEGRAM_API_HASH no servidor");
   if (!credentialsEnabled()) throw new DomainError(503, "Telegram desativado: defina CREDENTIALS_KEY no servidor");
 }
 
-/** Situação da conexão para a tela. */
+const view = (l: Link) => ({
+  id: l.id,
+  status: l.status as "CODE_SENT" | "PASSWORD_NEEDED" | "ACTIVE",
+  phone: maskPhone(l.phone),
+  codeViaApp: l.codeViaApp,
+  accountName: l.accountName,
+  group: l.groupId ? { id: l.groupId, title: l.groupTitle ?? "" } : null,
+});
+export type TelegramAccountView = ReturnType<typeof view>;
+
+/** As contas conectadas (e as que estão no meio do login), da mais antiga para a mais nova. */
 export async function telegramStatus(userId: string) {
-  const l = await link(userId);
-  return {
-    enabled: telegramEnabled(),
-    status: (l?.status ?? "NONE") as "NONE" | "CODE_SENT" | "PASSWORD_NEEDED" | "ACTIVE",
-    phone: l ? maskPhone(l.phone) : null,
-    codeViaApp: l?.codeViaApp ?? true,
-    accountName: l?.accountName ?? null,
-    group: l?.groupId ? { id: l.groupId, title: l.groupTitle ?? "" } : null,
-  };
+  const links = await prisma.telegramLink.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
+  return { enabled: telegramEnabled(), max: MAX_TELEGRAM_ACCOUNTS, accounts: links.map(view) };
 }
 
-/** 1ª etapa: o Telegram manda o código (no app do Telegram ou por SMS). */
+/** 1ª etapa: o Telegram manda o código (no app do Telegram ou por SMS). Cada número é uma conta; o mesmo número
+ *  no meio do login recomeça. */
 export async function startTelegramLogin(userId: string, rawPhone: string) {
   requireEnabled();
   const phone = normalizePhone(rawPhone);
-  const current = await link(userId);
-  if (current?.status === "ACTIVE") throw new DomainError(409, "Já há uma conta do Telegram conectada: desconecte antes de entrar com outra");
+  const same = await prisma.telegramLink.findUnique({ where: { userId_phone: { userId, phone } } });
+  if (same?.status === "ACTIVE") throw new DomainError(409, "Esta conta do Telegram já está conectada");
+  if (!same && (await prisma.telegramLink.count({ where: { userId } })) >= MAX_TELEGRAM_ACCOUNTS) throw new DomainError(409, `Limite de ${MAX_TELEGRAM_ACCOUNTS} contas do Telegram: desconecte uma antes`);
   const sent = await withClient("", async (c) => ({ ...(await c.sendCode(phone)), session: c.saveSession() }));
-  const data = { sessionEnc: encrypt(sent.session), status: "CODE_SENT", phone, phoneCodeHash: sent.phoneCodeHash, codeViaApp: sent.viaApp, accountName: null, groupId: null, groupTitle: null };
-  await prisma.telegramLink.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+  const data = { sessionEnc: encrypt(sent.session), status: "CODE_SENT", phoneCodeHash: sent.phoneCodeHash, codeViaApp: sent.viaApp, accountName: null, groupId: null, groupTitle: null };
+  await prisma.telegramLink.upsert({ where: { userId_phone: { userId, phone } }, create: { userId, phone, ...data }, update: data });
   return telegramStatus(userId);
 }
 
 /** Login concluído: guarda a sessão já autorizada e o nome da conta. */
-async function activate(userId: string, c: TgClient) {
+async function activate(id: string, c: TgClient) {
   const accountName = await c.me();
-  await prisma.telegramLink.update({ where: { userId }, data: { sessionEnc: encrypt(c.saveSession()), status: "ACTIVE", phoneCodeHash: null, accountName } });
+  await prisma.telegramLink.update({ where: { id }, data: { sessionEnc: encrypt(c.saveSession()), status: "ACTIVE", phoneCodeHash: null, accountName } });
 }
 
 /** 2ª etapa: o código. Com senha de duas etapas, falta a senha. */
-export async function confirmTelegramCode(userId: string, rawCode: string) {
+export async function confirmTelegramCode(userId: string, id: string, rawCode: string) {
   requireEnabled();
-  const l = await link(userId);
-  if (l?.status !== "CODE_SENT" || !l.phoneCodeHash) throw new DomainError(409, "Peça o código primeiro");
+  const l = await own(userId, id);
+  if (l.status !== "CODE_SENT" || !l.phoneCodeHash) throw new DomainError(409, "Peça o código primeiro");
   const code = rawCode.replace(/\D/g, "");
   if (!code) throw new DomainError(400, "Informe o código");
   await withClient(decrypt(l.sessionEnc), async (c) => {
     const r = await c.signIn(l.phone, l.phoneCodeHash!, code);
     if (r === "SIGN_UP_REQUIRED") throw new DomainError(400, "Este número não tem conta no Telegram");
     if (r === "PASSWORD_NEEDED") {
-      await prisma.telegramLink.update({ where: { userId }, data: { sessionEnc: encrypt(c.saveSession()), status: "PASSWORD_NEEDED" } });
+      await prisma.telegramLink.update({ where: { id }, data: { sessionEnc: encrypt(c.saveSession()), status: "PASSWORD_NEEDED" } });
       return;
     }
-    await activate(userId, c);
+    await activate(id, c);
   });
   return telegramStatus(userId);
 }
 
 /** 3ª etapa (se a conta tiver): a senha de duas etapas. Ela não é guardada em lugar nenhum. */
-export async function confirmTelegramPassword(userId: string, password: string) {
+export async function confirmTelegramPassword(userId: string, id: string, password: string) {
   requireEnabled();
-  const l = await link(userId);
-  if (l?.status !== "PASSWORD_NEEDED") throw new DomainError(409, "Esta etapa não pede senha");
+  const l = await own(userId, id);
+  if (l.status !== "PASSWORD_NEEDED") throw new DomainError(409, "Esta etapa não pede senha");
   if (!password) throw new DomainError(400, "Informe a senha de duas etapas");
   await withClient(decrypt(l.sessionEnc), async (c) => {
     await c.checkPassword(password);
-    await activate(userId, c);
+    await activate(id, c);
   });
   return telegramStatus(userId);
 }
 
 /** Conta ativa: conecta com a sessão dela; sessão encerrada no app do Telegram desfaz a conexão aqui. */
-async function withActive<T>(userId: string, fn: (c: TgClient) => Promise<T>) {
+async function withActive<T>(userId: string, id: string, fn: (c: TgClient) => Promise<T>) {
   requireEnabled();
-  const l = await link(userId);
-  if (l?.status !== "ACTIVE") throw new DomainError(409, "Conecte a sua conta do Telegram primeiro");
+  const l = await own(userId, id);
+  if (l.status !== "ACTIVE") throw new DomainError(409, "Termine de conectar esta conta do Telegram primeiro");
   try {
     return await withClient(decrypt(l.sessionEnc), fn);
   } catch (e) {
     if (!(e instanceof SessionEnded)) throw e;
-    await prisma.telegramLink.deleteMany({ where: { userId } });
-    throw new DomainError(409, "A conexão com o Telegram foi encerrada (pelo app do Telegram?): conecte de novo");
+    await prisma.telegramLink.deleteMany({ where: { id, userId } });
+    throw new DomainError(409, `A conexão da conta ${maskPhone(l.phone)} foi encerrada (pelo app do Telegram?): conecte de novo`);
   }
 }
 
 /** Grupos e canais da conta, para escolher o do balcão. */
-export const listTelegramGroups = (userId: string) => withActive(userId, (c) => c.groups());
+export const listTelegramGroups = (userId: string, id: string) => withActive(userId, id, (c) => c.groups());
 
-/** Escolhe o grupo do balcão (precisa ser um dos grupos da conta). */
-export async function chooseTelegramGroup(userId: string, groupId: string) {
-  const g = (await listTelegramGroups(userId)).find((x) => x.id === groupId);
-  if (!g) throw new DomainError(404, "Grupo não encontrado na sua conta do Telegram");
-  await prisma.telegramLink.update({ where: { userId }, data: { groupId: g.id, groupTitle: g.title } });
+/** Escolhe o grupo do balcão da conta (precisa ser um dos grupos dela). */
+export async function chooseTelegramGroup(userId: string, id: string, groupId: string) {
+  const g = (await listTelegramGroups(userId, id)).find((x) => x.id === groupId);
+  if (!g) throw new DomainError(404, "Grupo não encontrado nesta conta do Telegram");
+  await prisma.telegramLink.update({ where: { id }, data: { groupId: g.id, groupTitle: g.title } });
   return telegramStatus(userId);
 }
 
-/** Desconecta: encerra a sessão no Telegram (some de Dispositivos) e apaga daqui. No meio do login, só cancela. */
-export async function disconnectTelegram(userId: string) {
-  const l = await link(userId);
-  if (!l) return;
+/** Desconecta a conta: encerra a sessão no Telegram (some de Dispositivos) e apaga daqui. No meio do login, só
+ *  cancela. */
+export async function disconnectTelegram(userId: string, id: string) {
+  const l = await own(userId, id);
   if (l.status === "ACTIVE" && telegramEnabled()) {
     await withClient(decrypt(l.sessionEnc), (c) => c.logOut()).catch(() => {}); // já encerrada lá: só apaga aqui
   }
-  await prisma.telegramLink.deleteMany({ where: { userId } });
+  await prisma.telegramLink.deleteMany({ where: { id, userId } });
+  return telegramStatus(userId);
 }
