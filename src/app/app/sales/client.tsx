@@ -18,7 +18,9 @@ import type { SaleView } from "@/server/services/sales";
 
 const COST_LABELS: Record<string, string> = { TAXA_EMBARQUE: "Taxa de embarque", IOF: "IOF", BAGAGEM: "Bagagem", ASSENTO: "Assento", COMPLETAR_PONTOS: "Completar pontos", OUTROS: "Outros" };
 
-export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, partners, members = [], editSale }: { partners: { id: string; name: string; mode: string; value: number }[]; members?: { id: string; name: string; issuer: boolean }[]; sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
+type FinAccountOpt = { id: string; name: string };
+
+export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, range, tags, partners, members = [], finAccounts = [], editSale }: { partners: { id: string; name: string; mode: string; value: number }[]; members?: { id: string; name: string; issuer: boolean }[]; finAccounts?: FinAccountOpt[]; sales: SaleView[]; accounts: SaleAccount[]; suppliers: SaleSupplier[]; customers: SaleCustomer[]; cards: SaleCard[]; sp: Record<string, string>; range: DayRange; tags: string[]; editSale?: SaleView | null }) {
   const router = useRouter();
   const nav = useNav();
   const params = useSearchParams();
@@ -30,6 +32,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
   const [tagging, setTagging] = useState<SaleView | null>(null);
   const [partnering, setPartnering] = useState<SaleView | null>(null);
   const [issuing, setIssuing] = useState<SaleView | null>(null);
+  const [receiving, setReceiving] = useState<SaleView | null>(null);
   const [cols, setCols] = useColumns();
   const on = (k: ColKey) => cols.includes(k);
   // prazo de reembolso (24h depois da emissão): o relógio da tela anda sozinho a cada minuto
@@ -84,14 +87,14 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
     toast(kind === "miles" ? "Estorno das milhas recebido" : "Estorno da taxa recebido");
     refreshSafe(router);
   }
+  /** Cliente pagou: abre a janela com a data e a conta; já paga, volta para a receber (sai da conta). */
   async function setPaid(s: SaleView, paid: boolean) {
-    const ok = await confirmDialog(paid
-      ? { title: "Cliente pagou?", body: `Marcar ${fmtBRL(s.totalCents)} como recebido hoje?`, confirmLabel: "Marcar pago" }
-      : { title: "Voltar para a receber?", body: "A venda volta a aparecer como não paga.", confirmLabel: "Voltar" });
+    if (paid) return setReceiving(s);
+    const ok = await confirmDialog({ title: "Voltar para a receber?", body: `A venda volta a aparecer como não paga${s.finAccount ? ` e ${fmtBRL(s.totalCents)} sai do saldo da conta ${s.finAccount}` : ""}.`, confirmLabel: "Voltar" });
     if (!ok) return;
-    const r = await api(`/api/sales/${s.id}/payment`, "POST", { paid, date: paid ? today() : undefined });
+    const r = await api(`/api/sales/${s.id}/payment`, "POST", { paid: false });
     if (!r.ok) return toast(r.erro, "error");
-    toast(paid ? "Pagamento registrado" : "Venda voltou para a receber");
+    toast("Venda voltou para a receber");
     refreshSafe(router);
   }
   async function undo(s: SaleView) {
@@ -182,7 +185,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
                     {on("roe") && <td className="text-right tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</td>}
                     {on("lucroCpf") && <td className="text-right tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}</td>}
                     {on("pgto") && <td className="whitespace-nowrap">{s.paidAt
-                      ? <button type="button" onClick={() => setPaid(s, false)} title="Clique para voltar para a receber" className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">Pago {fmtDate(s.paidAt).slice(0, 5)}</button>
+                      ? <button type="button" onClick={() => setReceiving(s)} title={`Recebido em ${fmtDate(s.paidAt)}${s.finAccount ? ` na conta ${s.finAccount}` : ", fora das contas do Financeiro"}. Clique para mudar`} className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">Pago {fmtDate(s.paidAt).slice(0, 5)}</button>
                       : <button type="button" onClick={() => setPaid(s, true)} title="Clique quando o cliente pagar" className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">A receber</button>}</td>}
                     <td className="text-right">
                       <button className="btn-subtle h-8 w-8 px-0" aria-label={`Ações da venda ${s.description}`} aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu(menu?.s.id === s.id ? null : { s, top: r.bottom + 4, right: window.innerWidth - r.right }); }}><MoreHorizontal className="h-4 w-4" /></button>
@@ -198,7 +201,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
         <div role="menu" style={{ top: menu.top, right: menu.right }} className="fixed z-50 w-44 rounded-xl border border-line bg-panel2 p-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setViewing(menu.s); setMenu(null); }}><Eye className="h-4 w-4" />Ver detalhes</button>
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setEditingSale(menu.s); setMenu(null); }}><Pencil className="h-4 w-4" />Editar</button>}
-          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); setPaid(s, !s.paidAt); }}><Wallet className="h-4 w-4 shrink-0" />{menu.s.paidAt ? "Voltar para a receber" : "Cliente pagou"}</button>
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); setReceiving(s); }}><Wallet className="h-4 w-4 shrink-0" />{menu.s.paidAt ? "Recebimento" : "Cliente pagou"}</button>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setTagging(menu.s); setMenu(null); }}><Tag className="h-4 w-4" />Etiquetas</button>
           {!menu.s.refund && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setPartnering(menu.s); setMenu(null); }}><Handshake className="h-4 w-4" />Parceiro</button>}
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setIssuing(menu.s); setMenu(null); }}><UserCheck className="h-4 w-4" />Emissores</button>
@@ -219,7 +222,59 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
       {tagging && <TagsDialog sale={tagging} known={tags} onClose={() => setTagging(null)} />}
       {partnering && <PartnerDialog sale={partnering} partners={partners} onClose={() => setPartnering(null)} />}
       {issuing && <IssuersDialog sale={issuing} members={members} onClose={() => setIssuing(null)} />}
+      {receiving && <ReceiveDialog sale={receiving} accounts={finAccounts} onClose={() => setReceiving(null)} onUnpay={() => { const s = receiving; setReceiving(null); setPaid(s, false); }} />}
     </>
+  );
+}
+
+/** Cliente pagou: a data e a conta do Financeiro em que o dinheiro entrou (soma no saldo dela). Já paga, muda a
+ *  data ou a conta, ou volta para a receber. */
+function ReceiveDialog({ sale: s, accounts, onClose, onUnpay }: { sale: SaleView; accounts: FinAccountOpt[]; onClose: () => void; onUnpay: () => void }) {
+  const router = useRouter();
+  const paid = !!s.paidAt;
+  const minDay = s.date.slice(0, 10);
+  const [date, setDate] = useState(() => (paid ? s.paidAt!.slice(0, 10) : today() < minDay ? minDay : today()));
+  // conta já escolhida; nova: a primeira conta ativa (a conta que a venda tinha pode ter sido arquivada)
+  const [accountId, setAccountId] = useState(() => (paid ? s.finAccountId ?? "" : accounts[0]?.id ?? ""));
+  const archived = !!s.finAccountId && !accounts.some((a) => a.id === s.finAccountId);
+  const [erro, setErro] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const r = await api(`/api/sales/${s.id}/payment`, "POST", { paid: true, date, accountId: accountId || null });
+    setBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    const name = accounts.find((a) => a.id === accountId)?.name ?? (archived && accountId === s.finAccountId ? s.finAccount : null);
+    toast(paid ? "Recebimento atualizado" : name ? `Pagamento registrado na conta ${name}` : "Pagamento registrado");
+    onClose();
+    refreshSafe(router);
+  }
+  return (
+    <Modal open onClose={onClose} title={paid ? "Recebimento da venda" : "Cliente pagou"} footer={<>
+      {paid && <button type="button" className="btn-ghost mr-auto text-red-300" onClick={onUnpay}>Voltar para a receber</button>}
+      <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
+      <button form="receive-form" className="btn-primary" disabled={busy}>{paid ? "Salvar" : "Marcar pago"}</button>
+    </>}>
+      <form id="receive-form" onSubmit={save} className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <p className="text-sm text-muted">{s.description} · {s.program}</p>
+        <div className="flex items-center justify-between rounded-xl bg-panel2 px-3 py-2 text-sm"><span className="text-muted">Valor recebido</span><span className="font-semibold tabular-nums">{fmtBRL(s.totalCents)}</span></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Data do pagamento" required><input className="input" type="date" min={minDay} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data do pagamento" required /></Field>
+          <Field label="Conta em que entrou">
+            <select className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="Conta em que o pagamento entrou">
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {archived && <option value={s.finAccountId!}>{s.finAccount} (arquivada)</option>}
+              <option value="">Nenhuma (fora das contas do Financeiro)</option>
+            </select>
+          </Field>
+        </div>
+        <p className="text-xs text-muted">{accounts.length === 0
+          ? "Cadastre uma conta em Financeiro › Contas para o recebimento somar no saldo dela."
+          : accountId ? "O valor soma no saldo da conta no Financeiro." : "Sem conta, a venda conta como recebida, mas não mexe no saldo de nenhuma conta."}</p>
+      </form>
+    </Modal>
   );
 }
 
@@ -314,6 +369,7 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
           {line("Data", fmtDate(s.date))}
           {line("Origem dos pontos", s.origin === "OWN" ? "Meus pontos" : "Fornecedor")}
           {line("Programa", s.program)}
+          {line("Pagamento do cliente", s.paidAt ? `Recebido em ${fmtDate(s.paidAt)}${s.finAccount ? ` · ${s.finAccount}` : ""}` : "A receber")}
         </div>
         {s.items.map((it, n) => (
           <section key={it.id} className="rounded-xl border border-line p-3">

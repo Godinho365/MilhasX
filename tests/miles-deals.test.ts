@@ -77,15 +77,24 @@ describe("CRM Milhas", () => {
     await c.call(deal.PUT, "PUT", "/x", { buyerType: "AGENCY", customerName: "Agência Voa", accountId: lat, points: 10000, saleCpmCents: 3000 }, { id: d.id });
 
     expect((await c.call(move.POST, "POST", "/x", { stage: "NEGOTIATION" }, { id: d.id })).data.item.stage).toBe("NEGOTIATION");
-    const paid = (await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
+    // o pagamento entra na conta do Financeiro (a primeira ativa)
+    const userId = (await prisma.milesDeal.findUniqueOrThrow({ where: { id: d.id } })).userId;
+    const pj = await prisma.finAccount.create({ data: { userId, name: "Nubank PJ" } });
+    await c.call(faceRoute.POST, "POST", "/x", { status: "NOT_NEEDED" }, { id: d.id });
+    expect((await sendFile(ticket.POST, d.id, Buffer.from("%PDF-1.4\n"), "bilhete.pdf")).status).toBe(201); // para poder voltar a Emitido
+    const paid =(await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item;
     expect(paid.saleId).toBeTruthy();
     expect(await acc(lat)).toMatchObject({ balance: 10000, costCents: 25000 });
     const s = await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId }, include: { items: true } });
-    expect(s).toMatchObject({ points: 10000, totalCents: 30000 });
+    expect(s).toMatchObject({ points: 10000, totalCents: 30000, finAccountId: pj.id });
     expect(s.paidAt).toBeTruthy(); // com o comprovante a venda já entra paga
-    expect(paid.paidAt).toBe(s.paidAt!.toISOString());
+    expect(paid).toMatchObject({ paidAt: s.paidAt!.toISOString(), paidAccount: "Nubank PJ" });
+    // de volta para Emitido: a receber, sai da conta; em Pago de novo, volta para ela
+    expect((await c.call(move.POST, "POST", "/x", { stage: "ISSUED" }, { id: d.id })).data.item).toMatchObject({ paidAt: null, paidAccount: null });
+    expect((await prisma.sale.findUniqueOrThrow({ where: { id: paid.saleId } })).finAccountId).toBeNull();
+    expect((await c.call(move.POST, "POST", "/x", { stage: "PAID" }, { id: d.id })).data.item.paidAccount).toBe("Nubank PJ");
     expect(s.items[0]).toMatchObject({ kind: "OTHER", clientType: "AGENCY", points: 10000, salePriceCents: 30000 });
-    expect(await prisma.saleAttachment.findMany({ where: { saleId: paid.saleId }, select: { name: true } })).toEqual([{ name: "comprovante.pdf" }]);
+    expect(await prisma.saleAttachment.findMany({ where: { saleId: paid.saleId }, select: { name: true }, orderBy: { name: "asc" } })).toEqual([{ name: "bilhete.pdf" }, { name: "comprovante.pdf" }]);
     // venda lançada: o comprovante não sai mais da negociação (está nos anexos da venda)
     const delRec = await receipt.DELETE(new Request("http://localhost:3100/x", { method: "DELETE", headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: d.id }) });
     expect(delRec.status).toBe(409);

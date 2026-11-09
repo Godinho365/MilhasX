@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
-import { createSale, type SaleCost } from "./sales";
+import { createSale, defaultFinAccountId, type SaleCost } from "./sales";
 import { brDay } from "@/domain/brasilia";
 import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
@@ -33,7 +33,7 @@ const include = {
   account: { select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true } }, holder: { select: { name: true, phone: true } } } },
   ticket: { select: { name: true, size: true, createdAt: true } }, // sem os bytes
   receipt: { select: { name: true, size: true, createdAt: true } },
-  sale: { select: { occurredAt: true, paidAt: true, items: { where: { issuedWith: "POINTS" }, select: { costs: true } } } }, // datas da venda e do pagamento (dashboard e quadro)
+  sale: { select: { occurredAt: true, paidAt: true, finAccount: { select: { name: true } }, items: { where: { issuedWith: "POINTS" }, select: { costs: true } } } }, // datas da venda e do pagamento (dashboard e quadro)
 } as const;
 type Row = Prisma.MilesDealGetPayload<{ include: typeof include }>;
 
@@ -81,6 +81,7 @@ const view = (d: Row) => {
     soldAt: d.sale?.occurredAt.toISOString() ?? null,
     // venda lançada e paga (vazio = a receber)
     paidAt: d.sale?.paidAt?.toISOString() ?? null,
+    paidAccount: d.sale?.finAccount?.name ?? null, // conta do Financeiro em que o pagamento entrou
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
     chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
@@ -312,11 +313,12 @@ async function copyFilesToSale(userId: string, dealId: string, saleId: string) {
   }
 }
 
-/** Venda da negociação paga hoje (se ainda estava a receber) ou de volta a receber. */
-async function setSalePaidFromDeal(saleId: string, paid: boolean) {
+/** Venda da negociação paga hoje (se ainda estava a receber), entrando na conta padrão do Financeiro (a conta
+ *  se troca em Vendas), ou de volta a receber (sai da conta). */
+async function setSalePaidFromDeal(userId: string, saleId: string, paid: boolean) {
   await prisma.sale.updateMany({
     where: { id: saleId, paidAt: paid ? null : { not: null } },
-    data: { paidAt: paid ? new Date(`${brDay()}T00:00:00Z`) : null },
+    data: paid ? { paidAt: new Date(`${brDay()}T00:00:00Z`), finAccountId: await defaultFinAccountId(userId) } : { paidAt: null, finAccountId: null },
   });
 }
 
@@ -331,10 +333,10 @@ export async function moveDeal(userId: string, id: string, stage: MilesDealStage
   if (stage === "PAID" && d.stage !== "PAID" && !(await prisma.milesDealReceipt.count({ where: { dealId: id } }))) throw new DomainError(409, "Anexe o comprovante de pagamento para marcar como paga");
   const saleId = selling && !d.saleId ? await closeAsSale(userId, d) : d.saleId;
   if (saleId && stage === "PAID") {
-    await setSalePaidFromDeal(saleId, true);
+    await setSalePaidFromDeal(userId, saleId, true);
     await copyFilesToSale(userId, d.id, saleId); // o comprovante vai para os anexos da venda
   }
-  if (saleId && stage === "ISSUED" && d.stage === "PAID") await setSalePaidFromDeal(saleId, false);
+  if (saleId && stage === "ISSUED" && d.stage === "PAID") await setSalePaidFromDeal(userId, saleId, false);
   await prisma.$transaction(async (tx) => {
     const column = await tx.milesDeal.findMany({ where: { userId, stage, archivedAt: null, NOT: { id } }, orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { id: true } });
     const at = Math.max(0, Math.min(position ?? column.length, column.length));

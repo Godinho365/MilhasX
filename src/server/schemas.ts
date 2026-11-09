@@ -531,6 +531,7 @@ export const saleRefundSchema = z.object({
 export const salePaymentSchema = z.object({
   paid: z.boolean(),
   date: dateStr.optional(),
+  accountId: id.nullable().optional(), // conta do Financeiro em que o dinheiro entrou (null = fora das contas)
 });
 export const saleTagsSchema = z.object({
   tags: z.array(z.string().trim().min(1, "Etiqueta vazia").max(30, "Etiqueta com mais de 30 letras")).max(10, "No máximo 10 etiquetas"),

@@ -171,7 +171,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             ))}
           </div>
         )}
-        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>, {deal.paidAt ? `paga em ${fmtDate(deal.paidAt)}` : "a receber"}. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
+        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>, {deal.paidAt ? `paga em ${fmtDate(deal.paidAt)}${deal.paidAccount ? `, na conta ${deal.paidAccount}` : ""}` : "a receber"}. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
         {deal && onMove && !deal.saleId && (deal.stage === "ISSUED" || deal.stage === "PAID") && (
           <Alert kind="info">
             Esta negociação {deal.stage === "PAID" ? "está paga" : "foi emitida"}, mas a venda ainda não está em Vendas.{" "}

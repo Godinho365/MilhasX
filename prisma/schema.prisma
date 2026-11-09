@@ -414,7 +414,9 @@ model Sale {
   refundMilesReceivedAt  DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
   refundTaxReceivedAt    DateTime? // estorno da taxa de embarque e dos repasses pela companhia
   paidAt                 DateTime? // cliente pagou (vazio = a receber)
-  tags                   String[]         @default([]) // etiquetas livres para filtrar
+  finAccountId           String? // conta do Financeiro em que o pagamento entrou (soma no saldo dela)
+  finAccount             FinAccount?      @relation(fields: [finAccountId], references: [id], onDelete: SetNull)
+  tags                 String[]         @default([]) // etiquetas livres para filtrar
   nfNumber               String? // nota fiscal de serviço emitida para a venda
   nfIssuedAt             DateTime?
   partnerId              String? // parceiro que trouxe a venda (comissão)
@@ -1184,6 +1186,7 @@ model FinAccount {
   outgoing     FinTransaction[]  @relation("FinFrom")
   incoming     FinTransaction[]  @relation("FinTo")
   billPayments CardBillPayment[]
+  sales        Sale[] // vendas recebidas nesta conta
 
   @@index([userId])
 }

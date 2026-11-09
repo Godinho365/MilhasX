@@ -258,9 +258,14 @@ export async function listFinAccounts(userId: string, book?: Book) {
     prisma.finAccount.findMany({ where: { userId }, orderBy: [{ archived: "asc" }, { createdAt: "asc" }] }),
     book ?? financeBook(userId),
   ]);
-  // compra no cartão não mexe na conta; o pagamento da fatura sai da conta escolhida nele
-  const all = [...b.manualPlain, ...b.billCash];
-  return accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind, color: a.color, archived: a.archived, initialCents: a.initialCents, balanceCents: accountBalance(a.id, a.initialCents, all) }));
+  // compra no cartão não mexe na conta; o pagamento da fatura sai da conta escolhida nele; a venda paga entra na
+  // conta em que foi recebida
+  const received = b.autoPlain.filter((t) => t.source === "sales" && t.accountId && t.paidAt);
+  const all = [...b.manualPlain, ...b.billCash, ...received];
+  return accounts.map((a) => ({
+    id: a.id, name: a.name, kind: a.kind, color: a.color, archived: a.archived, initialCents: a.initialCents, balanceCents: accountBalance(a.id, a.initialCents, all),
+    salesCents: sumCents(received.filter((t) => t.accountId === a.id)), // vendas recebidas nela
+  }));
 }
 
 export async function saveFinAccount(userId: string, id: string | null, input: FinAccountInput) {
@@ -273,9 +278,9 @@ export async function saveFinAccount(userId: string, id: string | null, input: F
 
 /** Conta com lançamentos é arquivada (o histórico fica); vazia é excluída. */
 export async function deleteFinAccount(userId: string, id: string) {
-  const a = await prisma.finAccount.findFirst({ where: { id, userId }, include: { _count: { select: { outgoing: true, incoming: true, billPayments: true } } } });
+  const a = await prisma.finAccount.findFirst({ where: { id, userId }, include: { _count: { select: { outgoing: true, incoming: true, billPayments: true, sales: true } } } });
   if (!a) throw new DomainError(404, "Conta não encontrada");
-  if (a._count.outgoing + a._count.incoming + a._count.billPayments > 0) {
+  if (a._count.outgoing + a._count.incoming + a._count.billPayments + a._count.sales > 0) {
     await prisma.finAccount.update({ where: { id }, data: { archived: true } });
     return "archived" as const;
   }
@@ -461,7 +466,7 @@ async function automaticCashTxs(userId: string, ctx: CardCtx): Promise<Tx[]> {
     prisma.sale.findMany({
       where: { userId },
       select: {
-        id: true, groupId: true, occurredAt: true, paidAt: true, totalCents: true, refundedAt: true, refundFeeCents: true, origin: true, partnerCommissionCents: true, customer: { select: { name: true } },
+        id: true, groupId: true, occurredAt: true, paidAt: true, finAccountId: true, totalCents: true, refundedAt: true, refundFeeCents: true, origin: true, partnerCommissionCents: true, customer: { select: { name: true } },
         items: { select: { issuedWith: true, points: true, cashCostCents: true, supplierCpmCents: true, costs: true } },
       },
     }),
@@ -475,7 +480,7 @@ async function automaticCashTxs(userId: string, ctx: CardCtx): Promise<Tx[]> {
     return purchaseTxs({ day: day(e.occurredAt), costs, installments: pay?.installments, anticipated: pay?.anticipated, description: e.description, ref: { kind: "entry", id: e.id } }, today);
   });
   const fromSales = sales.flatMap((s) => saleTxs({
-    day: day(s.occurredAt), paidAt: s.paidAt ? day(s.paidAt) : null, totalCents: s.totalCents, refunded: !!s.refundedAt, refundFeeCents: s.refundFeeCents,
+    day: day(s.occurredAt), paidAt: s.paidAt ? day(s.paidAt) : null, accountId: s.finAccountId, totalCents: s.totalCents, refunded: !!s.refundedAt, refundFeeCents: s.refundFeeCents,
     description: `Custos da venda${s.customer ? ` · ${s.customer.name}` : ""}`, ref: { kind: "sale", id: s.groupId ?? s.id },
     costs: [
       ...s.items.flatMap((i) => [

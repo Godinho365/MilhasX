@@ -291,6 +291,7 @@ const saleInclude = {
   items: { include: { entry: { select: { costCents: true } }, customers: { select: { id: true, name: true } } }, orderBy: { position: "asc" as const } },
   _count: { select: { attachments: true } },
   partner: { select: { id: true, name: true } },
+  finAccount: { select: { name: true } },
 } satisfies Prisma.SaleInclude;
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
@@ -336,6 +337,8 @@ function present(s: SaleRow) {
     customers: [...new Map(s.items.flatMap((i) => i.customers).map((c) => [c.id, c.name])).values()],
     reservations: [...new Set(s.items.map((i) => i.reservation?.trim()).filter((r): r is string => !!r))],
     paidAt: s.paidAt?.toISOString() ?? null,
+    finAccountId: s.finAccountId, // conta do Financeiro em que o pagamento entrou
+    finAccount: s.finAccount?.name ?? null,
     tags: s.tags,
     // reembolsada: as milhas voltaram, então não contam como vendidas (os números da venda ficam em refund);
     // os CPFs continuam gastos na conta e são a base da taxa de administração
@@ -554,13 +557,22 @@ export async function deleteSaleAttachment(userId: string, saleId: string, id: s
   if (!count) throw new DomainError(404, "Anexo não encontrado");
 }
 
-/** Cliente pagou (com a data) ou volta para "a receber". */
-export async function setSalePaid(userId: string, id: string, input: { paid: boolean; date?: Date }) {
-  const s = await prisma.sale.findFirst({ where: { id, userId }, select: { id: true, occurredAt: true } });
+/** Conta do Financeiro que recebe as vendas quando nenhuma é escolhida: a primeira ativa (ou nenhuma). */
+export async function defaultFinAccountId(userId: string) {
+  const a = await prisma.finAccount.findFirst({ where: { userId, archived: false }, orderBy: { createdAt: "asc" }, select: { id: true } });
+  return a?.id ?? null;
+}
+
+/** Cliente pagou (com a data e a conta em que o dinheiro entrou) ou volta para "a receber" (sai da conta).
+ *  Sem conta informada (undefined), fica a que a venda já tinha, ou a conta padrão; null = fora das contas. */
+export async function setSalePaid(userId: string, id: string, input: { paid: boolean; date?: Date; accountId?: string | null }) {
+  const s = await prisma.sale.findFirst({ where: { id, userId }, select: { id: true, occurredAt: true, finAccountId: true } });
   if (!s) throw new DomainError(404, "Venda não encontrada");
   const date = input.date ?? new Date(`${brDay()}T00:00:00Z`);
   if (input.paid && date.toISOString().slice(0, 10) < saleDay(s.occurredAt)) throw new DomainError(400, "O pagamento não pode ser antes da venda");
-  await prisma.sale.update({ where: { id: s.id }, data: { paidAt: input.paid ? date : null } });
+  if (input.paid && input.accountId && !(await prisma.finAccount.count({ where: { id: input.accountId, userId } }))) throw new DomainError(404, "Conta não encontrada");
+  const finAccountId = !input.paid ? null : input.accountId !== undefined ? input.accountId : s.finAccountId ?? (await defaultFinAccountId(userId));
+  await prisma.sale.update({ where: { id: s.id }, data: { paidAt: input.paid ? date : null, finAccountId } });
   return getSale(userId, s.id);
 }
 

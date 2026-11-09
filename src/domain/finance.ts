@@ -119,11 +119,12 @@ export function purchaseTxs(p: { day: string; costs: PaidCost[]; installments?: 
 }
 
 /** Venda no fluxo de caixa: entra o que o cliente paga, na data da venda (realizado quando a venda está paga);
- *  reembolsada, só a taxa de administração que fica. Os custos pagos na emissão (fornecedor, emissão em dinheiro,
- *  taxas repassadas, comissão) saem na data da venda, ou na fatura do cartão. */
-export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[]; description?: string | null; ref?: TxRef | null }, today: string): Tx[] {
+ *  reembolsada, só a taxa de administração que fica. Recebida numa conta (accountId), soma no saldo dela. Os custos
+ *  pagos na emissão (fornecedor, emissão em dinheiro, taxas repassadas, comissão) saem na data da venda, ou na
+ *  fatura do cartão. */
+export function saleTxs(s: { day: string; paidAt: string | null; totalCents: number; refunded: boolean; refundFeeCents: number; costs: PaidCost[]; accountId?: string | null; description?: string | null; ref?: TxRef | null }, today: string): Tx[] {
   const amountCents = s.refunded ? s.refundFeeCents : s.totalCents;
-  const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: "", toAccountId: null, amountCents, category: AUTO_CATEGORY.sales, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
+  const income: Tx[] = amountCents > 0 ? [{ type: "INCOME", accountId: s.accountId ?? "", toAccountId: null, amountCents, category: AUTO_CATEGORY.sales, competence: s.day, dueDate: s.day, paidAt: s.paidAt, source: "sales" }] : [];
   if (s.refunded) return income; // milhas e taxas voltaram: os custos da emissão se desfazem
   return [...income, ...s.costs.filter((c) => c.amountCents > 0).map((c) => outflow(c.card ? cardDueDay(s.day, c.card) : s.day, c.amountCents, "saleCosts", s.day, today, { cardId: c.cardId, description: s.description, ref: s.ref }))];
 }
