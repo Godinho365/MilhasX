@@ -533,6 +533,11 @@ export const telegramPhoneSchema = z.object({ phone: z.string().trim().min(8, "I
 export const telegramCodeSchema = z.object({ code: z.string().trim().min(1, "Informe o código").max(12) });
 export const telegramPasswordSchema = z.object({ password: z.string().min(1, "Informe a senha de duas etapas").max(256) });
 export const telegramGroupSchema = z.object({ groupId: z.string().trim().regex(/^-?\d{1,20}$/, "Grupo inválido") });
+export const telegramAlertSchema = z.object({
+  name: z.string().trim().max(60).optional(),
+  words: z.array(z.string().trim().max(40, "Palavra longa demais")).min(1, "Informe ao menos uma palavra").max(10, "Até 10 palavras por alerta"),
+  active: z.boolean().optional(),
+});
 
 export const salePaymentSchema = z.object({
   paid: z.boolean(),

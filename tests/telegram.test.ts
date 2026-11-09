@@ -9,15 +9,27 @@ import * as account from "@/app/api/telegram/accounts/[id]/route";
 import * as codeRoute from "@/app/api/telegram/accounts/[id]/code/route";
 import * as passwordRoute from "@/app/api/telegram/accounts/[id]/password/route";
 import * as groupsRoute from "@/app/api/telegram/accounts/[id]/groups/route";
-import { setTelegramClientFactory, normalizePhone, maskPhone, MAX_TELEGRAM_ACCOUNTS, type TgClient } from "@/server/services/telegram";
+import * as messagesRoute from "@/app/api/telegram/accounts/[id]/messages/route";
+import * as alertsRoute from "@/app/api/telegram/alerts/route";
+import * as alertRoute from "@/app/api/telegram/alerts/[id]/route";
+import * as feedRoute from "@/app/api/telegram/alerts/feed/route";
+import { setTelegramClientFactory, normalizePhone, maskPhone, MAX_TELEGRAM_ACCOUNTS, type TgClient, type TgMessage } from "@/server/services/telegram";
+import { matchAlerts, parseAlertWords } from "@/domain/telegram-alerts";
 import { decrypt } from "@/server/services/accounts";
 import { prisma } from "@/server/db";
+import { Prisma } from "@prisma/client";
 
 process.env.TELEGRAM_API_ID ||= "1";
 process.env.TELEGRAM_API_HASH ||= "teste";
 process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
+/** Mensagens dos grupos simulados (pelo id do grupo), da mais antiga para a mais nova. */
+const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media });
+const MSGS: Record<string, TgMessage[]> = {
+  "1234": [msg(1, 10, "Ana", "Compro 100k LATAM a R$ 25"), msg(2, 11, "Bia", "Bom dia, pessoal"), msg(3, 12, "Caio", "", "foto"), msg(4, 13, "Duda", "Vendo Smiles 50k")],
+  "5678": [msg(10, 12, "Eva", "compro latam 30K urgente"), msg(11, 14, "Fábio", "Promoção Azul")],
+};
 let calls: string[] = [];
 /** Telegram simulado. Sessão "etapa:número" (code → 2fa → ok); código certo 12345; senha só nos números em
  *  `withPassword`; `revoked` = sessões encerradas pelo app do Telegram. */
@@ -45,7 +57,17 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
       me: async () => `Conta ${phone().slice(-4)}`,
       groups: async () => {
         if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
-        return [{ id: "-1001234", title: "Balcão de Milhas ASM", channel: false }, { id: "-1005678", title: "Balcão Milhas VIP", channel: false }, { id: "-1009999", title: "Promoções", channel: true }];
+        calls.push(`groups ${phone()}`);
+        return [
+          { id: "-1001234", title: "Balcão de Milhas ASM", channel: false, peer: { kind: "channel", id: "1234", hash: "h1" } },
+          { id: "-1005678", title: "Balcão Milhas VIP", channel: false, peer: { kind: "channel", id: "5678", hash: "h2" } },
+          { id: "-1009999", title: "Promoções", channel: true, peer: { kind: "channel", id: "9999", hash: "h3" } },
+        ];
+      },
+      messages: async (peer, { limit, minId }) => {
+        if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
+        calls.push(`messages ${peer.id}`);
+        return (MSGS[peer.id] ?? []).filter((m) => !minId || m.id > minId).slice(-limit);
       },
       logOut: async () => { calls.push(`logOut ${phone()}`); },
     };
@@ -156,5 +178,95 @@ describe("Telegram", () => {
     } finally {
       process.env.TELEGRAM_API_ID = apiId;
     }
+  });
+});
+
+/** Conecta a conta (código 12345, sem senha) e escolhe o grupo; devolve o id da conta. */
+async function connected(phone: string, groupId: string) {
+  await start(phone);
+  const id = await idOf(phone.slice(-4));
+  await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id });
+  await c.call(groupsRoute.POST, "POST", "/x", { groupId }, { id });
+  return id;
+}
+
+describe("Chat Balcões", () => {
+  it("alertas: todas as palavras, sem diferenciar maiúsculas e acentos; pausado não dispara", () => {
+    expect(parseAlertWords(" latam, compro ,, LATAM\nurgente;30k")).toEqual(["latam", "compro", "urgente", "30k"]);
+    const rules = [
+      { id: "1", name: "Compra LATAM", words: ["latam", "compro"], active: true },
+      { id: "2", name: "Promoção", words: ["promocao"], active: true },
+      { id: "3", name: "Pausado", words: ["latam"], active: false },
+    ];
+    expect(matchAlerts("Compro 100k LATAM a R$ 25", rules)).toEqual(["Compra LATAM"]);
+    expect(matchAlerts("Vendo LATAM", rules)).toEqual([]);
+    expect(matchAlerts("PROMOÇÃO Azul", rules)).toEqual(["Promoção"]);
+  });
+
+  it("mensagens do grupo de cada conta, só as novas depois, com os alertas destacados", async () => {
+    const a = await connected("11999998888", "-1001234");
+    // o acesso direto ao grupo fica guardado ao escolher
+    expect((await prisma.telegramLink.findUniqueOrThrow({ where: { id: a } })).groupPeer).toEqual({ kind: "channel", id: "1234", hash: "h1" });
+    await c.call(alertsRoute.POST, "POST", "/x", { words: ["latam", "compro"] });
+
+    const all = (await c.call(messagesRoute.GET, "GET", "/api/telegram/accounts/x/messages?limit=60", undefined, { id: a })).data.items;
+    expect(all.map((m: { id: number }) => m.id)).toEqual([1, 2, 3, 4]);
+    expect(all[0]).toMatchObject({ sender: "Ana", text: "Compro 100k LATAM a R$ 25", alerts: ["latam + compro"] });
+    expect(all[2]).toMatchObject({ text: "", media: "foto", alerts: [] });
+    const newer = (await c.call(messagesRoute.GET, "GET", "/api/telegram/accounts/x/messages?minId=2", undefined, { id: a })).data.items;
+    expect(newer.map((m: { id: number }) => m.id)).toEqual([3, 4]);
+
+    // conta que escolheu o grupo antes de existir o acesso direto: busca nos chats uma vez e guarda
+    await prisma.telegramLink.update({ where: { id: a }, data: { groupPeer: Prisma.DbNull } });
+    calls = [];
+    await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a });
+    await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a });
+    expect(calls).toEqual(["groups +5511999998888", "messages 1234", "messages 1234"]);
+
+    // sem grupo escolhido
+    await start("21977776666");
+    const b = await idOf("6666");
+    await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id: b });
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: b })).data.erro).toMatch(/Escolha o grupo do balcão/);
+  });
+
+  it("cadastra, pausa e exclui alertas; a aba Alertas junta as mensagens de todos os chats", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const b = await connected("21977776666", "-1005678");
+    let r = await c.call(alertsRoute.POST, "POST", "/x", { name: "Compra LATAM", words: ["latam", " compro ", "LATAM"] });
+    expect([r.status, r.data.items]).toEqual([201, [expect.objectContaining({ name: "Compra LATAM", words: ["latam", "compro"], active: true })]]);
+    r = await c.call(alertsRoute.POST, "POST", "/x", { words: ["smiles"] });
+    const [latam, smiles] = r.data.items;
+    expect(smiles.name).toBe("smiles");
+    expect((await c.call(alertsRoute.POST, "POST", "/x", { words: [] })).status).toBe(400);
+
+    const feed = (await c.call(feedRoute.GET, "GET", "/x")).data;
+    expect(feed.errors).toEqual([]);
+    expect(feed.items.map((m: { chat: string; id: number; alerts: string[] }) => [m.chat, m.id, m.alerts])).toEqual([
+      ["Balcão de Milhas ASM", 4, ["smiles"]],
+      ["Balcão Milhas VIP", 10, ["Compra LATAM"]],
+      ["Balcão de Milhas ASM", 1, ["Compra LATAM"]],
+    ]);
+    expect(feed.items[1].chatId).toBe(b);
+
+    // pausar tira do feed; excluir some
+    await c.call(alertRoute.PUT, "PUT", "/x", { name: latam.name, words: latam.words, active: false }, { id: latam.id });
+    expect((await c.call(feedRoute.GET, "GET", "/x")).data.items.map((m: { id: number }) => m.id)).toEqual([4]);
+    expect((await c.call(alertRoute.DELETE, "DELETE", "/x", undefined, { id: smiles.id })).data.items).toHaveLength(1);
+
+    // um chat com a sessão encerrada não derruba a aba: aparece em errors
+    await c.call(alertRoute.PUT, "PUT", "/x", { name: latam.name, words: latam.words, active: true }, { id: latam.id });
+    await prisma.telegramLink.update({ where: { id: a }, data: { sessionEnc: (await prisma.telegramLink.findUniqueOrThrow({ where: { id: b } })).sessionEnc.replace(/./, "x") } });
+    const partial = (await c.call(feedRoute.GET, "GET", "/x")).data;
+    expect(partial.items.map((m: { id: number }) => m.id)).toEqual([10]);
+    expect(partial.errors).toEqual([expect.objectContaining({ chatId: a, chat: "Balcão de Milhas ASM" })]);
+
+    // de outro usuário: nada
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(alertsRoute.GET, "GET", "/x")).data.items).toEqual([]);
+    expect((await o.call(alertRoute.DELETE, "DELETE", "/x", undefined, { id: latam.id })).status).toBe(404);
+    expect((await o.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).status).toBe(404);
+    expect((await o.call(feedRoute.GET, "GET", "/x")).data).toEqual({ ok: true, items: [], errors: [] });
   });
 });

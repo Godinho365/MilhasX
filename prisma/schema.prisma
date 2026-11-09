@@ -140,6 +140,7 @@ model User {
   milesLeads          MilesLead[]
   contractSignatures  ContractSignature[]
   telegramLinks       TelegramLink[]
+  telegramAlerts      TelegramAlert[]
 }
 
 /// Conta do Telegram do usuário (pode ter várias), conectada para ler o grupo do balcão (só leitura). A sessão dá
@@ -157,10 +158,24 @@ model TelegramLink {
   accountName   String? // conta conectada (nome e @usuário)
   groupId       String? // grupo do balcão escolhido
   groupTitle    String?
+  groupPeer     Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@unique([userId, phone])
+  @@index([userId])
+}
+
+/// Alerta do Chat Balcões: destaca e avisa quando uma mensagem dos grupos tem todas as palavras dele.
+model TelegramAlert {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  words     String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
   @@index([userId])
 }
 
