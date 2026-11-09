@@ -14,6 +14,15 @@ export const BUYER_TYPES = ["AGENCY", "BALCAO", "FINAL"] as const;
 export type BuyerType = (typeof BUYER_TYPES)[number];
 export const BUYER_LABELS: Record<BuyerType, string> = { AGENCY: "Agência / revendedor", BALCAO: "Balcão / plataforma", FINAL: "Cliente final" };
 
+/** Balcões que já vêm na lista ao criar a negociação. */
+export const DEFAULT_BALCOES = ["Balcão de Milhas ASM", "Balcão Milhas VIP", "Balcão MilhasX"];
+
+/** Balcões para escolher: os que já vêm na lista e os usados nas negociações (um balcão novo entra na lista
+ *  quando a negociação é salva), sem repetir, em ordem alfabética. */
+export function balcaoOptions(usedNames: string[]) {
+  return [...new Set([...DEFAULT_BALCOES, ...usedNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
 /** Valor da venda: pontos pelo preço do milheiro. */
 export const dealTotalCents = (points: number | null, saleCpmCents: number | null) => (points && saleCpmCents ? Math.round((points * saleCpmCents) / 1000) : null);
 
