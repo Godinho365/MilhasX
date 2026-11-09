@@ -149,6 +149,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   const [opening, setOpening] = useState<number | null>(null);
   const [replying, setReplying] = useState<Msg | null>(null); // a mensagem que vai ser respondida (contraproposta)
   const [editing, setEditing] = useState<Msg | null>(null); // a sua mensagem que está sendo editada
+  const [alsoPrivate, setAlsoPrivate] = useState(true); // contraproposta: mandar também no privado do autor
   // limpo só no app até esta mensagem (no Telegram nada muda)
   const [cleared, setCleared] = useState<number | null>((group ? source.chat.clearedUpTo : source.dm.clearedUpTo) ?? null);
   const clearUrl = group ? `/api/telegram/chats/${source.chat.id}/clear` : `/api/telegram/dms/${source.dm.id}/clear`;
@@ -184,10 +185,12 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     if (!text.trim() || sending) return;
+    const rep = replying; // guardado: a contraproposta vai também no privado do autor
+    const body = text;
     setSending(true);
     const r = editing
       ? await api<{ item: Msg }>(`${url}/${editing.id}`, "PATCH", { text })
-      : await api<{ item: Msg }>(url, "POST", { text, ...(replying ? { replyTo: replying.id } : {}) });
+      : await api<{ item: Msg }>(url, "POST", { text, ...(rep ? { replyTo: rep.id } : {}) });
     setSending(false);
     if (!r.ok) return toast(r.erro, "error");
     const item = r.data.item;
@@ -200,6 +203,16 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
     }
     stick.current = true;
     setMsgs((cur) => (cur?.some((m) => m.id === item.id) ? cur : [...(cur ?? []), item]));
+    // contraproposta a um pedido: manda a mesma no privado do autor (um só clique faz os dois)
+    if (source.kind === "group" && rep?.ad && alsoPrivate && onDm) void alsoDmOffer(source.chat.id, rep, body);
+  }
+  /** Depois da contraproposta no grupo, abre o privado com o autor do pedido e manda a mesma mensagem. */
+  async function alsoDmOffer(chatId: string, ad: Msg, body: string) {
+    const d = await api<{ item: Dm }>(`/api/telegram/chats/${chatId}/dms`, "POST", { messageId: ad.id });
+    if (!d.ok) return toast(`Contraproposta no grupo enviada; não consegui abrir o privado de ${ad.sender}: ${d.erro}`, "error");
+    const pm = await api(`/api/telegram/dms/${d.data.item.id}/messages`, "POST", { text: body });
+    if (!pm.ok) return toast(`No grupo enviada; no privado de ${ad.sender} falhou: ${pm.erro}`, "error");
+    toast(`Contraproposta também no privado de ${ad.sender}`);
   }
   function reply(m: Msg) {
     setEditing(null);
@@ -323,6 +336,12 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
             </div>
             <button type="button" onClick={cancel} className="shrink-0 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={editing ? "Cancelar a edição" : replying!.ad ? "Cancelar a contraproposta" : "Cancelar a resposta"} title="Cancelar (Esc)"><X className="h-4 w-4" /></button>
           </div>
+        )}
+        {source.kind === "group" && replying?.ad && onDm && !editing && (
+          <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs text-muted">
+            <input type="checkbox" checked={alsoPrivate} onChange={(e) => setAlsoPrivate(e.target.checked)} className="h-3.5 w-3.5 accent-accent-light" />
+            Mandar também no privado de <b className="text-zinc-200">{replying.sender}</b>
+          </label>
         )}
         <div className="flex items-end gap-2">
           <textarea
