@@ -4,6 +4,7 @@ import { prisma, DomainError } from "../db";
 import { beneficiaryUsage } from "./accounts";
 import { listSales, saleCpfs } from "./sales";
 import { DEFAULT_PTS_PER_CPF, accountLeftover, accountSpace, leftoverAfter, capacityPotential, emissionFit, rankForEmission } from "@/domain/capacity";
+import type { EmissionAccount } from "@/domain/balcao-ads";
 
 const OPEN_STAGES = ["NEW", "NEGOTIATION", "AWAITING", "ISSUED"] as const;
 
@@ -58,7 +59,30 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
   return { avg, rows };
 }
 
-export type FitInput = { points?: number | null; cpfs?: number | null; accountId?: string | null; orderLink?: string | null };
+/** Contas que podem emitir pedidos do balcão (Chat Balcões): saldo livre (sem o reservado em negociações abertas),
+ *  CPFs livres (null = conta sem limite) e custo médio do milheiro. Só contas com saldo. */
+export async function emissionAccounts(userId: string): Promise<EmissionAccount[]> {
+  const [usage, accounts, deals] = await Promise.all([
+    beneficiaryUsage(userId),
+    prisma.account.findMany({ where: { userId, archived: false, balance: { gt: 0 } }, select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true, code: true } }, holder: { select: { name: true } } } }),
+    prisma.milesDeal.findMany({ where: { userId, archivedAt: null, saleId: null, stage: { in: [...OPEN_STAGES] }, accountId: { not: null } }, select: { accountId: true, points: true } }),
+  ]);
+  const reservedBy = new Map<string, number>();
+  for (const d of deals) reservedBy.set(d.accountId!, (reservedBy.get(d.accountId!) ?? 0) + (d.points ?? 0));
+  return accounts
+    .map((a) => {
+      const u = usage[a.id];
+      return {
+        id: a.id, label: a.nickname || `${a.program.name} ${shortName(a.holder.name)}`, programCode: a.program.code.toUpperCase(),
+        available: a.balance - (reservedBy.get(a.id) ?? 0),
+        cpfFree: u?.limit != null ? Math.max(0, u.limit - u.used) : null,
+        costCpmCents: Math.round((Math.max(0, a.costCents) * 1000) / a.balance),
+      };
+    })
+    .filter((a) => a.available > 0);
+}
+
+export type FitInput ={ points?: number | null; cpfs?: number | null; accountId?: string | null; orderLink?: string | null };
 
 /** Para a negociação: em cada conta, quantos CPFs novos a emissão ocupa (passageiro que já é beneficiário
  *  na janela não conta), como fica o saldo e se sobra milha sem CPF. Em ordem de sugestão.

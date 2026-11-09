@@ -40,6 +40,10 @@ export interface TgClient {
   messages(peer: TgPeer, opts: { limit: number; minId?: number }): Promise<TgMessage[]>;
   /** Manda a mensagem no chat (replyTo = como resposta a uma mensagem) e devolve como ela ficou. */
   send(peer: TgPeer, text: string, replyTo?: number): Promise<TgMessage>;
+  /** Troca o texto de uma mensagem da conta. */
+  edit(peer: TgPeer, id: number, text: string): Promise<TgMessage>;
+  /** Apaga uma mensagem da conta para todos. */
+  remove(peer: TgPeer, id: number): Promise<void>;
   /** Quem mandou a mensagem do grupo, com o acesso para o privado (null = não é de uma pessoa). */
   author(group: TgPeer, messageId: number): Promise<TgUser | null>;
   logOut(): Promise<void>;
@@ -128,6 +132,8 @@ function gramClient(session: string): TgClient {
       return list.filter((m) => m instanceof Api.Message).map(toMessage).reverse();
     },
     send: async (peer, text, replyTo) => toMessage(await c.sendMessage(inputPeer(peer), { message: text, ...(replyTo ? { replyTo } : {}) })),
+    edit: async (peer, id, text) => toMessage(await c.editMessage(inputPeer(peer), { message: id, text })),
+    remove: async (peer, id) => { await c.deleteMessages(inputPeer(peer), [id], { revoke: true }); },
     author: async (group, messageId) => {
       const [m] = await c.getMessages(inputPeer(group), { ids: [messageId] });
       if (!(m instanceof Api.Message) || !(m.fromId instanceof Api.PeerUser)) return null;
@@ -174,6 +180,12 @@ function tgError(e: unknown): never {
     USER_BANNED_IN_CHANNEL: [403, "Esta conta está proibida de escrever neste grupo"],
     MESSAGE_TOO_LONG: [400, "Mensagem longa demais para o Telegram"],
     MESSAGE_EMPTY: [400, "Escreva a mensagem"],
+    // editar e excluir
+    MESSAGE_AUTHOR_REQUIRED: [403, "Só dá para editar as suas mensagens"],
+    MESSAGE_DELETE_FORBIDDEN: [403, "Só dá para excluir as suas mensagens"],
+    MESSAGE_EDIT_TIME_EXPIRED: [400, "Passou o prazo do Telegram para editar esta mensagem"],
+    MESSAGE_NOT_MODIFIED: [400, "A mensagem ficou igual"],
+    MESSAGE_ID_INVALID: [404, "Mensagem não encontrada no Telegram"],
   };
   const k = known[msg];
   if (k) throw new DomainError(k[0], k[1]);
@@ -419,6 +431,22 @@ export async function sendToGroup(userId: string, id: string, raw: string, reply
   return { ...m, ad, alerts: [] as string[] };
 }
 
+/** Edita a mensagem da conta no grupo do balcão (a sua contraproposta, por exemplo). */
+export async function editGroupMessage(userId: string, id: string, messageId: number, raw: string) {
+  const text = messageText(raw);
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  const m = await guardSession(l, () => withPooled(l, (c) => c.edit(peer, messageId, text)));
+  return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
+}
+
+/** Exclui a mensagem da conta no grupo do balcão, para todos. */
+export async function deleteGroupMessage(userId: string, id: string, messageId: number) {
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  await guardSession(l, () => withPooled(l, (c) => c.remove(peer, messageId)));
+}
+
 /* ---------------- Privado ---------------- */
 
 const dmView = (d: { id: string; linkId: string; name: string; username: string | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
@@ -471,6 +499,18 @@ export async function sendTelegramDm(userId: string, dmId: string, raw: string, 
   const text = messageText(raw);
   const d = await ownDm(userId, dmId);
   return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text, replyTo))));
+}
+
+/** Edita ou exclui (text null) uma mensagem sua na conversa no privado. */
+export async function changeDmMessage(userId: string, dmId: string, messageId: number, raw: string | null) {
+  const d = await ownDm(userId, dmId);
+  const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
+  if (raw == null) {
+    await guardSession(d.link, () => withPooled(d.link, (c) => c.remove(peer, messageId)));
+    return null;
+  }
+  const text = messageText(raw);
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.edit(peer, messageId, text))));
 }
 
 /** Fecha a conversa aqui (no Telegram ela continua). */

@@ -4,13 +4,15 @@ import { requirePageUser } from "@/server/session";
 import { PageHeader } from "@/components/stat";
 import { Empty, Alert } from "@/components/ui";
 import { telegramStatus, listTelegramAlerts, listTelegramDms } from "@/server/services/telegram";
+import { emissionAccounts } from "@/server/services/capacity";
 import { ChatBalcoesClient } from "./client";
 
 // Chat Balcões: uma aba por grupo de balcão conectado (Configurações › Telegram), com as mensagens e o envio, as
 // conversas no privado abertas a partir dos grupos e a aba Alertas.
 export default async function ChatBalcoesPage() {
   const user = await requirePageUser();
-  const [st, alerts, dms] = await Promise.all([telegramStatus(user.id), listTelegramAlerts(user.id), listTelegramDms(user.id)]);
+  // contas com saldo: o lucro de cada pedido (e da contraproposta) sai do custo da conta mais barata que consegue emitir
+  const [st, alerts, dms, accounts] = await Promise.all([telegramStatus(user.id), listTelegramAlerts(user.id), listTelegramDms(user.id), emissionAccounts(user.id)]);
   const chats = st.accounts
     .filter((a) => a.status === "ACTIVE" && a.group)
     .map((a) => ({ id: a.id, title: a.group!.title, account: a.accountName ?? a.phone }));
@@ -25,7 +27,7 @@ export default async function ChatBalcoesPage() {
           <Link href="/app/settings?tab=telegram" className="btn-primary">Conectar o Telegram</Link>
         </Empty>
       ) : (
-        <ChatBalcoesClient chats={chats} initialAlerts={alerts} initialDms={dms} />
+        <ChatBalcoesClient chats={chats} initialAlerts={alerts} initialDms={dms} accounts={accounts} />
       )}
     </>
   );
