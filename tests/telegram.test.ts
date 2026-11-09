@@ -19,6 +19,8 @@ import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
 import * as crmRoute from "@/app/api/telegram/chats/[id]/crm/route";
 import * as chatRoute from "@/app/api/telegram/chats/[id]/route";
+import * as dealDmRoute from "@/app/api/miles-deals/[id]/telegram-dm/route";
+import * as dealsRoute from "@/app/api/miles-deals/route";
 import * as clearRoute from "@/app/api/telegram/chats/[id]/clear/route";
 import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
 import * as msgRoute from "@/app/api/telegram/chats/[id]/messages/[msgId]/route";
@@ -511,5 +513,27 @@ describe("registrar o pedido no CRM Milhas", () => {
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await o.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).status).toBe(404);
+  });
+});
+
+describe("negociação vinda do Chat Balcões: com quem está negociando", () => {
+  it("guarda quem postou e abre o privado com a pessoa a partir da negociação", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    expect(deal.telegramContact).toBe("Ana");
+    const dm = await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id });
+    expect([dm.status, dm.data.item]).toEqual([201, expect.objectContaining({ name: "Ana", group: "Balcão de Milhas ASM" })]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items.map((d: { id: string }) => d.id)).toEqual([dm.data.item.id]);
+    // negociação feita à mão: não tem com quem abrir
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect(manual.telegramContact).toBeNull();
+    expect((await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: manual.id })).status).toBe(400);
+    // grupo tirado do Chat Balcões
+    await c.call(chatRoute.DELETE, "DELETE", "/x", undefined, { id: asm });
+    expect((await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id })).data.erro).toMatch(/não está mais no Chat Balcões/);
+    // de outro usuário: não
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id })).status).toBe(404);
   });
 });

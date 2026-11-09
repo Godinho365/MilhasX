@@ -479,7 +479,7 @@ export async function registerAdInCrm(userId: string, chatId: string, input: { m
   ].filter(Boolean).join("\n");
   const deal = await createDeal(userId, {
     buyerType: "BALCAO", customerName: balcao, accountId: profit?.accountId ?? null, points: ad.miles, saleCpmCents: cpmCents ?? null,
-    passengers: ad.cpfs ?? 1, notes, sourceRef,
+    passengers: ad.cpfs ?? 1, notes, sourceRef, sourceContact: input.sender,
   });
   return input.cpmCents != null ? moveDeal(userId, deal.id, "NEGOTIATION") : deal;
 }
@@ -554,6 +554,17 @@ export async function openTelegramDm(userId: string, chatId: string, messageId: 
     include: DM_INCLUDE,
   });
   return dmView(d);
+}
+
+/** Chamar no privado quem postou o pedido de uma negociação registrada pelo Chat Balcões (pela conta do grupo). */
+export async function openDmFromDeal(userId: string, dealId: string) {
+  const d = await prisma.milesDeal.findFirst({ where: { id: dealId, userId }, select: { sourceRef: true } });
+  if (!d) throw new DomainError(404, "Negociação não encontrada");
+  const ref = d.sourceRef?.match(/^tg:([^:]+):(-?\d+):(\d+)$/);
+  if (!ref) throw new DomainError(400, "Esta negociação não veio de um pedido do Chat Balcões");
+  const chat = await prisma.telegramGroup.findFirst({ where: { userId, linkId: ref[1], groupId: ref[2] }, select: { id: true } });
+  if (!chat) throw new DomainError(409, "O grupo deste pedido não está mais no Chat Balcões: adicione de novo em Configurações › Telegram");
+  return openTelegramDm(userId, chat.id, Number(ref[3]));
 }
 
 async function ownDm(userId: string, dmId: string) {

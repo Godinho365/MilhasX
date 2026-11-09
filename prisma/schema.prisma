@@ -1201,7 +1201,8 @@ model MilesDeal {
   ticket          MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
   receipt         MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
   archivedAt      DateTime?
-  sourceRef       String? // de onde veio: "tg:<conta do Telegram>:<mensagem>" (pedido do Chat Balcões); um por pedido
+  sourceRef       String? // de onde veio: "tg:<conta do Telegram>:<grupo>:<mensagem>" (pedido do Chat Balcões); um por pedido
+  sourceContact   String? // com quem está negociando: quem postou o pedido no grupo
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 

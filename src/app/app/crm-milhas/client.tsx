@@ -117,6 +117,16 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
     readPrint(img);
   }
 
+  // Negociação vinda do Chat Balcões: abre a conversa no privado com quem postou o pedido
+  const [dmBusy, setDmBusy] = useState(false);
+  async function messageContact() {
+    if (!deal) return;
+    setDmBusy(true);
+    const r = await api<{ item: { id: string } }>(`/api/miles-deals/${deal.id}/telegram-dm`, "POST");
+    setDmBusy(false);
+    if (!r.ok) return setErro(r.erro);
+    router.push(`/app/chat-balcoes?abrir=${r.data.item.id}`);
+  }
   // Trocando entre balcão e cliente, o nome de um não serve para o outro
   function pickBuyerType(b: BuyerType) {
     if ((b === "BALCAO") !== (buyerType === "BALCAO")) {
@@ -203,6 +213,13 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             ))}
           </div>
         </Field>
+        {deal?.telegramContact && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-2 text-sm">
+            <MessageCircle className="h-4 w-4 shrink-0 text-accent-light" />
+            <p className="min-w-0 flex-1">Negociando com <b>{deal.telegramContact}</b> <span className="text-muted">· pedido do Chat Balcões</span></p>
+            <button type="button" className="btn-ghost h-8 text-sm" onClick={messageContact} disabled={dmBusy}>{dmBusy ? "Abrindo…" : "Mandar mensagem"}</button>
+          </div>
+        )}
         {buyerType === "BALCAO" ? (
           <Field label="Balcão" required>
             {newBalcao ? (
@@ -882,7 +899,7 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-bold text-accent-light" aria-hidden>{initials(d.customerName)}</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-semibold leading-tight">{d.customerName}</span>
-            <span className="block text-[11px] text-muted">#{d.number}</span>
+            <span className="block truncate text-[11px] text-muted">#{d.number}{d.telegramContact ? ` · ${d.telegramContact}` : ""}</span>
           </span>
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${BUYER_CLS[d.buyerType]}`}>{BUYER_LABELS[d.buyerType].split(" /")[0]}</span>
         </div>

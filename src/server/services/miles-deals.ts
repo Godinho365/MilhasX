@@ -28,6 +28,7 @@ export type DealInput = {
   locator?: string | null;
   notes?: string | null;
   sourceRef?: string | null; // de onde veio (pedido do Chat Balcões); só na criação
+  sourceContact?: string | null; // com quem está negociando (quem postou o pedido); só na criação
 };
 
 const include = {
@@ -83,6 +84,8 @@ const view = (d: Row) => {
     // venda lançada e paga (vazio = a receber)
     paidAt: d.sale?.paidAt?.toISOString() ?? null,
     paidAccount: d.sale?.finAccount?.name ?? null, // conta do Financeiro em que o pagamento entrou
+    // veio de um pedido do Chat Balcões: com quem está negociando (dá para chamar no privado pelo Telegram)
+    telegramContact: d.sourceRef?.startsWith("tg:") ? d.sourceContact || "quem postou o pedido" : null,
     passengersData: (Array.isArray(d.passengersData) ? d.passengersData : []) as Passenger[],
     passengersAt: d.passengersAt?.toISOString() ?? null,
     chargeCents: dealChargeCents(d.points, d.saleCpmCents, d.taxesCents),
@@ -204,7 +207,7 @@ export async function createDeal(userId: string, input: DealInput) {
     try {
       return await prisma.$transaction(async (tx) => {
         const last = await tx.milesDeal.aggregate({ where: { userId }, _max: { number: true } });
-        return view(await tx.milesDeal.create({ data: { userId, number: (last._max.number ?? 0) + 1, ...data(input), sourceRef: input.sourceRef || null }, include }));
+        return view(await tx.milesDeal.create({ data: { userId, number: (last._max.number ?? 0) + 1, ...data(input), sourceRef: input.sourceRef || null, sourceContact: input.sourceContact?.trim() || null }, include }));
       });
     } catch (e) {
       if (attempt < 3 && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;

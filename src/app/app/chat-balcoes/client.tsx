@@ -62,8 +62,9 @@ function usePolling(fn: () => void, ms: number, on = true) {
   }, [ms, on]);
 }
 
-export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts = [] }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[]; accounts?: EmissionAccount[] }) {
-  const [tab, setTab] = useState(chats[0]!.id);
+export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts = [], openDmId = null }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[]; accounts?: EmissionAccount[]; openDmId?: string | null }) {
+  // abre direto na conversa pedida (vinda do CRM Milhas) ou no primeiro grupo
+  const [tab, setTab] = useState(openDmId ? `dm:${openDmId}` : chats[0]!.id);
   const [dms, setDms] = useState(initialDms);
   const [alerts, setAlerts] = useState(initialAlerts);
   const [feed, setFeed] = useState<FeedMsg[] | null>(null);
