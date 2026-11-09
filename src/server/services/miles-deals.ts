@@ -6,7 +6,7 @@ import { createSale, defaultFinAccountId, type SaleCost } from "./sales";
 import { brDay } from "@/domain/brasilia";
 import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
-import { unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
+import { unicoProcessLink, suggestFaceCheck, type FaceCheckStatus } from "@/domain/face-check";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Emitido" a negociação vira uma
 // venda em Vendas, a receber (baixa dos pontos da conta escolhida); em "Pago" a venda fica paga. Depois
@@ -527,12 +527,26 @@ export async function markDealTermsSent(userId: string, id: string, at = new Dat
   return getDeal(userId, id);
 }
 
+/** Após salvar passageiros, pré-marca a verificação facial quando ainda não há decisão:
+ *  compara o CPF do titular da conta com os CPFs dos passageiros. Nunca sobrescreve link colado nem status já definido. */
+async function autoFaceCheckFromPassengers(dealId: string) {
+  const d = await prisma.milesDeal.findUnique({
+    where: { id: dealId },
+    select: { faceCheckStatus: true, faceCheckUrl: true, passengersData: true, account: { select: { holder: { select: { documents: true } } } } },
+  });
+  if (!d || d.faceCheckStatus || d.faceCheckUrl) return;
+  const suggestion = suggestFaceCheck(d.account?.holder?.documents, d.passengersData);
+  if (!suggestion) return;
+  await prisma.milesDeal.update({ where: { id: dealId }, data: { faceCheckStatus: suggestion, faceCheckAt: suggestion === "NOT_NEEDED" ? new Date() : null } });
+}
+
 /** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */
 export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
   const d = await own(userId, id);
   const data = passengers.map(cleanPassenger);
   const saved = await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
   await syncSaleCpfs(userId, saved);
+  await autoFaceCheckFromPassengers(d.id);
   return getDeal(userId, id);
 }
 
@@ -548,6 +562,7 @@ export async function submitDealPassengers(slug: string, token: string, passenge
   await prisma.loginAttempt.create({ data: { email: key, ip: ipHash, success: true } });
   const data = passengers.map(cleanPassenger);
   await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: new Date() } });
+  await autoFaceCheckFromPassengers(d.id);
   await prisma.notification.create({ data: { userId: d.userId, title: "Passageiros recebidos", body: `${d.customerName} enviou ${data.length === 1 ? "o passageiro" : `${data.length} passageiros`} da negociação #${d.number} (CRM Milhas).` } });
   return { ok: true };
 }

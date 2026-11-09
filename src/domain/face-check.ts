@@ -28,6 +28,36 @@ export function unicoProcessLink(input: string): { id: string; url: string } | n
   return { id: clean, url: `https://cadastro.unico.app/process/${clean}?collect-data=true` };
 }
 
+const cpfDigits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+
+/** CPFs (11 dígitos) da lista de documentos do titular `[{ type, number }]`. */
+export function holderCpfs(documents: unknown): string[] {
+  if (!Array.isArray(documents)) return [];
+  return documents
+    .filter((d): d is Record<string, unknown> => !!d && typeof d === "object")
+    .filter((d) => String(d.type ?? "").toUpperCase() === "CPF")
+    .map((d) => cpfDigits(d.number))
+    .filter((c) => c.length === 11);
+}
+
+/**
+ * Palpite de quando a LATAM pede validação facial: só quando a emissão é para um terceiro
+ * (CPF diferente do titular da conta). Compara o CPF do titular com os CPFs dos passageiros.
+ * - `NOT_NEEDED`: todos os passageiros são o próprio titular (auto-emissão).
+ * - `PENDING`: há pelo menos um passageiro com CPF diferente do titular.
+ * - `null`: sem CPF do titular ou sem passageiros com CPF — não dá para decidir.
+ * Palpite da regra da LATAM, não garantia: o operador pode sobrescrever e o link real da LATAM sempre vence.
+ */
+export function suggestFaceCheck(documents: unknown, passengers: unknown): FaceCheckStatus | null {
+  const titular = new Set(holderCpfs(documents));
+  if (titular.size === 0) return null;
+  const pax = (Array.isArray(passengers) ? passengers : [])
+    .map((p) => cpfDigits((p as Record<string, unknown> | null)?.cpf))
+    .filter((c) => c.length === 11);
+  if (pax.length === 0) return null;
+  return pax.every((c) => titular.has(c)) ? "NOT_NEEDED" : "PENDING";
+}
+
 /** Mensagem para o titular fazer a validação. */
 export function faceCheckMessage(holderName: string | null, url: string) {
   const first = holderName?.trim().split(/\s+/)[0];
