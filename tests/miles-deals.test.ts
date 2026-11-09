@@ -20,7 +20,7 @@ import * as cardsRoute from "@/app/api/cards/route";
 import { listCardBills } from "@/server/services/finance";
 import * as pubTicketRoute from "@/app/api/public/miles-deal/[slug]/[token]/ticket/route";
 import * as pub from "@/app/api/public/miles-deal/[slug]/[token]/route";
-import { balcaoOptions, parseDealPaste } from "@/domain/miles-deals";
+import { balcaoForGroup, balcaoOptions, parseDealPaste } from "@/domain/miles-deals";
 import { publicDeal } from "@/server/services/miles-deals";
 import { prisma } from "@/server/db";
 
@@ -344,5 +344,18 @@ describe("balcões da negociação", () => {
   it("lista os balcões padrão e os já usados, sem repetir, em ordem alfabética", () => {
     expect(balcaoOptions([])).toEqual(["Balcão de Milhas ASM", "Balcão Milhas VIP", "Balcão MilhasX"]);
     expect(balcaoOptions(["HotMilhas", " Balcão Milhas VIP ", "", "HotMilhas"])).toEqual(["Balcão de Milhas ASM", "Balcão Milhas VIP", "Balcão MilhasX", "HotMilhas"]);
+  });
+});
+
+describe("balcão do grupo do Telegram", () => {
+  it("o da lista que está inteiro no nome do grupo, o mais completo; nome genérico não vale", () => {
+    const used = ["balcao", "Balcao", "HotMilhas"];
+    expect(balcaoForGroup("BALCÃO MILHAS VIP PRO", used)).toBe("Balcão Milhas VIP");
+    expect(balcaoForGroup("Balcão de Milhas ASM - Oficial", used)).toBe("Balcão de Milhas ASM");
+    expect(balcaoForGroup("Balcão de Milhas ASM", used)).toBe("Balcão de Milhas ASM");
+    // "balcao" sozinho não casa: fica o nome do grupo
+    expect(balcaoForGroup("Balcão Turbo", used)).toBe("Balcão Turbo");
+    // palavra inteira: "Milhas VIPs" não é "Milhas VIP"
+    expect(balcaoForGroup("Balcão Milhas VIPs", used)).toBe("Balcão Milhas VIPs");
   });
 });

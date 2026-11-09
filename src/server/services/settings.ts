@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Prisma, type Plan } from "@prisma/client";
 import type { PixInfo } from "@/domain/deal-message";
+import { DEFAULT_EMISSION_TERMS } from "@/domain/emission-terms";
 import { prisma, DomainError, audit } from "../db";
 import { mpEnabled, currentSubscription } from "./billing-mp";
 import { assertFeature, hasFeature } from "./plan-limits";
@@ -21,10 +22,17 @@ export interface PreferenceInput {
   valuesMode?: ValuesMode;
   notifications?: Record<string, { email?: boolean; push?: boolean }>;
   pix?: PixInfo | null;
+  emissionTerms?: string | null;
 }
 
 export async function savePreferences(userId: string, input: PreferenceInput) {
-  const data: Prisma.UserPreferenceUpdateInput = { ...input, notifications: undefined, pix: input.pix === undefined ? undefined : input.pix ?? Prisma.DbNull };
+  const data: Prisma.UserPreferenceUpdateInput = {
+    ...input,
+    notifications: undefined,
+    pix: input.pix === undefined ? undefined : input.pix ?? Prisma.DbNull,
+    // igual ao padrão do MilhasX (ou vazio) não guarda: assim uma melhora no padrão chega para quem não mexeu
+    emissionTerms: input.emissionTerms === undefined ? undefined : input.emissionTerms?.trim() && input.emissionTerms.trim() !== DEFAULT_EMISSION_TERMS.trim() ? input.emissionTerms.trim() : null,
+  };
   // "Mostrar valores" e o modo de visibilidade andam juntos
   if (input.valuesMode) data.showValues = input.valuesMode === "VISIBLE";
   else if (input.showValues !== undefined) data.valuesMode = input.showValues ? "VISIBLE" : "PARTIAL";
@@ -57,6 +65,7 @@ export async function getPreferences(userId: string) {
     valuesMode: ((["VISIBLE", "PARTIAL", "HIDDEN"] as const).find((m) => m === p?.valuesMode) ?? (p?.showValues === false ? "PARTIAL" : "VISIBLE")) as ValuesMode,
     notifications: notifyPrefs(p?.notifications),
     pix: (p?.pix as PixInfo | null) ?? null,
+    emissionTerms: p?.emissionTerms ?? null, // null = o padrão (DEFAULT_EMISSION_TERMS)
   };
 }
 

@@ -59,5 +59,6 @@ export function whatsappLink(phone: string | null | undefined, text: string) {
   const digits = (phone ?? "").replace(/\D/g, "");
   if (!digits) return null;
   const full = digits.length <= 11 ? `55${digits}` : digits;
-  return `https://wa.me/${full}?text=${encodeURIComponent(text)}`;
+  // espaço inquebrável (U+00A0) e estreito (U+202F) viram � em alguns WhatsApp: manda espaço normal
+  return `https://wa.me/${full}?text=${encodeURIComponent(text.replace(/[  ]/g, " "))}`;
 }

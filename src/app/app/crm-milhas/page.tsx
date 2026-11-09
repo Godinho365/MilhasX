@@ -12,7 +12,7 @@ import { DealsKanban, DealsList } from "./client";
 
 const PERIODS = [["7", "Últimos 7 dias"], ["30", "Últimos 30 dias"], ["90", "Últimos 90 dias"], ["365", "Últimos 12 meses"], ["all", "Tudo"]] as const;
 
-export default async function CrmMilhasPage({ searchParams }: { searchParams: Promise<{ view?: string; periodo?: string }> }) {
+export default async function CrmMilhasPage({ searchParams }: { searchParams: Promise<{ view?: string; periodo?: string; deal?: string }> }) {
   const user = await requirePageUser();
   const sp = await searchParams;
   const view = sp.view === "lista" ? "lista" : sp.view === "dashboard" ? "dashboard" : "kanban";
@@ -36,7 +36,7 @@ export default async function CrmMilhasPage({ searchParams }: { searchParams: Pr
         { key: "kanban", label: "Kanban", href: "/app/crm-milhas" },
         { key: "lista", label: "Lista", href: "/app/crm-milhas?view=lista" },
       ]} />
-      {view === "kanban" && <DealsKanban deals={await listDeals(user.id)} customers={customers} accounts={accountOpts} cards={cards} avgSaleCpmCents={avg.saleCpmCents} />}
+      {view === "kanban" && <DealsKanban deals={await listDeals(user.id)} customers={customers} accounts={accountOpts} cards={cards} avgSaleCpmCents={avg.saleCpmCents} openId={sp.deal ?? null} />}
       {view === "lista" && <DealsList active={await listDeals(user.id)} archived={await listDeals(user.id, { archived: true })} customers={customers} accounts={accountOpts} cards={cards} avgSaleCpmCents={avg.saleCpmCents} />}
       {view === "dashboard" && <Dashboard userId={user.id} periodo={sp.periodo ?? "30"} />}
     </>

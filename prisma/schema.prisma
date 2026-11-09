@@ -140,32 +140,47 @@ model User {
   milesLeads          MilesLead[]
   contractSignatures  ContractSignature[]
   telegramLinks       TelegramLink[]
+  telegramGroups      TelegramGroup[]
   telegramAlerts      TelegramAlert[]
   telegramDms         TelegramDm[]
 }
 
-/// Conta do Telegram do usuário (pode ter várias), conectada para ler o grupo do balcão (só leitura). A sessão dá
-/// acesso à conta: fica criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas
-/// etapas) → ativa. Um número por usuário.
+/// Conta do Telegram do usuário (pode ter várias), para o Chat Balcões. A sessão dá acesso à conta: fica
+/// criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas etapas) → ativa. Um número
+/// por usuário. Cada conta tem os seus grupos de balcão (TelegramGroup).
 model TelegramLink {
-  id            String   @id @default(cuid())
+  id            String          @id @default(cuid())
   userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionEnc    String // sessão do Telegram, criptografada
-  status        String   @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
+  status        String          @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
   phone         String // número usado no login (+55...)
   phoneCodeHash String? // da etapa do código (sai quando o login termina)
-  codeViaApp    Boolean  @default(true) // o código chegou no app do Telegram (senão, por SMS)
+  codeViaApp    Boolean         @default(true) // o código chegou no app do Telegram (senão, por SMS)
   accountName   String? // conta conectada (nome e @usuário)
-  groupId       String? // grupo do balcão escolhido
-  groupTitle    String?
-  groupPeer     Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
-  clearedUpTo   Int? // chat limpo no app até esta mensagem (no Telegram nada muda)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  groups        TelegramGroup[]
   dms           TelegramDm[]
 
   @@unique([userId, phone])
+  @@index([userId])
+}
+
+/// Grupo de balcão escolhido numa conta do Telegram: cada um é uma aba (um chat) no Chat Balcões.
+model TelegramGroup {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkId      String
+  link        TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  groupId     String // id do grupo no Telegram
+  title       String
+  peer        Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
+  clearedUpTo Int? // chat limpo no app até esta mensagem (no Telegram nada muda)
+  createdAt   DateTime     @default(now())
+
+  @@unique([linkId, groupId])
   @@index([userId])
 }
 
@@ -181,6 +196,7 @@ model TelegramDm {
   peerHash  String // hash de acesso dela para esta conta (para ler e mandar mensagem)
   name        String
   username    String?
+  groupTitle  String? // grupo de onde a pessoa veio
   clearedUpTo Int? // conversa limpa no app até esta mensagem (no Telegram nada muda)
   createdAt   DateTime     @default(now())
 
@@ -587,6 +603,7 @@ model UserPreference {
   valuesMode         String    @default("VISIBLE")
   notifications      Json      @default("{}")
   pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
+  emissionTerms      String? // termo de emissão mandado ao comprador antes de emitir (vazio = o padrão do MilhasX)
   metricsHidden      String[]  @default([]) // blocos escondidos na página Métricas ("vendas.mix", ...)
 }
 
@@ -1180,15 +1197,19 @@ model MilesDeal {
   faceCheckUrl    String? // verificação antes da emissão: link da validação facial (formato novo)
   faceCheckStatus String? // PENDING | DONE | NOT_NEEDED; o bilhete só entra com DONE ou NOT_NEEDED
   faceCheckAt     DateTime?
+  termsSentAt     DateTime? // quando o termo de emissão foi mandado ao comprador (antes de emitir)
   saleId          String?           @unique // venda criada ao chegar em "Pago"
   sale            Sale?             @relation(fields: [saleId], references: [id], onDelete: SetNull)
   ticket          MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"
   receipt         MilesDealReceipt? // comprovante de pagamento: só com ele a negociação vai para "Pago" (vira venda)
   archivedAt      DateTime?
+  sourceRef       String? // de onde veio: "tg:<conta do Telegram>:<grupo>:<mensagem>" (pedido do Chat Balcões); um por pedido
+  sourceContact   String? // com quem está negociando: quem postou o pedido no grupo
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@unique([userId, number])
+  @@unique([userId, sourceRef])
   @@index([userId, stage])
 }
 

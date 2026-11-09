@@ -210,10 +210,17 @@ export const preferenceSchema = z.object({
       key: z.string().trim().min(1, "Informe a chave PIX").max(140),
       name: z.string().trim().max(100).default(""),
       bank: z.string().trim().max(60).default(""),
+      city: z.string().trim().max(60).optional(), // cidade do recebedor, para o PIX copia e cola (QR)
     })
     .nullable()
     .optional(),
+  // termo de emissão mandado ao comprador antes de emitir (null ou vazio = o padrão do MilhasX)
+  emissionTerms: z.string().trim().max(4000, "Termo longo demais (até 4.000 caracteres)").nullable().optional(),
 });
+// termo de emissão: com text, manda no privado do Telegram (negociação do Chat Balcões); sem, só marca como enviado
+export const dealTermsSchema = z.object({ text: z.string().trim().min(1, "Escreva o termo").max(4000, "Termo longo demais (até 4.000 caracteres)").optional() });
+// mensagem de emissão enviada em 1 clique no privado do Telegram (negociação do Chat Balcões)
+export const telegramMessageSchema = z.object({ text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)") });
 export const profileSchema = z.object({ name: z.string().trim().min(2, "Informe seu nome").max(100) });
 export const planRequestSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).default("MENSAL") });
 export const adminPlanSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).nullable().default(null) });
@@ -539,7 +546,13 @@ export const telegramSendSchema = z.object({
   replyTo: z.number().int().positive().optional(), // como resposta a esta mensagem (a contraproposta a um pedido)
 });
 export const telegramEditSchema = z.object({ text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)") });
-export const telegramClearSchema = z.object({ upTo: z.number().int().positive().nullable() }); // null = mostrar tudo de novo
+export const telegramCrmSchema = z.object({
+  messageId: z.number().int().positive(),
+  text: z.string().trim().min(1).max(4096),
+  sender: z.string().trim().max(200),
+  cpmCents: z.number().int().positive().max(1_000_000).nullable().optional(), // o da sua contraproposta
+});
+export const telegramClearSchema =z.object({ upTo: z.number().int().positive().nullable() }); // null = mostrar tudo de novo
 export const telegramDmOpenSchema = z.object({ messageId: z.number().int().positive() });
 const optInt = (min: number, max: number, msg: string) => z.number({ invalid_type_error: msg }).int(msg).min(min, msg).max(max, msg).nullable().optional();
 export const telegramAlertSchema = z

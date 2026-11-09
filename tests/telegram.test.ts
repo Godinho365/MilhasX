@@ -9,17 +9,27 @@ import * as account from "@/app/api/telegram/accounts/[id]/route";
 import * as codeRoute from "@/app/api/telegram/accounts/[id]/code/route";
 import * as passwordRoute from "@/app/api/telegram/accounts/[id]/password/route";
 import * as groupsRoute from "@/app/api/telegram/accounts/[id]/groups/route";
-import * as messagesRoute from "@/app/api/telegram/accounts/[id]/messages/route";
+import * as messagesRoute from "@/app/api/telegram/chats/[id]/messages/route";
 import * as alertsRoute from "@/app/api/telegram/alerts/route";
 import * as alertRoute from "@/app/api/telegram/alerts/[id]/route";
 import * as feedRoute from "@/app/api/telegram/alerts/feed/route";
-import * as dmOpenRoute from "@/app/api/telegram/accounts/[id]/dms/route";
+import * as dmOpenRoute from "@/app/api/telegram/chats/[id]/dms/route";
 import * as dmsRoute from "@/app/api/telegram/dms/route";
 import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
-import * as clearRoute from "@/app/api/telegram/accounts/[id]/clear/route";
+import * as crmRoute from "@/app/api/telegram/chats/[id]/crm/route";
+import * as chatRoute from "@/app/api/telegram/chats/[id]/route";
+import * as dealDmRoute from "@/app/api/miles-deals/[id]/telegram-dm/route";
+import * as dealsRoute from "@/app/api/miles-deals/route";
+import * as dealDataRoute from "@/app/api/miles-deals/[id]/telegram-data/route";
+import * as termsRoute from "@/app/api/miles-deals/[id]/terms/route";
+import * as dealMsgRoute from "@/app/api/miles-deals/[id]/telegram-message/route";
+import * as prefsRoute from "@/app/api/preferences/route";
+import { parsePassengersText } from "@/domain/miles-deals";
+import { DEFAULT_EMISSION_TERMS, emissionTermsText } from "@/domain/emission-terms";
+import * as clearRoute from "@/app/api/telegram/chats/[id]/clear/route";
 import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
-import * as msgRoute from "@/app/api/telegram/accounts/[id]/messages/[msgId]/route";
+import * as msgRoute from "@/app/api/telegram/chats/[id]/messages/[msgId]/route";
 import * as dmMsgRoute from "@/app/api/telegram/dms/[id]/messages/[msgId]/route";
 import * as holders from "@/app/api/holders/route";
 import * as milesAccounts from "@/app/api/accounts/route";
@@ -140,7 +150,7 @@ describe("Telegram", () => {
 
   it("conecta duas contas ao mesmo tempo, cada uma com o seu grupo, e desconecta uma sem mexer na outra", async () => {
     setTelegramClientFactory(fake({ withPassword: ["+5521977776666"] }));
-    expect(await status()).toEqual({ enabled: true, max: MAX_TELEGRAM_ACCOUNTS, accounts: [] });
+    expect(await status()).toEqual({ enabled: true, max: MAX_TELEGRAM_ACCOUNTS, maxGroups: 10, accounts: [] });
 
     // as duas pedem código juntas
     expect((await start("(11) 99999-8888")).data.item.accounts).toEqual([expect.objectContaining({ status: "CODE_SENT", phone: "+55 •••• 8888", codeViaApp: true, accountName: null })]);
@@ -165,7 +175,7 @@ describe("Telegram", () => {
     expect((await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1000001" }, { id: a })).status).toBe(404);
     await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1001234" }, { id: a });
     const both = (await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1005678" }, { id: b })).data.item.accounts;
-    expect(both.map((x: { group: { title: string } }) => x.group.title)).toEqual(["Balcão de Milhas ASM", "Balcão Milhas VIP"]);
+    expect(both.map((x: { groups: { title: string }[] }) => x.groups.map((g) => g.title))).toEqual([["Balcão de Milhas ASM"], ["Balcão Milhas VIP"]]);
 
     // o mesmo número de novo não duplica
     expect((await start("+55 11 99999-8888")).status).toBe(409);
@@ -221,14 +231,42 @@ describe("Telegram", () => {
   });
 });
 
-/** Conecta a conta (código 12345, sem senha) e escolhe o grupo; devolve o id da conta. */
+/** Conecta a conta (código 12345, sem senha) e põe o grupo no Chat Balcões; devolve o id do chat (o grupo). */
 async function connected(phone: string, groupId: string) {
   await start(phone);
   const id = await idOf(phone.slice(-4));
   await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id });
   await c.call(groupsRoute.POST, "POST", "/x", { groupId }, { id });
-  return id;
+  return (await prisma.telegramGroup.findFirstOrThrow({ where: { linkId: id, groupId } })).id;
 }
+/** A conta do Telegram do chat. */
+const linkOf = async (chatId: string) => (await prisma.telegramGroup.findUniqueOrThrow({ where: { id: chatId } })).linkId;
+
+describe("vários grupos por conta", () => {
+  it("põe e tira grupos da conta; cada um é um chat com as suas mensagens", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const link = await linkOf(asm);
+    // a lista da conta marca os que já estão no Chat Balcões
+    expect((await c.call(groupsRoute.GET, "GET", "/x", undefined, { id: link })).data.items.map((g: { title: string; chosen: boolean }) => [g.title, g.chosen]))
+      .toEqual([["Balcão de Milhas ASM", true], ["Balcão Milhas VIP", false], ["Promoções", false]]);
+    const st = (await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1005678" }, { id: link })).data.item;
+    expect(st.accounts[0].groups.map((g: { title: string }) => g.title)).toEqual(["Balcão de Milhas ASM", "Balcão Milhas VIP"]);
+    expect((await c.call(groupsRoute.POST, "POST", "/x", { groupId: "-1005678" }, { id: link })).data.erro).toMatch(/já está no Chat Balcões/);
+    const vip = st.accounts[0].groups[1].id;
+    // cada chat lê o seu grupo, pela mesma conta
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: asm })).data.items.map((m: { id: number }) => m.id)).toEqual([1, 2, 3, 4]);
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: vip })).data.items.map((m: { id: number }) => m.id)).toEqual([10, 11]);
+    // tirar um grupo não mexe no outro (no Telegram nada muda)
+    const after = (await c.call(chatRoute.DELETE, "DELETE", "/x", undefined, { id: vip })).data.item;
+    expect(after.accounts[0].groups.map((g: { title: string }) => g.title)).toEqual(["Balcão de Milhas ASM"]);
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: vip })).status).toBe(404);
+    expect(calls.some((x) => x.startsWith("logOut") || x.startsWith("remove"))).toBe(false);
+    // de outro usuário: não
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(chatRoute.DELETE, "DELETE", "/x", undefined, { id: asm })).status).toBe(404);
+  });
+});
 
 describe("Chat Balcões", () => {
   it("alertas: todas as palavras, sem diferenciar maiúsculas e acentos; pausado não dispara", () => {
@@ -246,7 +284,7 @@ describe("Chat Balcões", () => {
   it("mensagens do grupo de cada conta, só as novas depois, com os alertas destacados", async () => {
     const a = await connected("11999998888", "-1001234");
     // o acesso direto ao grupo fica guardado ao escolher
-    expect((await prisma.telegramLink.findUniqueOrThrow({ where: { id: a } })).groupPeer).toEqual({ kind: "channel", id: "1234", hash: "h1" });
+    expect((await prisma.telegramGroup.findUniqueOrThrow({ where: { id: a } })).peer).toEqual({ kind: "channel", id: "1234", hash: "h1" });
     await c.call(alertsRoute.POST, "POST", "/x", { words: ["latam", "compro"] });
 
     const all = (await c.call(messagesRoute.GET, "GET", "/api/telegram/accounts/x/messages?limit=60", undefined, { id: a })).data.items;
@@ -257,7 +295,7 @@ describe("Chat Balcões", () => {
     expect(newer.map((m: { id: number }) => m.id)).toEqual([3, 4]);
 
     // conta que escolheu o grupo antes de existir o acesso direto: busca nos chats uma vez e guarda
-    await prisma.telegramLink.update({ where: { id: a }, data: { groupPeer: Prisma.DbNull } });
+    await prisma.telegramGroup.update({ where: { id: a }, data: { peer: Prisma.DbNull } });
     calls = [];
     await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a });
     await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a });
@@ -267,7 +305,7 @@ describe("Chat Balcões", () => {
     await start("21977776666");
     const b = await idOf("6666");
     await c.call(codeRoute.POST, "POST", "/x", { code: "12345" }, { id: b });
-    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: b })).data.erro).toMatch(/Escolha o grupo do balcão/);
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: b })).data.erro).toMatch(/Grupo não encontrado no Chat Balcões/);
   });
 
   it("cadastra, pausa e exclui alertas; a aba Alertas junta as mensagens de todos os chats", async () => {
@@ -296,7 +334,7 @@ describe("Chat Balcões", () => {
 
     // um chat com a sessão encerrada não derruba a aba: aparece em errors
     await c.call(alertRoute.PUT, "PUT", "/x", { name: latam.name, words: latam.words, active: true }, { id: latam.id });
-    await prisma.telegramLink.update({ where: { id: a }, data: { sessionEnc: (await prisma.telegramLink.findUniqueOrThrow({ where: { id: b } })).sessionEnc.replace(/./, "x") } });
+    await prisma.telegramLink.update({ where: { id: await linkOf(a) }, data: { sessionEnc: (await prisma.telegramLink.findUniqueOrThrow({ where: { id: await linkOf(b) } })).sessionEnc.replace(/./, "x") } });
     const partial = (await c.call(feedRoute.GET, "GET", "/x")).data;
     expect(partial.items.map((m: { id: number }) => m.id)).toEqual([10]);
     expect(partial.errors).toEqual([expect.objectContaining({ chatId: a, chat: "Balcão de Milhas ASM" })]);
@@ -368,7 +406,7 @@ describe("mandar mensagem e conversar no privado", () => {
     expect((await c.call(dmRoute.DELETE, "DELETE", "/x", undefined, { id: dm.id })).status).toBe(200);
     expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items).toEqual([]);
     await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 2 }, { id: a });
-    await c.call(account.DELETE, "DELETE", "/x", undefined, { id: a });
+    await c.call(account.DELETE, "DELETE", "/x", undefined, { id: await linkOf(a) });
     expect(await prisma.telegramDm.count()).toBe(0);
   });
 
@@ -434,7 +472,7 @@ describe("limpar o chat só no app", () => {
     expect(await ids()).toEqual([1, 2, 3, 4]);
     expect((await c.call(clearRoute.POST, "POST", "/x", { upTo: 4 }, { id: a })).status).toBe(200);
     expect(await ids()).toEqual([]);
-    expect((await c.call(accounts.GET, "GET", "/x")).data.item.accounts[0].clearedUpTo).toBe(4);
+    expect((await c.call(accounts.GET, "GET", "/x")).data.item.accounts[0].groups[0].clearedUpTo).toBe(4);
     // mensagem nova depois de limpar aparece
     const sent = (await c.call(messagesRoute.POST, "POST", "/x", { text: "Bom dia" }, { id: a })).data.item;
     expect(await ids()).toEqual([sent.id]);
@@ -455,5 +493,125 @@ describe("limpar o chat só no app", () => {
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await o.call(clearRoute.POST, "POST", "/x", { upTo: 1 }, { id: a })).status).toBe(404);
     expect((await o.call(dmClearRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
+  });
+});
+
+describe("registrar o pedido no CRM Milhas", () => {
+  it("cria a negociação de balcão com o pedido; com contraproposta, no milheiro dela e em Negociação; não duplica", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const r = await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a });
+    expect([r.status, r.data.item]).toEqual([201, expect.objectContaining({ number: 1, stage: "NEW", buyerType: "BALCAO", customerName: "Balcão de Milhas ASM", points: 100_000, saleCpmCents: 2500, passengers: 1 })]);
+    expect(r.data.item.notes).toMatch(/Pedido de Ana no grupo Balcão de Milhas ASM:\nCompro 100k LATAM/);
+    expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).data.erro).toMatch(/já está no CRM Milhas \(#1\)/);
+    // a mensagem do pedido mostra a negociação
+    const msgs = (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items;
+    expect(msgs.find((m: { id: number }) => m.id === 1).crm).toEqual({ id: r.data.item.id, number: 1, stage: "NEW" });
+    expect(msgs.find((m: { id: number }) => m.id === 2).crm).toBeNull();
+    expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 2, text: "Bom dia, pessoal", sender: "Bia" }, { id: a })).data.erro).toMatch(/não é um pedido/);
+
+    // pela sua contraproposta: no milheiro dela, já em Negociação; balcão = o próprio grupo quando não está na lista
+    const b = await connected("21977776666", "-1005678");
+    const offer = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 10, text: "compro latam 30K urgente", sender: "Eva", cpmCents: 2700 }, { id: b })).data.item;
+    expect(offer).toMatchObject({ number: 2, stage: "NEGOTIATION", customerName: "Balcão Milhas VIP", points: 30_000, saleCpmCents: 2700 });
+    expect(offer.notes).toMatch(/Minha contraproposta: R\$ 27,00 o milheiro/);
+    expect(await prisma.milesDeal.findFirstOrThrow({ where: { id: offer.id } })).toMatchObject({ sourceRef: `tg:${await linkOf(b)}:-1005678:10` });
+
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).status).toBe(404);
+  });
+});
+
+describe("negociação vinda do Chat Balcões: com quem está negociando", () => {
+  it("guarda quem postou e abre o privado com a pessoa a partir da negociação", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    expect(deal.telegramContact).toBe("Ana");
+    const dm = await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id });
+    expect([dm.status, dm.data.item]).toEqual([201, expect.objectContaining({ name: "Ana", group: "Balcão de Milhas ASM" })]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items.map((d: { id: string }) => d.id)).toEqual([dm.data.item.id]);
+    // negociação feita à mão: não tem com quem abrir
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect(manual.telegramContact).toBeNull();
+    expect((await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: manual.id })).status).toBe(400);
+    // grupo tirado do Chat Balcões
+    await c.call(chatRoute.DELETE, "DELETE", "/x", undefined, { id: asm });
+    expect((await c.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id })).data.erro).toMatch(/não está mais no Chat Balcões/);
+    // de outro usuário: não
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id })).status).toBe(404);
+  });
+});
+
+describe("negociação vinda do Chat Balcões: dados do comprador e termo de emissão", () => {
+  /** Mensagem no privado com a Ana, `min` minutos a partir de agora (a negociação é criada agora). */
+  const dm = (id: number, min: number, text: string, out = false): TgMessage => ({ id, date: new Date(Date.now() + min * 60_000).toISOString(), sender: out ? "Você" : "Ana", text, media: null, out, fromUser: true, replyTo: null });
+
+  it("pega os passageiros e o link pronto da LATAM do privado, sem mandar nada", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    MSGS["u-Ana"] = [
+      dm(1, -3 * 24 * 60, "Bruno Costa\n529.982.247-25\n12/01/1987"), // de uma negociação antiga: fica de fora
+      dm(2, 1, "Bom dia! Segue os dados"),
+      dm(3, 2, "Ana Lima Souza\n111.444.777-35\n05/06/1990"),
+      dm(4, 3, "Carla Dias\n390.533.447-05\n03/04/1995", true), // mandada pela conta: fica de fora
+      dm(5, 4, "https://www.latamairlines.com/br/pt/v2/passageiros?orderId=LA123"),
+    ];
+    try {
+      const r = await c.call(dealDataRoute.GET, "GET", "/x", undefined, { id: deal.id });
+      expect(r.status).toBe(200);
+      expect(r.data.item).toMatchObject({ contact: "Ana", messages: 3, latamLink: "https://www.latamairlines.com/br/pt/v2/passageiros?orderId=LA123" });
+      expect(parsePassengersText(r.data.item.text).map((p) => [p.name, p.cpf, p.birthDate])).toEqual([["Ana Lima Souza", "11144477735", "1990-06-05"]]);
+      expect(calls.filter((x) => x.startsWith("send "))).toEqual([]);
+      // negociação feita à mão: não tem conversa para ler
+      const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+      expect((await c.call(dealDataRoute.GET, "GET", "/x", undefined, { id: manual.id })).status).toBe(400);
+    } finally {
+      delete MSGS["u-Ana"];
+    }
+  });
+
+  it("manda o termo no privado e anota quando; feita à mão, só marca como enviado", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    expect(deal.termsSentAt).toBeNull();
+    const r = await c.call(termsRoute.POST, "POST", "/x", { text: "  Termo de teste  " }, { id: deal.id });
+    expect(r.status).toBe(200);
+    expect(r.data.item.termsSentAt).toEqual(expect.any(String));
+    expect(calls.filter((x) => x.startsWith("send "))).toEqual(["send user:u-Ana Termo de teste"]);
+
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect((await c.call(termsRoute.POST, "POST", "/x", { text: "Termo" }, { id: manual.id })).status).toBe(400);
+    expect((await c.call(termsRoute.POST, "POST", "/x", {}, { id: manual.id })).data.item.termsSentAt).toEqual(expect.any(String));
+    expect(calls.filter((x) => x.startsWith("send "))).toHaveLength(1);
+
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(termsRoute.POST, "POST", "/x", {}, { id: deal.id })).status).toBe(404);
+  });
+
+  it("manda a mensagem de emissão no privado em 1 clique", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    const r = await c.call(dealMsgRoute.POST, "POST", "/x", { text: "Emissão concluída! Localizador ABC123" }, { id: deal.id });
+    expect(r.status).toBe(200);
+    expect(calls.filter((x) => x.startsWith("send "))).toEqual(["send user:u-Ana Emissão concluída! Localizador ABC123"]);
+    // feita à mão: não tem para quem mandar; vazia: barra
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect((await c.call(dealMsgRoute.POST, "POST", "/x", { text: "oi" }, { id: manual.id })).status).toBe(400);
+    expect((await c.call(dealMsgRoute.POST, "POST", "/x", { text: "  " }, { id: deal.id })).status).toBe(400);
+  });
+
+  it("o texto do termo: o padrão do MilhasX ou o salvo pelo usuário", async () => {
+    const get = async () => (await c.call(prefsRoute.GET, "GET", "/x")).data.item.emissionTerms;
+    expect(await get()).toBeNull();
+    expect(emissionTermsText(null)).toBe(DEFAULT_EMISSION_TERMS);
+    await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: "Meu termo" });
+    expect(await get()).toBe("Meu termo");
+    // salvar igual ao padrão (ou vazio) volta para o padrão
+    await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: DEFAULT_EMISSION_TERMS });
+    expect(await get()).toBeNull();
+    expect((await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: "x".repeat(4001) })).status).toBe(400);
   });
 });
