@@ -129,6 +129,19 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
     if (!r.ok) return setErro(r.erro);
     router.push(`/app/chat-balcoes?abrir=${r.data.item.id}`);
   }
+  // Ao entrar em "Aguardando" num pedido do Chat Balcões, oferecer mandar o termo de emissão no privado (1 toque)
+  async function moveTo(stage: DealStageKey) {
+    if (!onMove || !deal) return;
+    const entering = stage === "AWAITING" && deal.stage !== "AWAITING";
+    onMove(stage);
+    if (!entering || !deal.telegramContact || deal.termsSentAt) return;
+    if (!(await confirmDialog({ title: `Mandar o termo de emissão para ${deal.telegramContact} agora?`, body: "Vai no privado do Telegram com o seu texto padrão. Você ainda manda o print da reserva na conversa; dá para conferir/editar na seção Termo de emissão.", confirmLabel: "Mandar termo" }))) return;
+    const prefs = await api<{ item: { emissionTerms: string | null } }>("/api/preferences");
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/terms`, "POST", { text: emissionTermsText(prefs.ok ? prefs.data.item.emissionTerms : null) });
+    if (!r.ok) return toast(r.erro, "error");
+    toast(`Termo enviado para ${deal.telegramContact}`);
+    refreshSafe(router);
+  }
   // Trocando entre balcão e cliente, o nome de um não serve para o outro
   function pickBuyerType(b: BuyerType) {
     if ((b === "BALCAO") !== (buyerType === "BALCAO")) {
@@ -197,7 +210,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
         {deal && onMove && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Etapa">
             {DEAL_STAGES.map((s) => (
-              <button key={s} type="button" aria-pressed={deal.stage === s} onClick={() => onMove(s)} className={`rounded-lg border px-2.5 py-1 text-xs ${deal.stage === s ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>{DEAL_STAGE_LABELS[s]}</button>
+              <button key={s} type="button" aria-pressed={deal.stage === s} onClick={() => moveTo(s)} className={`rounded-lg border px-2.5 py-1 text-xs ${deal.stage === s ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>{DEAL_STAGE_LABELS[s]}</button>
             ))}
           </div>
         )}
@@ -324,7 +337,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
         ) : (
           <p className="rounded-xl border border-dashed border-line p-3 text-sm text-muted">
             A página do comprador, a verificação facial e o bilhete aparecem quando a negociação estiver em <b className="text-zinc-200">{DEAL_STAGE_LABELS.AWAITING}</b>.
-            {onMove && <> <button type="button" className="font-medium text-accent-light hover:underline" onClick={() => onMove("AWAITING")}>Mover agora</button></>}
+            {onMove && <> <button type="button" className="font-medium text-accent-light hover:underline" onClick={() => moveTo("AWAITING")}>Mover agora</button></>}
           </p>
         ))}
       </form>
