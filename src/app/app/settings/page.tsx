@@ -5,6 +5,8 @@ import { getPreferences, billingState, referralState, getSalesProfile } from "@/
 import { mpEnabled, syncSubscription } from "@/server/services/billing-mp";
 import { GeneralTab, ProfileTab } from "./client";
 import { BillingTab, ReferralsTab, SalesProfileTab } from "./tabs";
+import { TelegramTab } from "./telegram";
+import { telegramStatus } from "@/server/services/telegram";
 
 const TABS = [
   ["", "Geral"],
@@ -12,6 +14,7 @@ const TABS = [
   ["billing", "Assinatura"],
   ["referrals", "Indicações"],
   ["sales-profile", `Sua ${publicBrand()}`],
+  ["telegram", "Telegram"],
 ] as const;
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; preapproval_id?: string }> }) {
@@ -47,6 +50,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         {tab === "billing" && <BillingTab state={await billingState(user.id)} checkout={checkout} />}
         {tab === "referrals" && <ReferralsTab state={await referralState(user.id)} />}
         {tab === "sales-profile" && <SalesProfileTab profile={await getSalesProfile(user.id)} defaultName={user.name} brand={publicBrand()} />}
+        {tab === "telegram" && <TelegramTab initial={await telegramStatus(user.id)} />}
       </div>
     </>
   );

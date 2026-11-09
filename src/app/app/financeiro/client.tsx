@@ -9,7 +9,7 @@ import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { cardDueDay, categoryOptions, type FinType, type Regime } from "@/domain/finance";
 
-type Account = { id: string; name: string; kind: string; color: string; archived: boolean; initialCents: number; balanceCents: number };
+type Account = { id: string; name: string; kind: string; color: string; archived: boolean; initialCents: number; balanceCents: number; salesCents?: number };
 type Tx = { id: string; type: string; category: string | null; amountCents: number; description: string | null; counterpart: string | null; accountId: string; account: string; accountColor: string; toAccountId: string | null; toAccount: string | null; competence: string; dueDate: string; paidAt: string | null; repeat: boolean; overdue: boolean; cardId: string | null; card: string | null; billDue: string | null };
 type CardOpt = { id: string; name: string; last4: string | null; closingDay: number; dueDay: number };
 const cardLabel = (c: { name: string; last4: string | null }) => (c.last4 ? `${c.name} •••• ${c.last4}` : c.name);
@@ -646,11 +646,12 @@ export function AccountsClient({ accounts }: { accounts: Account[] }) {
               </div>
               <p className="text-xs text-muted">{KIND_LABEL[a.kind] ?? a.kind}{a.archived ? " · arquivada" : ""}</p>
               <p className={`mt-3 text-2xl font-semibold tabular-nums ${a.balanceCents < 0 ? "text-red-400" : ""}`}>{fmtBRL(a.balanceCents)}</p>
-              <p className="text-xs text-muted">saldo inicial {fmtBRL(a.initialCents)}</p>
+              <p className="text-xs text-muted">saldo inicial {fmtBRL(a.initialCents)}{a.salesCents ? ` · vendas recebidas ${fmtBRL(a.salesCents)}` : ""}</p>
             </li>
           ))}
         </ul>
       )}
+      {accounts.length > 0 && <p className="mt-3 text-xs text-muted">O saldo é o saldo inicial mais o que foi recebido e menos o que foi pago: lançamentos pagos do Financeiro, vendas recebidas na conta (em Vendas, Cliente pagou) e pagamentos de faturas feitos por ela.</p>}
       {editing && <AccountDialog account={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
     </>
   );

@@ -10,6 +10,8 @@ const config: NextConfig = {
   // Permite um build separado (ex.: testes E2E) sem conflitar com o servidor de desenvolvimento
   distDir: process.env.NEXT_DIST_DIR || ".next",
   poweredByHeader: false,
+  // Cliente do Telegram (GramJS): roda só no servidor, como pacote do Node, sem passar pelo empacotador
+  serverExternalPackages: ["telegram"],
   async headers() {
     return [
       // A prévia do editor da página pública roda num iframe do próprio app; o resto nunca é emoldurado

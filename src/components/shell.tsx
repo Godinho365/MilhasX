@@ -9,7 +9,7 @@ import {
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Plane, ChevronDown, Users, Gem, Landmark, Briefcase,
   Ticket, ArrowLeftRight, CalendarClock, Crown, Lightbulb, ShoppingCart, Luggage, FileSpreadsheet, ListChecks, Workflow, Target, UserRound,
-  Truck, IdCard, MapPinned, Wallet, Sparkles, Store, Globe, TrendingUp, BarChart3,
+  Truck, IdCard, MapPinned, Wallet, Sparkles, Store, Globe, TrendingUp, BarChart3, MessagesSquare,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -44,6 +44,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/app/crm-milhas", label: "CRM Milhas", icon: Coins },
     ] },
     { href: "/app/buscador", label: "Buscador", icon: Plane },
+    { href: "/app/chat-balcoes", label: "Chat Balcões", icon: MessagesSquare },
     { key: "marketing", label: "Marketing", icon: Megaphone, children: [
       { href: "/app/marketing/criativos", label: "Criativos", icon: Sparkles },
       { href: "/app/marketing/vitrine", label: "Vitrine", icon: Store },
@@ -99,7 +100,7 @@ const TITLES: [string, string][] = [
   ["/app/metricas", "Métricas"], ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
   ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/site", "Site"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
-  ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
+  ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/chat-balcoes", "Chat Balcões"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
 ];
 
 // Tag dos guias que explica cada página (botão "Tutorial" do cabeçalho)

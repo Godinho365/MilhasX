@@ -9,7 +9,7 @@ import { fmtBRL, fmtPts, parseBRLToCents, fmtDate, fmtDateTime, fmtDay as fmtDay
 import { Modal, Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { whatsappLink } from "@/domain/orders";
-import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
+import { BUYER_LABELS, BUYER_TYPES, DEAL_STAGES, DEAL_STAGE_LABELS, balcaoOptions, dealChargeCents, dealProfitCents, parseDealPaste, parsePassengersText, type BuyerType, type DealStageKey, type Passenger } from "@/domain/miles-deals";
 import type { DealView } from "@/server/services/miles-deals";
 import { parseLatamScreen } from "@/domain/latam-screen";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
@@ -32,11 +32,15 @@ const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((
 
 /* ---------------- Nova / editar negociação ---------------- */
 
+const NEW_BALCAO = "__novo__"; // opção "+ Adicionar balcão…" da lista
+
 function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove, avgSaleCpmCents = null }: { deal: DealView | null; customers: Customer[]; accounts: AccountOpt[]; cards: CardOpt[]; balcoes: string[]; onClose: () => void; onMove?: (stage: DealStageKey) => void; avgSaleCpmCents?: number | null }) {
   const router = useRouter();
   const [buyerType, setBuyerType] = useState<BuyerType>(deal?.buyerType ?? "FINAL");
   const [customerId, setCustomerId] = useState(deal?.customerId ?? "");
   const [name, setName] = useState(deal?.customerName ?? "");
+  // balcão que não está na lista: digitando o nome de um novo (entra na lista quando a negociação é salva)
+  const [newBalcao, setNewBalcao] = useState(() => deal?.buyerType === "BALCAO" && !balcoes.includes(deal.customerName));
   const [phone, setPhone] = useState(deal?.customerPhone ?? "");
   const [accountId, setAccountId] = useState(deal?.accountId ?? "");
   const [points, setPoints] = useState(deal?.points ? pts(deal.points) : "");
@@ -113,6 +117,20 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
     readPrint(img);
   }
 
+  // Trocando entre balcão e cliente, o nome de um não serve para o outro
+  function pickBuyerType(b: BuyerType) {
+    if ((b === "BALCAO") !== (buyerType === "BALCAO")) {
+      setName("");
+      setCustomerId("");
+      setNewBalcao(false);
+    }
+    setBuyerType(b);
+  }
+  function pickBalcao(v: string) {
+    if (v !== NEW_BALCAO) return setName(v);
+    setNewBalcao(true);
+    setName("");
+  }
   function pickCustomer(id: string) {
     setCustomerId(id);
     const c = customers.find((x) => x.id === id);
@@ -171,7 +189,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             ))}
           </div>
         )}
-        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>, {deal.paidAt ? `paga em ${fmtDate(deal.paidAt)}` : "a receber"}. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
+        {locked && <Alert kind="info">Venda lançada em <Link href="/app/sales" className="underline">Vendas</Link>, {deal.paidAt ? `paga em ${fmtDate(deal.paidAt)}${deal.paidAccount ? `, na conta ${deal.paidAccount}` : ""}` : "a receber"}. Para mudar conta, pontos ou milheiro, exclua a venda lá.</Alert>}
         {deal && onMove && !deal.saleId && (deal.stage === "ISSUED" || deal.stage === "PAID") && (
           <Alert kind="info">
             Esta negociação {deal.stage === "PAID" ? "está paga" : "foi emitida"}, mas a venda ainda não está em Vendas.{" "}
@@ -181,14 +199,25 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
         <Field label="Comprador">
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Tipo de comprador">
             {BUYER_TYPES.map((b) => (
-              <button key={b} type="button" aria-pressed={buyerType === b} onClick={() => setBuyerType(b)} className={`rounded-lg border px-2.5 py-1 text-sm ${buyerType === b ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>{BUYER_LABELS[b]}</button>
+              <button key={b} type="button" aria-pressed={buyerType === b} onClick={() => pickBuyerType(b)} className={`rounded-lg border px-2.5 py-1 text-sm ${buyerType === b ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>{BUYER_LABELS[b]}</button>
             ))}
           </div>
         </Field>
         {buyerType === "BALCAO" ? (
-          <Field label="Nome do balcão" required>
-            <input className="input" list="balcoes" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} placeholder="Ex.: HotMilhas" />
-            <datalist id="balcoes">{balcoes.map((b) => <option key={b} value={b} />)}</datalist>
+          <Field label="Balcão" required>
+            {newBalcao ? (
+              <div className="flex gap-2">
+                <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} placeholder="Nome do novo balcão" aria-label="Nome do novo balcão" />
+                <button type="button" className="btn-ghost shrink-0" onClick={() => { setNewBalcao(false); setName(""); }}>Escolher da lista</button>
+              </div>
+            ) : (
+              <select className="input" value={name} onChange={(e) => pickBalcao(e.target.value)} required aria-label="Balcão">
+                <option value="" disabled>Escolha o balcão</option>
+                {balcoes.map((b) => <option key={b} value={b}>{b}</option>)}
+                <option value={NEW_BALCAO}>+ Adicionar balcão…</option>
+              </select>
+            )}
+            {newBalcao && <p className="mt-1 text-xs text-muted">Ao salvar a negociação, o balcão entra na lista para as próximas.</p>}
           </Field>
         ) : (
           <>
@@ -474,7 +503,7 @@ export function DealsList({ active, archived, customers, accounts, cards = [], a
   const [open, setOpen] = useState<string | null>(null);
   const all = [...active, ...archived];
   const deal = all.find((d) => d.id === open) ?? null;
-  const balcoes = [...new Set([...all.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName), "HotMilhas", "MaxMilhas"])];
+  const balcoes = balcaoOptions(all.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName));
   const fmtDay = (iso: string) => fmtDayBR(iso);
   const table = (rows: DealView[], empty: string) =>
     rows.length === 0 ? <p className="px-5 py-8 text-center text-sm text-muted">{empty}</p> : (
@@ -925,7 +954,7 @@ export function DealsKanban({ deals, customers, accounts, cards = [], avgSaleCpm
   const shown = list.filter((d) => (buyer === "ALL" || d.buyerType === buyer) && (!q || d.customerName.toLowerCase().includes(q) || String(d.number) === q.replace("#", "")));
   const openDeal = list.find((d) => d.id === open) ?? null;
   // Sugestões de nome do balcão: os já usados e as plataformas mais comuns
-  const balcoes = [...new Set([...list.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName), "HotMilhas", "MaxMilhas"])];
+  const balcoes = balcaoOptions(list.filter((d) => d.buyerType === "BALCAO").map((d) => d.customerName));
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-2">

@@ -244,6 +244,47 @@ describe("fluxo de caixa com vendas e compras de pontos", () => {
     const oid = (await o.call(register.POST, "POST", "/r", { name: "Outro", email: "o2@x.test", password: "senha-forte-2" })).data.user.id;
     expect((await financeCashflow(oid, "2026-02")).months.every((m) => m.incomePlanned === 0 && m.expensePlanned === 0)).toBe(true);
   });
+
+  it("venda recebida numa conta soma no saldo dela; sem conta escolhida, vai para a primeira conta ativa", async () => {
+    const p = await seedPrograms();
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana" })).data.item.id;
+    const lat = (await c.call(milesAccounts.POST, "POST", "/a", { holderId: h, programId: p.latam.id })).data.item.id;
+    await c.call(entries.POST, "POST", "/e", { accountId: lat, type: "PURCHASE", points: 50_000, occurredAt: "2026-11-01", costs: [{ type: "PONTOS", amountCents: 50_000 }] });
+    const sell = async (cents: number) => (await c.call(sales.POST, "POST", "/api/sales", { origin: "OWN", accountId: lat, occurredAt: "2026-11-05", items: [{ kind: "FLIGHT", issuedWith: "POINTS", points: 10_000, salePriceCents: cents, passengers: 1 }] })).data.item.id;
+    const [older, s1, s2] = [await sell(10_000), await sell(40_000), await sell(25_000)];
+    // venda paga antes de existir conta no Financeiro: não entra em conta nenhuma
+    expect((await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-06" }, { id: older })).data.item).toMatchObject({ finAccountId: null, finAccount: null });
+    const pj = (await c.call(accountsRoute.POST, "POST", "/x", { name: "Nubank PJ", kind: "BANK", initialCents: 1_000 })).data.id;
+    const other = (await c.call(accountsRoute.POST, "POST", "/x", { name: "Caixa", kind: "CASH", initialCents: 0 })).data.id;
+
+    // escolhida a conta: entra nela
+    const r = await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07", accountId: other }, { id: s1 });
+    expect([r.status, r.data.item.finAccount]).toEqual([200, "Caixa"]);
+    // sem conta: a primeira ativa (Nubank PJ)
+    expect((await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07" }, { id: s2 })).data.item.finAccountId).toBe(pj);
+    let accs = await listFinAccounts(userId);
+    expect(accs.map((a) => [a.name, a.balanceCents, a.salesCents])).toEqual([["Nubank PJ", 26_000, 25_000], ["Caixa", 40_000, 40_000]]);
+    expect((await financeOverview(userId, "2026-11", "caixa")).balance.cash).toBe(66_000);
+
+    // trocar a conta de uma venda paga; null = fora das contas
+    await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07", accountId: pj }, { id: s1 });
+    expect((await listFinAccounts(userId)).map((a) => a.balanceCents)).toEqual([66_000, 0]);
+    await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07", accountId: null }, { id: s1 });
+    expect((await listFinAccounts(userId))[0]!.balanceCents).toBe(26_000);
+    // de volta a receber: sai da conta
+    await c.call(salePayment.POST, "POST", "/p", { paid: false }, { id: s2 });
+    expect(await prisma.sale.findUniqueOrThrow({ where: { id: s2 }, select: { paidAt: true, finAccountId: true } })).toEqual({ paidAt: null, finAccountId: null });
+    accs = await listFinAccounts(userId);
+    expect(accs[0]).toMatchObject({ balanceCents: 1_000, salesCents: 0 });
+
+    // conta de outro usuário não serve; conta com venda recebida é arquivada, não excluída
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Outro", email: "o3@x.test", password: "senha-forte-2" });
+    const theirs = (await o.call(accountsRoute.POST, "POST", "/x", { name: "Dele", kind: "BANK", initialCents: 0 })).data.id;
+    expect((await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07", accountId: theirs }, { id: s2 })).status).toBe(404);
+    await c.call(salePayment.POST, "POST", "/p", { paid: true, date: "2026-11-07", accountId: other }, { id: s2 });
+    expect((await c.call(accountRoute.DELETE, "DELETE", "/x", undefined, { id: other })).data.result).toBe("archived");
+  });
 });
 
 describe("faturas dos cartões", () => {

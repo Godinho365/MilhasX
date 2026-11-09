@@ -139,6 +139,70 @@ model User {
   flightSearches      FlightSearch[]
   milesLeads          MilesLead[]
   contractSignatures  ContractSignature[]
+  telegramLinks       TelegramLink[]
+  telegramAlerts      TelegramAlert[]
+  telegramDms         TelegramDm[]
+}
+
+/// Conta do Telegram do usuário (pode ter várias), conectada para ler o grupo do balcão (só leitura). A sessão dá
+/// acesso à conta: fica criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas
+/// etapas) → ativa. Um número por usuário.
+model TelegramLink {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionEnc    String // sessão do Telegram, criptografada
+  status        String   @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
+  phone         String // número usado no login (+55...)
+  phoneCodeHash String? // da etapa do código (sai quando o login termina)
+  codeViaApp    Boolean  @default(true) // o código chegou no app do Telegram (senão, por SMS)
+  accountName   String? // conta conectada (nome e @usuário)
+  groupId       String? // grupo do balcão escolhido
+  groupTitle    String?
+  groupPeer     Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  dms           TelegramDm[]
+
+  @@unique([userId, phone])
+  @@index([userId])
+}
+
+/// Conversa no privado aberta pelo Chat Balcões com alguém de um grupo de balcão, por uma das contas do Telegram.
+/// Fecha aqui sem apagar nada no Telegram.
+model TelegramDm {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkId    String
+  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  peerId    String // id da pessoa no Telegram
+  peerHash  String // hash de acesso dela para esta conta (para ler e mandar mensagem)
+  name      String
+  username  String?
+  createdAt DateTime     @default(now())
+
+  @@unique([linkId, peerId])
+  @@index([userId])
+}
+
+/// Alerta do Chat Balcões: destaca e avisa das mensagens dos grupos. Pelo pedido de compra (programa, até N CPFs,
+/// faixa de milhas, milheiro mínimo) e/ou por palavras (todas precisam aparecer).
+model TelegramAlert {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  words       String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
+  program     String? // vazio = qualquer programa
+  maxCpfs     Int? // pedido de até N CPFs
+  minMiles    Int?
+  maxMiles    Int?
+  minCpmCents Int? // milheiro oferecido de pelo menos
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
 }
 
 enum Plan {
@@ -414,7 +478,9 @@ model Sale {
   refundMilesReceivedAt  DateTime? // estorno das milhas pela companhia (até lá ficam bloqueadas, a receber)
   refundTaxReceivedAt    DateTime? // estorno da taxa de embarque e dos repasses pela companhia
   paidAt                 DateTime? // cliente pagou (vazio = a receber)
-  tags                   String[]         @default([]) // etiquetas livres para filtrar
+  finAccountId           String? // conta do Financeiro em que o pagamento entrou (soma no saldo dela)
+  finAccount             FinAccount?      @relation(fields: [finAccountId], references: [id], onDelete: SetNull)
+  tags                 String[]         @default([]) // etiquetas livres para filtrar
   nfNumber               String? // nota fiscal de serviço emitida para a venda
   nfIssuedAt             DateTime?
   partnerId              String? // parceiro que trouxe a venda (comissão)
@@ -1184,6 +1250,7 @@ model FinAccount {
   outgoing     FinTransaction[]  @relation("FinFrom")
   incoming     FinTransaction[]  @relation("FinTo")
   billPayments CardBillPayment[]
+  sales        Sale[] // vendas recebidas nesta conta
 
   @@index([userId])
 }
