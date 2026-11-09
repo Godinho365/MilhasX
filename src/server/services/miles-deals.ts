@@ -27,6 +27,7 @@ export type DealInput = {
   orderLink?: string | null;
   locator?: string | null;
   notes?: string | null;
+  sourceRef?: string | null; // de onde veio (pedido do Chat Balcões); só na criação
 };
 
 const include = {
@@ -203,7 +204,7 @@ export async function createDeal(userId: string, input: DealInput) {
     try {
       return await prisma.$transaction(async (tx) => {
         const last = await tx.milesDeal.aggregate({ where: { userId }, _max: { number: true } });
-        return view(await tx.milesDeal.create({ data: { userId, number: (last._max.number ?? 0) + 1, ...data(input) }, include }));
+        return view(await tx.milesDeal.create({ data: { userId, number: (last._max.number ?? 0) + 1, ...data(input), sourceRef: input.sourceRef || null }, include }));
       });
     } catch (e) {
       if (attempt < 3 && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;

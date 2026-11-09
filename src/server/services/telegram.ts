@@ -13,7 +13,10 @@ import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { matchAlerts, parseAlertWords, hasAdCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
-import { parseBalcaoAd } from "@/domain/balcao-ads";
+import { parseBalcaoAd, emissionProfit, normalizeText } from "@/domain/balcao-ads";
+import { balcaoOptions } from "@/domain/miles-deals";
+import { createDeal, moveDeal } from "./miles-deals";
+import { emissionAccounts } from "./capacity";
 
 /** Como chegar no chat direto (sem listar os chats da conta): supergrupo/canal e pessoa precisam do hash de acesso. */
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
@@ -407,10 +410,50 @@ export async function chatMessages(userId: string, id: string, opts: { limit?: n
     guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
     activeAlerts(userId),
   ]);
-  return msgs.map((m) => {
+  const read = msgs.map((m) => {
     const ad = m.text ? parseBalcaoAd(m.text) : null; // pedido de compra/venda lido da mensagem (contraproposta não é)
     return { ...m, ad, alerts: m.text ? matchAlerts(m.text, rules, ad) : [] };
   });
+  // pedidos já registrados no CRM Milhas
+  const refs = read.filter((m) => m.ad).map((m) => adRef(l.id, l.groupId!, m.id));
+  const deals = refs.length ? await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true } }) : [];
+  const byRef = new Map(deals.map((d) => [d.sourceRef, { id: d.id, number: d.number, stage: d.stage }]));
+  return read.map((m) => ({ ...m, crm: m.ad ? byRef.get(adRef(l.id, l.groupId!, m.id)) ?? null : null }));
+}
+
+/** Referência do pedido na negociação do CRM Milhas: conta, grupo e mensagem (o número da mensagem é por grupo). */
+const adRef = (linkId: string, groupId: string, messageId: number) => `tg:${linkId}:${groupId}:${messageId}`;
+const brl = (cents: number) => `R$ ${(cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Registra o pedido do grupo no CRM Milhas: negociação de balcão (o da lista que bate com o nome do grupo, ou o
+ * próprio grupo) com as milhas, os CPFs e o milheiro (o da sua contraproposta, se houver, senão o do pedido), na
+ * conta mais barata que consegue emitir, e o texto do pedido nas observações. Com contraproposta, já vai para
+ * "Negociação". Um pedido vira uma negociação só.
+ */
+export async function registerAdInCrm(userId: string, id: string, input: { messageId: number; text: string; sender: string; cpmCents?: number | null }) {
+  const l = await own(userId, id);
+  if (!l.groupId) throw new DomainError(409, "Escolha o grupo do balcão desta conta em Configurações › Telegram");
+  const ad = parseBalcaoAd(input.text);
+  if (!ad) throw new DomainError(400, "Esta mensagem não é um pedido");
+  const sourceRef = adRef(l.id, l.groupId, input.messageId);
+  const existing = await prisma.milesDeal.findFirst({ where: { userId, sourceRef }, select: { number: true } });
+  if (existing) throw new DomainError(409, `Este pedido já está no CRM Milhas (#${existing.number})`);
+  const cpmCents = input.cpmCents ?? ad.cpmCents;
+  const profit = emissionProfit(ad, cpmCents, await emissionAccounts(userId));
+  const group = l.groupTitle?.trim() || "Balcão";
+  const used = await prisma.milesDeal.findMany({ where: { userId, buyerType: "BALCAO" }, select: { customerName: true }, distinct: ["customerName"] });
+  const balcao = balcaoOptions(used.map((u) => u.customerName)).find((b) => normalizeText(group).includes(normalizeText(b))) ?? group;
+  const notes = [
+    `Pedido de ${input.sender} no grupo ${group}:`,
+    input.text.trim().slice(0, 1500),
+    input.cpmCents != null ? `Minha contraproposta: ${brl(input.cpmCents)} o milheiro` : null,
+  ].filter(Boolean).join("\n");
+  const deal = await createDeal(userId, {
+    buyerType: "BALCAO", customerName: balcao, accountId: profit?.accountId ?? null, points: ad.miles, saleCpmCents: cpmCents ?? null,
+    passengers: ad.cpfs ?? 1, notes, sourceRef,
+  });
+  return input.cpmCents != null ? moveDeal(userId, deal.id, "NEGOTIATION") : deal;
 }
 
 /** Texto para mandar: sem espaços sobrando; o Telegram aceita até 4.096 caracteres. */

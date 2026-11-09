@@ -17,6 +17,7 @@ import * as dmOpenRoute from "@/app/api/telegram/accounts/[id]/dms/route";
 import * as dmsRoute from "@/app/api/telegram/dms/route";
 import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
+import * as crmRoute from "@/app/api/telegram/accounts/[id]/crm/route";
 import * as clearRoute from "@/app/api/telegram/accounts/[id]/clear/route";
 import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
 import * as msgRoute from "@/app/api/telegram/accounts/[id]/messages/[msgId]/route";
@@ -455,5 +456,31 @@ describe("limpar o chat só no app", () => {
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await o.call(clearRoute.POST, "POST", "/x", { upTo: 1 }, { id: a })).status).toBe(404);
     expect((await o.call(dmClearRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
+  });
+});
+
+describe("registrar o pedido no CRM Milhas", () => {
+  it("cria a negociação de balcão com o pedido; com contraproposta, no milheiro dela e em Negociação; não duplica", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const r = await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a });
+    expect([r.status, r.data.item]).toEqual([201, expect.objectContaining({ number: 1, stage: "NEW", buyerType: "BALCAO", customerName: "Balcão de Milhas ASM", points: 100_000, saleCpmCents: 2500, passengers: 1 })]);
+    expect(r.data.item.notes).toMatch(/Pedido de Ana no grupo Balcão de Milhas ASM:\nCompro 100k LATAM/);
+    expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).data.erro).toMatch(/já está no CRM Milhas \(#1\)/);
+    // a mensagem do pedido mostra a negociação
+    const msgs = (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items;
+    expect(msgs.find((m: { id: number }) => m.id === 1).crm).toEqual({ id: r.data.item.id, number: 1, stage: "NEW" });
+    expect(msgs.find((m: { id: number }) => m.id === 2).crm).toBeNull();
+    expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 2, text: "Bom dia, pessoal", sender: "Bia" }, { id: a })).data.erro).toMatch(/não é um pedido/);
+
+    // pela sua contraproposta: no milheiro dela, já em Negociação; balcão = o próprio grupo quando não está na lista
+    const b = await connected("21977776666", "-1005678");
+    const offer = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 10, text: "compro latam 30K urgente", sender: "Eva", cpmCents: 2700 }, { id: b })).data.item;
+    expect(offer).toMatchObject({ number: 2, stage: "NEGOTIATION", customerName: "Balcão Milhas VIP", points: 30_000, saleCpmCents: 2700 });
+    expect(offer.notes).toMatch(/Minha contraproposta: R\$ 27,00 o milheiro/);
+    expect(await prisma.milesDeal.findFirstOrThrow({ where: { id: offer.id } })).toMatchObject({ sourceRef: `tg:${b}:-1005678:10` });
+
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).status).toBe(404);
   });
 });

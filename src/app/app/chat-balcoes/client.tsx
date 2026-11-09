@@ -5,17 +5,19 @@
 // o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser, KanbanSquare } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
 import { BALCAO_PROGRAMS, emissionProfit, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
+import { DEAL_STAGE_LABELS, type DealStageKey } from "@/domain/miles-deals";
 
 type Chat = { id: string; title: string; account: string; clearedUpTo?: number | null };
 export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null; clearedUpTo?: number | null };
-type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; ad: BalcaoAd | null; alerts: string[] };
+type CrmRef = { id: string; number: number; stage: string };
+type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; ad: BalcaoAd | null; alerts: string[]; crm?: CrmRef | null };
 type FeedMsg = Msg & { chatId: string; chat: string };
 /** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
 type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
@@ -223,6 +225,19 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
     setMsgs((cur) => (cur ?? []).filter((x) => x.id !== m.id));
     toast("Mensagem excluída");
   }
+  /** Registra o pedido no CRM Milhas (cpmCents = o da sua contraproposta; sem ele, o do pedido). */
+  const [registering, setRegistering] = useState<number | null>(null);
+  async function registerCrm(ad: Msg, cpmCents?: number) {
+    if (!group) return;
+    setRegistering(ad.id);
+    const r = await api<{ item: { id: string; number: number; stage: string } }>(`/api/telegram/accounts/${source.chat.id}/crm`, "POST", { messageId: ad.id, text: ad.text, sender: ad.sender, cpmCents: cpmCents ?? null });
+    setRegistering(null);
+    if (!r.ok) return toast(r.erro, "error");
+    const crm = { id: r.data.item.id, number: r.data.item.number, stage: r.data.item.stage };
+    setMsgs((cur) => (cur ?? []).map((m) => (m.id === ad.id ? { ...m, crm } : m)));
+    toast(`Negociação #${crm.number} registrada no CRM Milhas`);
+  }
+
   /** Limpa o chat só aqui: as mensagens até agora somem da tela; as novas continuam chegando. */
   async function clearChat() {
     const last = msgs?.at(-1)?.id;
@@ -287,6 +302,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
             <Bubble key={m.id} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
               profit={group && m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null}
               profitAt={group && m.ad ? (cents) => emissionProfit(m.ad!, cents, accounts) : undefined}
+              onCrm={group && m.ad ? (cents) => registerCrm(m, cents) : undefined} registering={registering === m.id}
               onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id}
               onEdit={m.out && m.text ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
               onEditOffer={edit} onDeleteOffer={remove} editingId={editing?.id} />
@@ -335,10 +351,11 @@ type Profit = ReturnType<typeof emissionProfit>;
 
 /** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
  *  offers: as contrapropostas ao pedido; profit: o lucro de atender o pedido pelo milheiro dele com a sua conta;
- *  profitAt: o lucro por outro milheiro (o da sua contraproposta). */
-function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId }: {
+ *  profitAt: o lucro por outro milheiro (o da sua contraproposta); onCrm: registra o pedido no CRM Milhas. */
+function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering }: {
   m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; quoted?: Msg | null; offers?: Msg[];
   profit?: Profit; profitAt?: (cpmCents: number) => Profit; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
+  onCrm?: (cpmCents?: number) => void; registering?: boolean;
 }) {
   const hit = m.alerts.length > 0;
   async function copy() {
@@ -356,6 +373,9 @@ function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, off
         {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
         <span className="ml-auto shrink-0 text-muted">{when(m.date)}</span>
         {onReply && <button type="button" onClick={onReply} className="flex shrink-0 items-center gap-1 font-medium text-accent-light opacity-90 hover:opacity-100" aria-label={m.ad ? `Contraproposta para ${m.sender}` : `Responder ${m.sender}`} title={m.ad ? "Mandar a sua contraproposta como resposta a este pedido" : "Responder esta mensagem"}><Reply className="h-3.5 w-3.5" />{m.ad ? "Contraproposta" : "Responder"}</button>}
+        {m.crm
+          ? <Link href={`/app/crm-milhas?deal=${m.crm.id}`} className="flex shrink-0 items-center gap-1 font-medium text-emerald-300 hover:underline" title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />No CRM #{m.crm.number} · {DEAL_STAGE_LABELS[m.crm.stage as DealStageKey] ?? m.crm.stage}</Link>
+          : onCrm && <button type="button" onClick={() => onCrm()} disabled={registering} className="flex shrink-0 items-center gap-1 text-accent-light opacity-80 hover:opacity-100" title="Registrar este pedido no CRM Milhas (com o milheiro do pedido)"><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
         {onDm && <button type="button" onClick={onDm} disabled={opening} className="flex shrink-0 items-center gap-1 text-accent-light opacity-70 hover:opacity-100 group-hover:opacity-100" title="Conversar no privado com quem mandou"><MessageCircle className="h-3.5 w-3.5" />{opening ? "Abrindo…" : "Privado"}</button>}
         {onEdit && <button type="button" onClick={onEdit} className="shrink-0 text-muted hover:text-zinc-100" aria-label="Editar a sua mensagem" title="Editar"><Pencil className="h-3.5 w-3.5" /></button>}
         {onDelete && <button type="button" onClick={onDelete} className="shrink-0 text-muted hover:text-red-300" aria-label="Excluir a sua mensagem" title="Excluir para todos"><Trash2 className="h-3.5 w-3.5" /></button>}
@@ -379,7 +399,7 @@ function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, off
       {m.media && <p className="mt-1 text-xs italic text-muted">[{m.media}]</p>}
       {m.text && <p className={`mt-1 whitespace-pre-wrap break-words ${m.ad ? "text-xs text-muted" : "text-sm"}`}>{m.text}</p>}
       {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
-      {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} />}
+      {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} onCrm={m.crm ? undefined : onCrm} registering={registering} />}
     </div>
   );
 }
@@ -405,7 +425,7 @@ function ProfitLine({ profit: p, cpmCents, compact }: { profit: NonNullable<Prof
 /** Contrapropostas dos membros a um pedido: do menor milheiro para o maior (sem valor por último), as 5 primeiras e
  *  o resto ao abrir. A sua aparece sempre, como "Você", com o lucro pelo seu preço (lucro, por CPF, sobra, CPFs
  *  livres e a conta), igual ao do pedido. */
-function Offers({ offers, onEdit, onDelete, editingId, profitAt }: { offers: Msg[]; onEdit?: (m: Msg) => void; onDelete?: (m: Msg) => void; editingId?: number; profitAt?: (cpmCents: number) => Profit }) {
+function Offers({ offers, onEdit, onDelete, editingId, profitAt, onCrm, registering }: { offers: Msg[]; onEdit?: (m: Msg) => void; onDelete?: (m: Msg) => void; editingId?: number; profitAt?: (cpmCents: number) => Profit; onCrm?: (cpmCents?: number) => void; registering?: boolean }) {
   const [all, setAll] = useState(false);
   const rows = offers
     .map((o) => ({ o, cents: parseCounterOffer(o.text) }))
@@ -425,6 +445,7 @@ function Offers({ offers, onEdit, onDelete, editingId, profitAt }: { offers: Msg
               <div className="flex items-baseline gap-2">
                 <span className={`w-20 shrink-0 tabular-nums ${cents != null && cents === best ? "font-semibold text-emerald-300" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
                 <span className="min-w-0 flex-1 truncate" title={o.text}>{o.sender}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
+                {o.out && cents != null && onCrm && <button type="button" onClick={() => onCrm(cents)} disabled={registering} className="flex shrink-0 items-center gap-1 self-center font-medium text-accent-light hover:underline" title="Registrar no CRM Milhas com o milheiro da sua contraproposta"><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
                 {o.out && onEdit && <button type="button" onClick={() => onEdit(o)} className="shrink-0 self-center text-muted hover:text-zinc-100" aria-label="Editar a sua contraproposta" title="Editar a sua contraproposta"><Pencil className="h-3.5 w-3.5" /></button>}
                 {o.out && onDelete && <button type="button" onClick={() => onDelete(o)} className="shrink-0 self-center text-muted hover:text-red-300" aria-label="Excluir a sua contraproposta" title="Excluir a sua contraproposta"><Trash2 className="h-3.5 w-3.5" /></button>}
                 <span className="shrink-0 font-normal text-muted">{when(o.date)}</span>

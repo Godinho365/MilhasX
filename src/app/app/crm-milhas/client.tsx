@@ -913,11 +913,12 @@ function Card({ d, onOpen, onDragStart }: { d: DealView; onOpen: () => void; onD
   );
 }
 
-export function DealsKanban({ deals, customers, accounts, cards = [], avgSaleCpmCents = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; cards?: CardOpt[]; avgSaleCpmCents?: number | null }) {
+export function DealsKanban({ deals, customers, accounts, cards = [], avgSaleCpmCents = null, openId = null }: { deals: DealView[]; customers: Customer[]; accounts: AccountOpt[]; cards?: CardOpt[]; avgSaleCpmCents?: number | null; openId?: string | null }) {
   const router = useRouter();
   const [list, setList] = useState(deals);
   const [over, setOver] = useState<DealStageKey | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  // ?deal=<id> (ex.: registrada pelo Chat Balcões) já abre a negociação
+  const [open, setOpen] = useState<string | null>(openId && deals.some((d) => d.id === openId) ? openId : null);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
   const [buyer, setBuyer] = useState<"ALL" | BuyerType>("ALL");
