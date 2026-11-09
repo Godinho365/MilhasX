@@ -5,27 +5,46 @@
 // o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser, KanbanSquare } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser, KanbanSquare, Handshake } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
-import { BALCAO_PROGRAMS, emissionProfit, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
+import { BALCAO_PROGRAMS, emissionProfit, parseBalcaoAd, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
 import { DEAL_STAGE_LABELS, type DealStageKey } from "@/domain/miles-deals";
 
 type Chat = { id: string; title: string; account: string; clearedUpTo?: number | null };
-export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null; clearedUpTo?: number | null };
+/** O pedido a que você mandou a contraproposta no privado (a conversa fica ligada a ele). */
+type DmOffer = { chatId: string; messageId: number; text: string; sender: string; group: string; cpmCents: number | null; at: string };
+export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null; clearedUpTo?: number | null; offer?: DmOffer | null; crm?: CrmRef | null };
+type Unread = { id: string; unread: number; reopened: boolean; last: { id: number; text: string; date: string } | null; dm: Dm };
 type CrmRef = { id: string; number: number; stage: string };
-type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; ad: BalcaoAd | null; alerts: string[]; crm?: CrmRef | null };
+type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; fwd?: boolean; ad: BalcaoAd | null; alerts: string[]; crm?: CrmRef | null };
 type FeedMsg = Msg & { chatId: string; chat: string };
 /** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
 type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
 
 const CHAT_POLL_MS = 15_000;
 const FEED_POLL_MS = 30_000;
+const UNREAD_POLL_MS = 20_000;
 const ALERTS_TAB = "alertas";
 const dmKey = (id: string) => `dm:${id}`;
+/** id da mensagem na página (para rolar até ela): o chat (pela url) e o número da mensagem. */
+const msgDomId = (url: string, id: number) => `msg-${url.split("/").slice(-2, -1)[0]}-${id}`;
+const ALERTS_SEEN_KEY = "chat-balcoes:alertas-vistos"; // até quando a aba Alertas foi vista (data da mensagem)
+
+/** Bolinha com a quantidade de não vistas na aba (100 ou mais = 99+). */
+function Badge({ n, tone = "accent" }: { n: number; tone?: "accent" | "amber" }) {
+  if (n <= 0) return null;
+  return <span className={`rounded-full px-1.5 text-[11px] font-bold ${tone === "amber" ? "bg-amber-500 text-black" : "bg-accent-light text-zinc-950"}`} aria-label={`${n} não vistas`}>{n > 99 ? "99+" : n}</span>;
+}
+function readAlertsSeen() {
+  try { return localStorage.getItem(ALERTS_SEEN_KEY); } catch { return null; }
+}
+function writeAlertsSeen(iso: string) {
+  try { localStorage.setItem(ALERTS_SEEN_KEY, iso); } catch { /* sem armazenamento: vale só nesta tela */ }
+}
 
 /** Milhas digitadas: "100k", "100.000" ou "100000"; vazio = null; inválido = undefined. */
 function milesInput(raw: string): number | null | undefined {
@@ -65,11 +84,17 @@ function usePolling(fn: () => void, ms: number, on = true) {
 export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts = [], openDmId = null }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[]; accounts?: EmissionAccount[]; openDmId?: string | null }) {
   // abre direto na conversa pedida (vinda do CRM Milhas) ou no primeiro grupo
   const [tab, setTab] = useState(openDmId ? `dm:${openDmId}` : chats[0]!.id);
+  // mensagem a mostrar no chat (vinda da aba Alertas): o chat rola até ela e abre a contraproposta; n = cada clique
+  const [focus, setFocus] = useState<{ chatId: string; id: number; n: number } | null>(null);
+  function negotiate(chatId: string, id: number) {
+    setTab(chatId);
+    setFocus({ chatId, id, n: Date.now() });
+  }
   const [dms, setDms] = useState(initialDms);
   const [alerts, setAlerts] = useState(initialAlerts);
   const [feed, setFeed] = useState<FeedMsg[] | null>(null);
   const [feedErrors, setFeedErrors] = useState<{ chat: string; erro: string }[]>([]);
-  const [unseen, setUnseen] = useState(0);
+  const [alertsSeenAt, setAlertsSeenAt] = useState<string | null>(null); // alertas vistos até esta data
   const seen = useRef<Set<string> | null>(null); // mensagens com alerta já vistas (para avisar só das novas)
   const active = alerts.some((a) => a.active);
 
@@ -83,7 +108,6 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
     const fresh = r.data.items.filter((m) => !seen.current!.has(`${m.chatId}:${m.id}`));
     for (const k of keys) seen.current.add(k);
     if (!fresh.length) return;
-    setUnseen((n) => n + fresh.length);
     for (const m of fresh.slice(0, 3)) {
       toast(`Alerta ${m.alerts.join(", ")} em ${m.chat}`);
       if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(`Alerta: ${m.alerts.join(", ")} · ${m.chat}`, { body: `${m.sender}: ${m.text.slice(0, 140)}`, tag: `${m.chatId}:${m.id}` });
@@ -95,6 +119,51 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
     if (active) void loadFeed();
   }, [active, alerts, loadFeed]);
   usePolling(loadFeed, FEED_POLL_MS, active);
+  // não vistos dos alertas: os que chegaram depois da última vez que a aba foi aberta (fica guardado no navegador)
+  const newestAlert = feed?.[0]?.date ?? null;
+  useEffect(() => {
+    if (!newestAlert) return;
+    const stored = alertsSeenAt ?? readAlertsSeen();
+    // primeira vez: começa do zero; com a aba Alertas aberta, o que chega já conta como visto
+    const next = !stored || tab === ALERTS_TAB ? (stored && stored > newestAlert ? stored : newestAlert) : stored;
+    if (next !== alertsSeenAt) setAlertsSeenAt(next);
+    if (next !== stored) writeAlertsSeen(next);
+  }, [newestAlert, tab, alertsSeenAt]);
+  const unseenAlerts = feed && alertsSeenAt ? feed.filter((m) => m.date > alertsSeenAt).length : 0;
+
+  // não vistas em cada aba (grupo e privado, pela chave da aba); quem responde a sua contraproposta ganha a aba de
+  // volta sozinho
+  const [unread, setUnread] = useState<Record<string, number>>({});
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const loadUnread = useCallback(async () => {
+    const r = await api<{ items: Unread[]; groups: { id: string; unread: number }[] }>("/api/telegram/dms/unread");
+    if (!r.ok) return;
+    const open = r.data.items.filter((u) => u.unread > 0);
+    setDms((cur) => {
+      const add = open.filter((u) => !cur.some((d) => d.id === u.id)).map((u) => u.dm);
+      return add.length ? [...cur, ...add] : cur;
+    });
+    // a aba aberta na tela se marca como vista sozinha
+    const counts: [string, number][] = [...r.data.items.map((u) => [dmKey(u.id), u.unread] as [string, number]), ...r.data.groups.map((g) => [g.id, g.unread] as [string, number])];
+    setUnread(Object.fromEntries(counts.map(([k, n]) => [k, tabRef.current === k ? 0 : n])));
+    for (const u of open.filter((x) => x.reopened).slice(0, 3)) {
+      toast(`${u.dm.name} respondeu a sua contraproposta`);
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification(`${u.dm.name} respondeu no privado`, { body: u.last?.text.slice(0, 140) ?? "", tag: `dm:${u.id}:${u.last?.id ?? 0}` });
+    }
+  }, []);
+  useEffect(() => { void loadUnread(); }, [loadUnread]);
+  usePolling(loadUnread, UNREAD_POLL_MS);
+  /** A aba (grupo ou privado) foi vista na tela até a mensagem upTo. */
+  const seenAt = useRef<Record<string, number>>({});
+  const markSeen = useCallback((key: string, url: string, upTo: number) => {
+    setUnread((u) => (u[key] ? { ...u, [key]: 0 } : u));
+    if ((seenAt.current[key] ?? 0) >= upTo) return;
+    seenAt.current[key] = upTo;
+    void api(url, "POST", { upTo });
+  }, []);
+  /** Contraproposta mandada também no privado: a conversa aparece na barra (sem trocar de aba). */
+  const offerDm = useCallback((dm: Dm) => setDms((cur) => (cur.some((d) => d.id === dm.id) ? cur.map((d) => (d.id === dm.id ? dm : d)) : [...cur, dm])), []);
 
   /** Chamar no privado quem mandou a mensagem do grupo: abre (ou volta para) a aba da conversa. */
   async function openDm(chatId: string, messageId: number) {
@@ -113,23 +182,23 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
 
   const tabBtn = (key: string, label: React.ReactNode, hint: string, extra?: React.ReactNode) => (
     <div key={key} className={`-mb-px flex items-center border-b-2 ${tab === key ? "border-accent-light text-white" : "border-transparent text-muted hover:text-zinc-100"}`}>
-      <button type="button" onClick={() => { setTab(key); if (key === ALERTS_TAB) setUnseen(0); }} aria-current={tab === key ? "page" : undefined} title={hint} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium">{label}</button>
+      <button type="button" onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined} title={hint} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium">{label}</button>
       {extra}
     </div>
   );
   return (
     <>
       <nav className="mb-4 flex gap-1 overflow-x-auto border-b border-line" aria-label="Chats dos balcões">
-        {chats.map((c) => tabBtn(c.id, c.title, `pela conta ${c.account}`))}
-        {dms.map((d) => tabBtn(dmKey(d.id), <><UserRound className="h-4 w-4" />{d.name}</>, `Privado pela conta ${d.via}`,
+        {chats.map((c) => tabBtn(c.id, <>{c.title}{tab !== c.id && <Badge n={unread[c.id] ?? 0} />}</>, `pela conta ${c.account}`))}
+        {dms.map((d) => tabBtn(dmKey(d.id), <><UserRound className="h-4 w-4" />{d.name}{tab !== dmKey(d.id) && <Badge n={unread[dmKey(d.id)] ?? 0} />}</>, `Privado pela conta ${d.via}${d.offer ? ` · contraproposta ao pedido do grupo ${d.offer.group}` : ""}`,
           <button type="button" onClick={() => closeDm(d)} className="-ml-1.5 mr-1 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={`Fechar a conversa com ${d.name}`} title="Fechar aqui (no Telegram a conversa continua)"><X className="h-3.5 w-3.5" /></button>))}
-        {tabBtn(ALERTS_TAB, <><Bell className="h-4 w-4" />Alertas{unseen > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-black">{unseen}</span>}</>, `${alerts.filter((a) => a.active).length} ativos`)}
+        {tabBtn(ALERTS_TAB, <><Bell className="h-4 w-4" />Alertas{tab !== ALERTS_TAB && <Badge n={unseenAlerts} tone="amber" />}</>, `${alerts.filter((a) => a.active).length} ativos`)}
         <Link href="/app/settings?tab=telegram" className="ml-auto flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-zinc-100" title="Contas e grupos do Telegram"><Settings className="h-3.5 w-3.5" />Contas</Link>
       </nav>
       {/* os chats ficam montados: trocar de aba não perde o que já carregou */}
-      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} accounts={accounts} /></div>)}
-      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} /></div>)}
-      {tab === ALERTS_TAB && <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={setTab} reload={loadFeed} />}
+      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} onOfferDm={offerDm} onSeen={(upTo) => markSeen(c.id, `/api/telegram/chats/${c.id}/seen`, upTo)} focus={focus?.chatId === c.id ? focus : null} accounts={accounts} /></div>)}
+      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} onSeen={(upTo) => markSeen(dmKey(d.id), `/api/telegram/dms/${d.id}/seen`, upTo)} accounts={accounts} /></div>)}
+      {tab === ALERTS_TAB && <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={setTab} reload={loadFeed} accounts={accounts} onNegotiate={negotiate} />}
     </>
   );
 }
@@ -137,7 +206,7 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
 /** Mensagens de um grupo ou de uma conversa no privado: carrega as últimas e depois só as novas (de 15 em 15
  *  segundos, com a aba aberta), com o campo para mandar mensagem embaixo. No grupo, cada pedido mostra o lucro de
  *  atendê-lo pela sua conta mais barata que consegue emitir (sem conta com saldo, não mostra). */
-function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; accounts?: EmissionAccount[] }) {
+function ChatView({ source, visible, onDm, onOfferDm, onSeen, focus, accounts = [] }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; onOfferDm?: (dm: Dm) => void; onSeen?: (upTo: number) => void; focus?: { id: number; n: number } | null; accounts?: EmissionAccount[] }) {
   const group = source.kind === "group";
   const url = group ? `/api/telegram/chats/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
@@ -163,6 +232,10 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   // só pedidos: os pedidos e as suas mensagens soltas (a sua contraproposta aparece embaixo do pedido)
   const shown = msgs && onlyAds ? msgs.filter((m) => m.ad || (m.out && !(m.replyTo && adIds.has(m.replyTo)))) : msgs;
   const byId = new Map((msgs ?? []).map((m) => [m.id, m]));
+  // privado: a sua contraproposta mais nova ao pedido encaminhado (nova ou editada) vale para a faixa do pedido
+  // (a resposta ao pedido ou um valor curto solto depois dele, como "26")
+  const fwdAd = (msgs ?? []).find((m) => m.fwd && m.ad);
+  const liveOffer = fwdAd ? (msgs ?? []).filter((m) => m.out && !m.fwd && m.id > fwdAd.id && ((m.replyTo && byId.get(m.replyTo)?.ad) || m.text.trim().length <= 12)).map((m) => parseCounterOffer(m.text)).filter((c) => c != null).at(-1) ?? null : null;
 
   const load = useCallback(async () => {
     const last = msgs?.at(-1)?.id;
@@ -177,6 +250,26 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
 
   useEffect(() => { if (visible && msgs === null) void load(); }, [visible, msgs, load]);
   usePolling(() => { if (msgs !== null) void load(); }, CHAT_POLL_MS, visible);
+  // vindo da aba Alertas: rola até o pedido e já abre a contraproposta para ele
+  const focused = useRef(0);
+  const refreshed = useRef(0); // já buscou as novas para este clique (o pedido pode ter chegado depois da última leitura)
+  useEffect(() => {
+    if (!focus || !visible || msgs === null || focused.current === focus.n) return;
+    const m = msgs.find((x) => x.id === focus.id);
+    if (!m && refreshed.current !== focus.n && focus.id > (msgs.at(-1)?.id ?? 0)) {
+      refreshed.current = focus.n;
+      return void load();
+    }
+    focused.current = focus.n;
+    if (!m) return void toast("Esse pedido não está mais entre as últimas mensagens do chat", "error");
+    stick.current = false;
+    if (!m.out) reply(m);
+    requestAnimationFrame(() => document.getElementById(msgDomId(url, m.id))?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reply só põe o estado da resposta
+  }, [focus, visible, msgs, url, load]);
+  // aba aberta na tela: o que chegou conta como visto
+  const lastId = msgs?.at(-1)?.id;
+  useEffect(() => { if (visible && lastId && onSeen) onSeen(lastId); }, [visible, lastId, onSeen]);
   useEffect(() => {
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -204,15 +297,15 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
     stick.current = true;
     setMsgs((cur) => (cur?.some((m) => m.id === item.id) ? cur : [...(cur ?? []), item]));
     // contraproposta a um pedido: manda a mesma no privado do autor (um só clique faz os dois)
-    if (source.kind === "group" && rep?.ad && alsoPrivate && onDm) void alsoDmOffer(source.chat.id, rep, body);
+    if (source.kind === "group" && rep?.ad && alsoPrivate) void alsoDmOffer(source.chat.id, rep, body);
   }
-  /** Depois da contraproposta no grupo, abre o privado com o autor do pedido e manda a mesma mensagem. */
+  /** Depois da contraproposta no grupo, leva o pedido para o privado do autor e manda a mesma contraproposta como
+   *  resposta a ele; a conversa aparece na barra ligada ao pedido. */
   async function alsoDmOffer(chatId: string, ad: Msg, body: string) {
-    const d = await api<{ item: Dm }>(`/api/telegram/chats/${chatId}/dms`, "POST", { messageId: ad.id });
-    if (!d.ok) return toast(`Contraproposta no grupo enviada; não consegui abrir o privado de ${ad.sender}: ${d.erro}`, "error");
-    const pm = await api(`/api/telegram/dms/${d.data.item.id}/messages`, "POST", { text: body });
-    if (!pm.ok) return toast(`No grupo enviada; no privado de ${ad.sender} falhou: ${pm.erro}`, "error");
-    toast(`Contraproposta também no privado de ${ad.sender}`);
+    const r = await api<{ item: { dm: Dm; forwarded: boolean } }>(`/api/telegram/chats/${chatId}/offer-dm`, "POST", { messageId: ad.id, text: body, adText: ad.text });
+    if (!r.ok) return toast(`Contraproposta no grupo enviada; no privado de ${ad.sender} falhou: ${r.erro}`, "error");
+    onOfferDm?.(r.data.item.dm);
+    toast(r.data.item.forwarded ? `Pedido e contraproposta também no privado de ${ad.sender}` : `Contraproposta também no privado de ${ad.sender} (o grupo não deixa encaminhar o pedido)`);
   }
   function reply(m: Msg) {
     setEditing(null);
@@ -308,17 +401,18 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
           <button type="button" onClick={showAgain} className="font-medium text-accent-light hover:underline">Mostrar de novo</button>
         </div>
       )}
+      {source.kind === "dm" && source.dm.offer && <OfferStrip offer={source.dm.offer} cpmCents={liveOffer ?? source.dm.offer.cpmCents} accounts={accounts} initialCrm={source.dm.crm} />}
       {erro && <div className="p-3"><Alert>{erro}</Alert></div>}
       <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[58vh] space-y-2 overflow-y-auto p-4">
         {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
           : shown.length === 0 ? <p className="text-sm text-muted">{cleared != null && !msgs?.length ? "Chat limpo. As mensagens novas aparecem aqui." : onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
           : shown.map((m) => (
-            <Bubble key={m.id} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
-              profit={group && m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null}
-              profitAt={group && m.ad ? (cents) => emissionProfit(m.ad!, cents, accounts) : undefined}
+            <Bubble key={m.id} domId={msgDomId(url, m.id)} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
+              profit={m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null}
+              profitAt={m.ad ? (cents) => emissionProfit(m.ad!, cents, accounts) : undefined}
               onCrm={group && m.ad ? (cents) => registerCrm(m, cents) : undefined} registering={registering === m.id}
               onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id}
-              onEdit={m.out && m.text ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
+              onEdit={m.out && m.text && !m.fwd ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
               onEditOffer={edit} onDeleteOffer={remove} editingId={editing?.id} />
           ))}
       </div>
@@ -337,7 +431,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
             <button type="button" onClick={cancel} className="shrink-0 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={editing ? "Cancelar a edição" : replying!.ad ? "Cancelar a contraproposta" : "Cancelar a resposta"} title="Cancelar (Esc)"><X className="h-4 w-4" /></button>
           </div>
         )}
-        {source.kind === "group" && replying?.ad && onDm && !editing && (
+        {source.kind === "group" && replying?.ad && onOfferDm && !editing && (
           <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={alsoPrivate} onChange={(e) => setAlsoPrivate(e.target.checked)} className="h-3.5 w-3.5 accent-accent-light" />
             Mandar também no privado de <b className="text-zinc-200">{replying.sender}</b>
@@ -369,11 +463,43 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
 
 type Profit = ReturnType<typeof emissionProfit>;
 
+/** No privado: o pedido do grupo a que a conversa está ligada, a sua contraproposta e o lucro por ela. */
+function OfferStrip({ offer, cpmCents, accounts, initialCrm }: { offer: DmOffer; cpmCents: number | null; accounts: EmissionAccount[]; initialCrm?: CrmRef | null }) {
+  const ad = offer.text ? parseBalcaoAd(offer.text) : null;
+  const profit = ad && cpmCents != null ? emissionProfit(ad, cpmCents, accounts) : null;
+  const [crm, setCrm] = useState(initialCrm ?? null);
+  const [registering, setRegistering] = useState(false);
+  /** Registra o pedido no CRM Milhas com o milheiro da sua contraproposta (sem ela, o do pedido). */
+  async function register() {
+    setRegistering(true);
+    const r = await api<{ item: CrmRef }>(`/api/telegram/chats/${offer.chatId}/crm`, "POST", { messageId: offer.messageId, text: offer.text, sender: offer.sender, cpmCents: cpmCents ?? null });
+    setRegistering(false);
+    if (!r.ok) return toast(r.erro, "error");
+    setCrm({ id: r.data.item.id, number: r.data.item.number, stage: r.data.item.stage });
+    toast(`Negociação #${r.data.item.number} registrada no CRM Milhas`);
+  }
+  return (
+    <div className="space-y-0.5 border-b border-line bg-panel2 px-4 py-2 text-xs" aria-label="Pedido desta conversa">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+        <KanbanSquare className="h-3.5 w-3.5 shrink-0 text-accent-light" />
+        <span className="text-muted">Pedido de <b className="text-zinc-200">{offer.sender}</b> no grupo {offer.group} · {when(offer.at)}</span>
+        {ad && <span className="font-semibold text-zinc-100">{ad.program} · {fmtPts(ad.miles)} milhas · {ad.cpfs ?? 1} {(ad.cpfs ?? 1) === 1 ? "CPF" : "CPFs"}{ad.cpmCents != null ? ` · pediu ${fmtBRL(ad.cpmCents)}` : ""}</span>}
+        {cpmCents != null && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-semibold text-accent-light">Sua contraproposta {fmtBRL(cpmCents)}</span>}
+        {crm
+          ? <Link href={`/app/crm-milhas?deal=${crm.id}`} className="ml-auto flex shrink-0 items-center gap-1 font-medium text-emerald-300 hover:underline" title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />No CRM #{crm.number} · {DEAL_STAGE_LABELS[crm.stage as DealStageKey] ?? crm.stage}</Link>
+          : ad && <button type="button" onClick={register} disabled={registering} className="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent-light hover:underline" title={`Registrar no CRM Milhas${cpmCents != null ? ` com ${fmtBRL(cpmCents)} o milheiro (a sua contraproposta)` : ""}`}><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
+      </p>
+      {profit && <ProfitLine profit={profit} cpmCents={cpmCents!} compact />}
+      {!ad && offer.text && <p className="truncate text-muted">{offer.text}</p>}
+    </div>
+  );
+}
+
 /** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
  *  offers: as contrapropostas ao pedido; profit: o lucro de atender o pedido pelo milheiro dele com a sua conta;
  *  profitAt: o lucro por outro milheiro (o da sua contraproposta); onCrm: registra o pedido no CRM Milhas. */
-function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering }: {
-  m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; quoted?: Msg | null; offers?: Msg[];
+function Bubble({ m, domId, chat, onOpen, onNegotiate, onDm, opening, onReply, replying, quoted, offers, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering }: {
+  m: Msg; domId?: string; chat?: string; onOpen?: () => void; onNegotiate?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; quoted?: Msg | null; offers?: Msg[];
   profit?: Profit; profitAt?: (cpmCents: number) => Profit; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
   onCrm?: (cpmCents?: number) => void; registering?: boolean;
 }) {
@@ -387,11 +513,12 @@ function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, off
     }
   }
   return (
-    <div className={`group rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : ""}`}>
+    <div id={domId} className={`group scroll-mt-4 rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : ""}`}>
       <div className="flex items-baseline gap-2 text-xs">
         <span className="truncate font-semibold text-zinc-200">{m.sender}</span>
         {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
         <span className="ml-auto shrink-0 text-muted">{when(m.date)}</span>
+        {onNegotiate && <button type="button" onClick={onNegotiate} className="flex shrink-0 items-center gap-1 font-medium text-accent-light hover:underline" title="Ir para o pedido no chat e mandar a contraproposta"><Handshake className="h-3.5 w-3.5" />Negociação</button>}
         {onReply && <button type="button" onClick={onReply} className="flex shrink-0 items-center gap-1 font-medium text-accent-light opacity-90 hover:opacity-100" aria-label={m.ad ? `Contraproposta para ${m.sender}` : `Responder ${m.sender}`} title={m.ad ? "Mandar a sua contraproposta como resposta a este pedido" : "Responder esta mensagem"}><Reply className="h-3.5 w-3.5" />{m.ad ? "Contraproposta" : "Responder"}</button>}
         {m.crm
           ? <Link href={`/app/crm-milhas?deal=${m.crm.id}`} className="flex shrink-0 items-center gap-1 font-medium text-emerald-300 hover:underline" title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />No CRM #{m.crm.number} · {DEAL_STAGE_LABELS[m.crm.stage as DealStageKey] ?? m.crm.stage}</Link>
@@ -418,7 +545,7 @@ function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, off
       {m.ad && profit && <ProfitLine profit={profit} cpmCents={m.ad.cpmCents!} />}
       {m.media && <p className="mt-1 text-xs italic text-muted">[{m.media}]</p>}
       {m.text && <p className={`mt-1 whitespace-pre-wrap break-words ${m.ad ? "text-xs text-muted" : "text-sm"}`}>{m.text}</p>}
-      {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
+      {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
       {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} onCrm={m.crm ? undefined : onCrm} registering={registering} />}
     </div>
   );
@@ -482,8 +609,8 @@ function Offers({ offers, onEdit, onDelete, editingId, profitAt, onCrm, register
 }
 
 /** Aba Alertas: cadastrar as palavras e ver as mensagens de todos os chats que dispararam algum alerta. */
-function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload }: { alerts: AlertRule[]; setAlerts: (a: AlertRule[]) => void; feed: FeedMsg[] | null; errors: { chat: string; erro: string }[]; chats: Chat[]; openChat: (id: string) => void; reload: () => Promise<void> }) {
-  const empty = { name: "", words: "", program: "", maxCpfs: "", minMiles: "", maxMiles: "", minCpm: "" };
+function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload, accounts, onNegotiate }: { alerts: AlertRule[]; setAlerts: (a: AlertRule[]) => void; feed: FeedMsg[] | null; errors: { chat: string; erro: string }[]; chats: Chat[]; openChat: (id: string) => void; reload: () => Promise<void>; accounts: EmissionAccount[]; onNegotiate: (chatId: string, id: number) => void }) {
+  const empty = { name: "", words: "", program: "", maxCpfs: "", minMiles: "", maxMiles: "", minCpm: "", minProfit: "", minProfitCpf: "" };
   const [f, setF] = useState(empty);
   const set = (k: keyof typeof empty) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   const [busy, setBusy] = useState(false);
@@ -493,9 +620,12 @@ function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload }:
     e.preventDefault();
     const minMiles = milesInput(f.minMiles), maxMiles = milesInput(f.maxMiles);
     const minCpmCents = f.minCpm.trim() ? parseBRLToCents(f.minCpm) : null;
+    const minProfitCents = f.minProfit.trim() ? parseBRLToCents(f.minProfit) : null;
+    const minProfitPerCpfCents = f.minProfitCpf.trim() ? parseBRLToCents(f.minProfitCpf) : null;
     if (minMiles === undefined || maxMiles === undefined) return toast("Milhas inválidas: use 100k, 100.000 ou 100000", "error");
     if (f.minCpm.trim() && !minCpmCents) return toast("Milheiro inválido", "error");
-    const body = { name: f.name, words: parseAlertWords(f.words), program: f.program || null, maxCpfs: f.maxCpfs ? Number(f.maxCpfs) : null, minMiles, maxMiles, minCpmCents };
+    if ((f.minProfit.trim() && !minProfitCents) || (f.minProfitCpf.trim() && !minProfitPerCpfCents)) return toast("Lucro inválido", "error");
+    const body = { name: f.name, words: parseAlertWords(f.words), program: f.program || null, maxCpfs: f.maxCpfs ? Number(f.maxCpfs) : null, minMiles, maxMiles, minCpmCents, minProfitCents, minProfitPerCpfCents };
     setBusy(true);
     const r = await api<{ items: AlertRule[] }>("/api/telegram/alerts", "POST", body);
     setBusy(false);
@@ -538,15 +668,18 @@ function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload }:
             <Field label="CPM a partir de"><input className="input" inputMode="decimal" value={f.minCpm} onChange={set("minCpm")} placeholder="R$ 0,00" aria-label="Milheiro a partir de" /></Field>
             <Field label="Milhas de"><input className="input" value={f.minMiles} onChange={set("minMiles")} placeholder="Ex.: 50k" aria-label="Milhas a partir de" /></Field>
             <Field label="Milhas até"><input className="input" value={f.maxMiles} onChange={set("maxMiles")} placeholder="Ex.: 300k" aria-label="Milhas até" /></Field>
+            <Field label="Lucro a partir de"><input className="input" inputMode="decimal" value={f.minProfit} onChange={set("minProfit")} placeholder="R$ 0,00" aria-label="Lucro a partir de" /></Field>
+            <Field label="Lucro por CPF a partir de"><input className="input" inputMode="decimal" value={f.minProfitCpf} onChange={set("minProfitCpf")} placeholder="R$ 0,00" aria-label="Lucro por CPF a partir de" /></Field>
           </div>
+          {(f.minProfit || f.minProfitCpf) && <p className="text-xs text-muted">O lucro é pelo milheiro do pedido, com a sua conta mais barata que consegue emitir. Pedido sem preço ou que nenhuma conta sua consegue emitir não avisa.</p>}
           <Field label="Palavras (opcional, separe por vírgula)">
             <input className="input" value={f.words} onChange={set("words")} placeholder="Ex.: urgente" aria-label="Palavras do alerta" />
           </Field>
           <Field label="Nome (opcional)">
             <input className="input" value={f.name} onChange={set("name")} maxLength={80} placeholder="Ex.: Smiles para a conta da Ana" aria-label="Nome do alerta" />
           </Field>
-          {(f.program || f.maxCpfs || f.minMiles || f.maxMiles || f.minCpm || f.words) && (
-            <p className="text-xs text-muted">Vai avisar de: {describeAlert({ words: parseAlertWords(f.words), program: f.program || null, maxCpfs: f.maxCpfs ? Number(f.maxCpfs) : null, minMiles: milesInput(f.minMiles) ?? null, maxMiles: milesInput(f.maxMiles) ?? null, minCpmCents: f.minCpm.trim() ? parseBRLToCents(f.minCpm) : null }) || "—"}</p>
+          {(f.program || f.maxCpfs || f.minMiles || f.maxMiles || f.minCpm || f.minProfit || f.minProfitCpf || f.words) && (
+            <p className="text-xs text-muted">Vai avisar de: {describeAlert({ words: parseAlertWords(f.words), program: f.program || null, maxCpfs: f.maxCpfs ? Number(f.maxCpfs) : null, minMiles: milesInput(f.minMiles) ?? null, maxMiles: milesInput(f.maxMiles) ?? null, minCpmCents: f.minCpm.trim() ? parseBRLToCents(f.minCpm) : null, minProfitCents: f.minProfit.trim() ? parseBRLToCents(f.minProfit) : null, minProfitPerCpfCents: f.minProfitCpf.trim() ? parseBRLToCents(f.minProfitCpf) : null }) || "—"}</p>
           )}
           <button className="btn-primary" disabled={busy}><Plus className="h-4 w-4" />Criar alerta</button>
         </form>
@@ -586,7 +719,7 @@ function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload }:
           {!alerts.some((a) => a.active) ? <p className="text-sm text-muted">Crie um alerta para os pedidos que te interessam aparecerem aqui.</p>
             : feed === null ? <p className="text-sm text-muted">Procurando nos chats…</p>
             : feed.length === 0 ? <p className="text-sm text-muted">Nenhuma mensagem recente com os seus alertas.</p>
-            : feed.map((m) => <Bubble key={`${m.chatId}:${m.id}`} m={m} chat={titleOf(m.chatId) || m.chat} onOpen={() => openChat(m.chatId)} />)}
+            : feed.map((m) => <Bubble key={`${m.chatId}:${m.id}`} m={m} chat={titleOf(m.chatId) || m.chat} onOpen={() => openChat(m.chatId)} onNegotiate={() => onNegotiate(m.chatId, m.id)} profit={m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null} />)}
         </div>
       </div>
     </div>
