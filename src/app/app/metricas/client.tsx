@@ -1,11 +1,12 @@
 "use client";
 // Métricas: barra de abas, navegação por mês, filtros e o "Personalizar" (blocos que aparecem em cada aba).
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BarChart3, ChevronLeft, ChevronRight, Calendar, SlidersHorizontal, Users, Wallet, RotateCcw } from "lucide-react";
 import { useNav, refreshSafe } from "@/lib/nav";
-import { api } from "@/lib/api";
+import { api, today } from "@/lib/api";
+import { MONTHS } from "@/lib/day-range";
 import { Modal, Alert } from "@/components/ui";
 import { Switch } from "@/components/form-parts";
 import { toast } from "@/components/feedback";
@@ -56,7 +57,7 @@ export function MetricsHeader({ tab, sp, window: w, hidden, filters }: {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex items-center gap-1 rounded-xl border border-line bg-panel p-1" aria-label="Mês">
-          <Calendar className="ml-2 h-4 w-4 text-muted" aria-hidden />
+          <MonthPicker month={w.month} onPick={(m) => nav(href({ mes: m === today().slice(0, 7) ? null : m }))} />
           <Link href={href({ mes: w.prevMonth })} className="btn-subtle h-7 w-7 px-0" aria-label="Mês anterior"><ChevronLeft className="h-4 w-4" /></Link>
           <span className="min-w-[150px] text-center text-sm font-medium">{w.label}</span>
           {w.nextMonth ? <Link href={href({ mes: w.nextMonth })} className="btn-subtle h-7 w-7 px-0" aria-label="Próximo mês"><ChevronRight className="h-4 w-4" /></Link> : <span className="h-7 w-7" aria-hidden />}
@@ -88,6 +89,49 @@ export function MetricsHeader({ tab, sp, window: w, hidden, filters }: {
         )}
       </div>
       {custom && <Customize hidden={hidden} onClose={() => setCustom(false)} />}
+    </div>
+  );
+}
+
+/** Escolher o mês pelo calendário: ano com setas e os 12 meses; meses depois do atual ficam desligados. */
+function MonthPicker({ month, onPick }: { month: string; onPick: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [year, setYear] = useState(Number(month.slice(0, 4)));
+  const box = useRef<HTMLDivElement>(null);
+  const cur = today().slice(0, 7);
+  useEffect(() => {
+    if (!open) return;
+    setYear(Number(month.slice(0, 4)));
+    const close = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
+  }, [open, month]);
+  return (
+    <div ref={box} className="relative">
+      <button type="button" className="btn-subtle h-7 w-7 px-0" onClick={() => setOpen((o) => !o)} aria-label="Escolher mês" aria-expanded={open}><Calendar className="h-4 w-4" /></button>
+      {open && (
+        <div className="absolute left-0 top-full z-40 mt-2 w-[260px] animate-pop-in rounded-xl border border-line bg-panel2 p-3 shadow-xl shadow-black/40" role="dialog" aria-label="Escolher mês">
+          <div className="mb-2 flex items-center justify-between">
+            <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => setYear((y) => y - 1)} aria-label="Ano anterior"><ChevronLeft className="h-4 w-4" /></button>
+            <span className="text-sm font-semibold tabular-nums">{year}</span>
+            <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => setYear((y) => y + 1)} disabled={year >= Number(cur.slice(0, 4))} aria-label="Próximo ano"><ChevronRight className="h-4 w-4" /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {MONTHS.map((name, i) => {
+              const m = `${year}-${String(i + 1).padStart(2, "0")}`;
+              const on = m === month;
+              return (
+                <button key={m} type="button" disabled={m > cur} aria-pressed={on} onClick={() => { setOpen(false); if (!on) onPick(m); }}
+                  className={`h-9 rounded-lg text-sm capitalize disabled:cursor-not-allowed disabled:opacity-30 ${on ? "bg-accent-light font-semibold text-zinc-950" : "hover:bg-line"} ${m === cur && !on ? "font-bold text-accent-light" : ""}`}>
+                  {name.slice(0, 3)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
