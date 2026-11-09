@@ -55,6 +55,17 @@ function findCpm(rest: string) {
   return cents != null && cents >= 100 && cents <= 50_000 ? cents : null;
 }
 
+/** Milheiro de uma contraproposta ("24,5", "17,00", "24?75", "95 voo próximo", "R$ 105,00, e comigo..."), em
+ *  centavos; null quando a mensagem é um pedido ou não traz um valor que pareça milheiro. */
+export function parseCounterOffer(text: string) {
+  if (parseBalcaoAd(text)) return null;
+  const t = normalizeText(text);
+  const m = t.match(/(?<![\d.,])(\d{1,3})(?:[.,?](\d{1,2}))?(?![\d]|[.,]\d)/);
+  if (!m) return null;
+  const cents = Number(m[1]) * 100 + (m[2] ? Number(m[2].padEnd(2, "0")) : 0);
+  return cents >= 100 && cents <= 50_000 ? cents : null;
+}
+
 /** O anúncio da mensagem, ou null quando não é anúncio (contraproposta, conversa, bot, crédito...). */
 export function parseBalcaoAd(text: string): BalcaoAd | null {
   const t = normalizeText(text).replace(/\s+/g, " ").trim();

@@ -19,8 +19,9 @@ import { parseBalcaoAd } from "@/domain/balcao-ads";
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
 export type TgGroup = { id: string; title: string; channel: boolean; peer?: TgPeer };
 /** Mensagem: quem mandou ("Você" se foi a conta), quando, o texto e, se tiver, o tipo de anexo (foto, arquivo...).
- *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado). */
-export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean };
+ *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado); replyTo = é resposta
+ *  a esta mensagem (contraproposta a um pedido, por exemplo). */
+export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null };
 /** Pessoa que mandou uma mensagem no grupo, com o acesso para conversar com ela no privado. */
 export type TgUser = { id: string; hash: string; name: string; username: string | null; self: boolean; bot: boolean };
 export type SignInResult = "OK" | "PASSWORD_NEEDED" | "SIGN_UP_REQUIRED";
@@ -37,8 +38,8 @@ export interface TgClient {
   groups(): Promise<TgGroup[]>;
   /** Últimas mensagens do chat (grupo ou privado), da mais antiga para a mais nova; minId = só as mais novas. */
   messages(peer: TgPeer, opts: { limit: number; minId?: number }): Promise<TgMessage[]>;
-  /** Manda a mensagem no chat e devolve como ela ficou. */
-  send(peer: TgPeer, text: string): Promise<TgMessage>;
+  /** Manda a mensagem no chat (replyTo = como resposta a uma mensagem) e devolve como ela ficou. */
+  send(peer: TgPeer, text: string, replyTo?: number): Promise<TgMessage>;
   /** Quem mandou a mensagem do grupo, com o acesso para o privado (null = não é de uma pessoa). */
   author(group: TgPeer, messageId: number): Promise<TgUser | null>;
   logOut(): Promise<void>;
@@ -54,6 +55,7 @@ function toMessage(m: Api.Message): TgMessage {
   return {
     id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
     media: mediaLabel(m.media), out: !!m.out, fromUser: m.fromId instanceof Api.PeerUser || (!m.fromId && m.peerId instanceof Api.PeerUser),
+    replyTo: m.replyTo instanceof Api.MessageReplyHeader ? m.replyTo.replyToMsgId ?? null : null,
   };
 }
 
@@ -125,7 +127,7 @@ function gramClient(session: string): TgClient {
       const list = await c.getMessages(inputPeer(peer), { limit, ...(minId ? { minId } : {}) });
       return list.filter((m) => m instanceof Api.Message).map(toMessage).reverse();
     },
-    send: async (peer, text) => toMessage(await c.sendMessage(inputPeer(peer), { message: text })),
+    send: async (peer, text, replyTo) => toMessage(await c.sendMessage(inputPeer(peer), { message: text, ...(replyTo ? { replyTo } : {}) })),
     author: async (group, messageId) => {
       const [m] = await c.getMessages(inputPeer(group), { ids: [messageId] });
       if (!(m instanceof Api.Message) || !(m.fromId instanceof Api.PeerUser)) return null;
@@ -202,6 +204,9 @@ async function withClient<T>(session: string, fn: (c: TgClient) => Promise<T>): 
 type Pooled = { c: TgClient; key: string; ready: Promise<void>; idle?: ReturnType<typeof setTimeout> };
 const g = globalThis as unknown as { __tgPool?: Map<string, Pooled> };
 const pool: Map<string, Pooled> = (g.__tgPool ??= new Map());
+// código recarregado (servidor de desenvolvimento): a conexão aberta pela versão anterior não serve mais
+const LOADED_AT = Date.now();
+const poolKey = (sessionEnc: string) => `${LOADED_AT}:${sessionEnc}`;
 function dropPooled(id: string) {
   const p = pool.get(id);
   if (!p) return;
@@ -211,13 +216,13 @@ function dropPooled(id: string) {
 }
 async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: TgClient) => Promise<T>): Promise<T> {
   let p = pool.get(link.id);
-  if (p && p.key !== link.sessionEnc) {
+  if (p && p.key !== poolKey(link.sessionEnc)) {
     dropPooled(link.id);
     p = undefined;
   }
   if (!p) {
     const c = makeClient(decrypt(link.sessionEnc));
-    p = { c, key: link.sessionEnc, ready: c.connect() };
+    p = { c, key: poolKey(link.sessionEnc), ready: c.connect() };
     pool.set(link.id, p);
   }
   const cur = p;
@@ -403,12 +408,13 @@ function messageText(raw: string) {
 }
 const plain = (m: TgMessage) => ({ ...m, ad: null, alerts: [] as string[] });
 
-/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário). */
-export async function sendToGroup(userId: string, id: string, raw: string) {
+/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário); replyTo = como resposta a uma
+ *  mensagem do grupo (a contraproposta a um pedido). */
+export async function sendToGroup(userId: string, id: string, raw: string, replyTo?: number) {
   const text = messageText(raw);
   const l = await activeLink(userId, id);
   const peer = await groupPeer(l);
-  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text)));
+  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text, replyTo)));
   const ad = parseBalcaoAd(m.text);
   return { ...m, ad, alerts: [] as string[] };
 }
@@ -460,11 +466,11 @@ export async function dmMessages(userId: string, dmId: string, opts: { limit?: n
   return msgs.map(plain);
 }
 
-/** Manda a mensagem no privado (escrita e enviada pelo usuário). */
-export async function sendTelegramDm(userId: string, dmId: string, raw: string) {
+/** Manda a mensagem no privado (escrita e enviada pelo usuário); replyTo = como resposta a uma mensagem da conversa. */
+export async function sendTelegramDm(userId: string, dmId: string, raw: string, replyTo?: number) {
   const text = messageText(raw);
   const d = await ownDm(userId, dmId);
-  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text))));
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text, replyTo))));
 }
 
 /** Fecha a conversa aqui (no Telegram ela continua). */

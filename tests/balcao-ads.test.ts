@@ -1,6 +1,6 @@
 // Leitor dos anúncios dos grupos de balcão, com os jeitos de escrever que aparecem nos grupos.
 import { describe, it, expect } from "vitest";
-import { parseBalcaoAd } from "@/domain/balcao-ads";
+import { parseBalcaoAd, parseCounterOffer } from "@/domain/balcao-ads";
 import { matchAlerts, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
 
 const ad = (text: string) => parseBalcaoAd(text);
@@ -32,6 +32,15 @@ describe("anúncios do balcão", () => {
       "Emitido para @fulano", "✅ Negociação registrada com sucesso!\n\n💰 Fulano vendeu para Beltrano", "Compro 9.200,00 credito Gol- 20%", "Bom dia, pessoal", "Promoção Azul", ""]) {
       expect(ad(t), t).toBeNull();
     }
+  });
+});
+
+describe("contrapropostas", () => {
+  it("lê o milheiro oferecido", () => {
+    expect(["17", "24,5", "16,75", "24?75", "17,00", "95 voo próximo", "24,5 conta própria", "R$ 105,00, e comigo o compromisso é com a sua emissão garantida"].map(parseCounterOffer))
+      .toEqual([1700, 2450, 1675, 2475, 1700, 9500, 2450, 10500]);
+    // pedido, conversa sem valor e números que não são milheiro
+    expect(["Compro 135k latam\n4 cpf\n25 reais", "Bom dia", "Emitido para @fulano", "0", "1500"].map(parseCounterOffer)).toEqual([null, null, null, null, null]);
   });
 });
 

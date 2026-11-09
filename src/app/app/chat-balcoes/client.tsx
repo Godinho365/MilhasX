@@ -5,17 +5,17 @@
 // o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
-import { BALCAO_PROGRAMS, type BalcaoAd } from "@/domain/balcao-ads";
+import { BALCAO_PROGRAMS, parseCounterOffer, type BalcaoAd } from "@/domain/balcao-ads";
 
 type Chat = { id: string; title: string; account: string };
 export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null };
-type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; ad: BalcaoAd | null; alerts: string[] };
+type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; ad: BalcaoAd | null; alerts: string[] };
 type FeedMsg = Msg & { chatId: string; chat: string };
 /** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
 type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
@@ -32,6 +32,13 @@ function milesInput(raw: string): number | null | undefined {
   const k = t.match(/^(\d+(?:[.,]\d+)?)k$/);
   if (k) return Math.round(Number(k[1]!.replace(",", ".")) * 1000);
   return /^\d{1,3}(\.\d{3})*$|^\d+$/.test(t) ? Number(t.replace(/\./g, "")) : undefined;
+}
+
+/** Resumo da mensagem para citar (na resposta e no "Respondendo a"): o pedido lido ou o começo do texto. */
+function quote(m: Msg) {
+  if (m.ad) return `${m.ad.program} · ${fmtPts(m.ad.miles)} milhas · ${m.ad.cpfs ?? 1} ${(m.ad.cpfs ?? 1) === 1 ? "CPF" : "CPFs"} · ${m.ad.cpmCents != null ? fmtBRL(m.ad.cpmCents) : "sem preço"}`;
+  const t = m.text.replace(/\s+/g, " ").trim();
+  return t ? (t.length > 80 ? `${t.slice(0, 80)}…` : t) : m.media ? `[${m.media}]` : "mensagem";
 }
 
 /** Hora da mensagem: só a hora se for de hoje; senão, dia e hora (Brasília). */
@@ -136,14 +143,21 @@ function ChatView({ source, visible, onDm }: { source: Source; visible: boolean;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [opening, setOpening] = useState<number | null>(null);
+  const [replying, setReplying] = useState<Msg | null>(null); // a mensagem que vai ser respondida (contraproposta)
+  const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // rolando junto com as mensagens novas (o usuário não subiu para ler as antigas)
-  const shown = msgs && onlyAds ? msgs.filter((m) => m.ad || m.out) : msgs;
+  // contrapropostas (respostas que não são pedido) agrupadas embaixo do pedido respondido
+  const offers = new Map<number, Msg[]>();
+  for (const m of msgs ?? []) if (m.replyTo && !m.ad) offers.set(m.replyTo, [...(offers.get(m.replyTo) ?? []), m]);
+  const adIds = new Set((msgs ?? []).filter((m) => m.ad).map((m) => m.id));
+  // só pedidos: os pedidos e as suas mensagens soltas (a sua contraproposta aparece embaixo do pedido)
+  const shown = msgs && onlyAds ? msgs.filter((m) => m.ad || (m.out && !(m.replyTo && adIds.has(m.replyTo)))) : msgs;
 
   const load = useCallback(async () => {
     const last = msgs?.at(-1)?.id;
     setLoading(true);
-    const r = await api<{ items: Msg[] }>(`${url}?limit=60${last ? `&minId=${last}` : ""}`);
+    const r = await api<{ items: Msg[] }>(`${url}?limit=100${last ? `&minId=${last}` : ""}`);
     setLoading(false);
     if (!r.ok) return setErro(r.erro);
     setErro("");
@@ -162,13 +176,19 @@ function ChatView({ source, visible, onDm }: { source: Source; visible: boolean;
     e?.preventDefault();
     if (!text.trim() || sending) return;
     setSending(true);
-    const r = await api<{ item: Msg }>(url, "POST", { text });
+    const r = await api<{ item: Msg }>(url, "POST", { text, ...(replying ? { replyTo: replying.id } : {}) });
     setSending(false);
     if (!r.ok) return toast(r.erro, "error");
     setText("");
+    setReplying(null);
     stick.current = true;
     setMsgs((cur) => (cur?.some((m) => m.id === r.data.item.id) ? cur : [...(cur ?? []), r.data.item]));
   }
+  function reply(m: Msg) {
+    setReplying(m);
+    input.current?.focus();
+  }
+  const byId = new Map((msgs ?? []).map((m) => [m.id, m]));
   async function dm(id: number) {
     if (!onDm) return;
     setOpening(id);
@@ -198,26 +218,47 @@ function ChatView({ source, visible, onDm }: { source: Source; visible: boolean;
       <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[58vh] space-y-2 overflow-y-auto p-4">
         {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
           : shown.length === 0 ? <p className="text-sm text-muted">{onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
-          : shown.map((m) => <Bubble key={m.id} m={m} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id} />)}
+          : shown.map((m) => (
+            <Bubble key={m.id} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
+              onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id} />
+          ))}
       </div>
-      <form onSubmit={send} className="flex items-end gap-2 border-t border-line p-3">
-        <textarea
-          className="input min-h-10 flex-1 resize-none text-sm"
-          rows={Math.min(5, Math.max(1, text.split("\n").length))}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
-          maxLength={4096}
-          placeholder={group ? `Mensagem para o grupo ${source.chat.title}` : `Mensagem para ${source.dm.name}`}
-          aria-label={group ? "Mensagem para o grupo" : "Mensagem no privado"}
-        />
-        <button className="btn-primary h-10" disabled={sending || !text.trim()} title="Enviar (Enter; Shift+Enter quebra a linha)"><Send className="h-4 w-4" />{sending ? "Enviando…" : "Enviar"}</button>
+      <form onSubmit={send} className="border-t border-line p-3">
+        {replying && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border-l-2 border-accent-light bg-panel2 px-3 py-1.5 text-xs">
+            <Reply className="h-3.5 w-3.5 shrink-0 text-accent-light" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-accent-light">{replying.ad ? `Contraproposta para ${replying.sender}` : `Respondendo a ${replying.sender}`}</p>
+              <p className="truncate text-muted">{quote(replying)}</p>
+            </div>
+            <button type="button" onClick={() => setReplying(null)} className="shrink-0 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={replying.ad ? "Cancelar a contraproposta" : "Cancelar a resposta"} title="Cancelar (Esc)"><X className="h-4 w-4" /></button>
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={input}
+            className="input min-h-10 flex-1 resize-none text-sm"
+            rows={Math.min(5, Math.max(1, text.split("\n").length))}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
+              if (e.key === "Escape" && replying) { e.preventDefault(); setReplying(null); }
+            }}
+            maxLength={4096}
+            placeholder={replying?.ad ? "Sua contraproposta (ex.: 24,50)" : replying ? `Resposta para ${replying.sender}` : group ? `Mensagem para o grupo ${source.chat.title}` : `Mensagem para ${source.dm.name}`}
+            aria-label={replying ? `Resposta para ${replying.sender}` : group ? "Mensagem para o grupo" : "Mensagem no privado"}
+          />
+          <button className="btn-primary h-10" disabled={sending || !text.trim()} title="Enviar (Enter; Shift+Enter quebra a linha)"><Send className="h-4 w-4" />{sending ? "Enviando…" : replying ? "Responder" : "Enviar"}</button>
+        </div>
       </form>
     </div>
   );
 }
 
-function Bubble({ m, chat, onOpen, onDm, opening }: { m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean }) {
+/** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
+ *  offers: as contrapropostas ao pedido. */
+function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers }: { m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; quoted?: Msg | null; offers?: Msg[] }) {
   const hit = m.alerts.length > 0;
   async function copy() {
     try {
@@ -228,14 +269,20 @@ function Bubble({ m, chat, onOpen, onDm, opening }: { m: Msg; chat?: string; onO
     }
   }
   return (
-    <div className={`group rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"}`}>
+    <div className={`group rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : ""}`}>
       <div className="flex items-baseline gap-2 text-xs">
         <span className="truncate font-semibold text-zinc-200">{m.sender}</span>
         {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
         <span className="ml-auto shrink-0 text-muted">{when(m.date)}</span>
+        {onReply && <button type="button" onClick={onReply} className="flex shrink-0 items-center gap-1 font-medium text-accent-light opacity-90 hover:opacity-100" aria-label={m.ad ? `Contraproposta para ${m.sender}` : `Responder ${m.sender}`} title={m.ad ? "Mandar a sua contraproposta como resposta a este pedido" : "Responder esta mensagem"}><Reply className="h-3.5 w-3.5" />{m.ad ? "Contraproposta" : "Responder"}</button>}
         {onDm && <button type="button" onClick={onDm} disabled={opening} className="flex shrink-0 items-center gap-1 text-accent-light opacity-70 hover:opacity-100 group-hover:opacity-100" title="Conversar no privado com quem mandou"><MessageCircle className="h-3.5 w-3.5" />{opening ? "Abrindo…" : "Privado"}</button>}
         {m.text && <button type="button" onClick={copy} className="shrink-0 text-muted opacity-0 hover:text-zinc-100 group-hover:opacity-100" aria-label="Copiar mensagem" title="Copiar"><Copy className="h-3.5 w-3.5" /></button>}
       </div>
+      {quoted !== undefined && (
+        <p className="mt-1 flex items-center gap-1 truncate rounded border-l-2 border-line bg-black/10 px-2 py-0.5 text-[11px] text-muted">
+          <CornerDownRight className="h-3 w-3 shrink-0" />{quoted ? <><b className="font-semibold text-zinc-300">{quoted.sender}:</b> {quote(quoted)}</> : "resposta a uma mensagem mais antiga"}
+        </p>
+      )}
       {m.ad && (
         <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs" aria-label="Pedido lido da mensagem">
           <span className={`rounded px-1.5 py-0.5 font-semibold ${m.ad.kind === "COMPRA" ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300"}`}>{m.ad.kind === "COMPRA" ? "Compra" : "Venda"}</span>
@@ -248,6 +295,35 @@ function Bubble({ m, chat, onOpen, onDm, opening }: { m: Msg; chat?: string; onO
       {m.media && <p className="mt-1 text-xs italic text-muted">[{m.media}]</p>}
       {m.text && <p className={`mt-1 whitespace-pre-wrap break-words ${m.ad ? "text-xs text-muted" : "text-sm"}`}>{m.text}</p>}
       {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
+      {offers && offers.length > 0 && <Offers offers={offers} />}
+    </div>
+  );
+}
+
+/** Contrapropostas dos membros a um pedido: do menor milheiro para o maior (sem valor por último), as 5 primeiras e
+ *  o resto ao abrir. A sua aparece como "Você". */
+function Offers({ offers }: { offers: Msg[] }) {
+  const [all, setAll] = useState(false);
+  const rows = offers
+    .map((o) => ({ o, cents: parseCounterOffer(o.text) }))
+    .sort((a, b) => (a.cents ?? Infinity) - (b.cents ?? Infinity) || a.o.id - b.o.id);
+  const best = rows[0]?.cents ?? null;
+  const visible = all ? rows : rows.slice(0, 5);
+  return (
+    <div className="mt-2 rounded-lg border border-line bg-black/10 px-2.5 py-1.5" aria-label="Contrapropostas">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {offers.length} {offers.length === 1 ? "contraproposta" : "contrapropostas"}{best != null && <span className="normal-case tracking-normal"> · menor {fmtBRL(best)}</span>}
+      </p>
+      <ul className="space-y-0.5">
+        {visible.map(({ o, cents }) => (
+          <li key={o.id} className={`flex items-baseline gap-2 text-xs ${o.out ? "font-semibold text-accent-light" : ""}`}>
+            <span className={`w-20 shrink-0 tabular-nums ${cents != null && cents === best ? "font-semibold text-emerald-300" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
+            <span className="min-w-0 flex-1 truncate" title={o.text}>{o.sender}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
+            <span className="shrink-0 text-muted">{when(o.date)}</span>
+          </li>
+        ))}
+      </ul>
+      {rows.length > 5 && <button type="button" onClick={() => setAll(!all)} className="mt-0.5 text-[11px] text-accent-light hover:underline">{all ? "Mostrar menos" : `Ver todas (${rows.length})`}</button>}
     </div>
   );
 }

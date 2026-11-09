@@ -29,7 +29,7 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
 /** Mensagens dos grupos simulados (pelo id do grupo), da mais antiga para a mais nova. */
-const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true });
+const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true, replyTo: null });
 /** O que foi mandado pelo app (no grupo ou no privado), pelo id do chat. */
 let SENT: Record<string, TgMessage[]> = {};
 const MSGS: Record<string, TgMessage[]> = {
@@ -75,10 +75,10 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
         calls.push(`messages ${peer.id}`);
         return [...(MSGS[peer.id] ?? []), ...(SENT[peer.id] ?? [])].filter((m) => !minId || m.id > minId).slice(-limit);
       },
-      send: async (peer, text) => {
+      send: async (peer, text, replyTo) => {
         if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
-        calls.push(`send ${peer.kind}:${peer.id} ${text}`);
-        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", text), out: true };
+        calls.push(`send ${peer.kind}:${peer.id} ${text}${replyTo ? ` ↩${replyTo}` : ""}`);
+        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", text), out: true, replyTo: replyTo ?? null };
         (SENT[peer.id] ??= []).push(m);
         return m;
       },
@@ -313,7 +313,12 @@ describe("mandar mensagem e conversar no privado", () => {
     const sent = await c.call(messagesRoute.POST, "POST", "/x", { text: " Faço 24 " }, { id: a });
     expect([sent.status, sent.data.item]).toEqual([201, expect.objectContaining({ text: "Faço 24", sender: "Você", out: true })]);
     expect(calls).toContain("send channel:1234 Faço 24");
-    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.at(-1)).toMatchObject({ text: "Faço 24", out: true });
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.at(-1)).toMatchObject({ text: "Faço 24", out: true, replyTo: null });
+    // contraproposta: resposta ao pedido
+    const offer = await c.call(messagesRoute.POST, "POST", "/x", { text: "24,50", replyTo: 1 }, { id: a });
+    expect([offer.status, offer.data.item.replyTo]).toEqual([201, 1]);
+    expect(calls).toContain("send channel:1234 24,50 ↩1");
+    expect((await c.call(messagesRoute.POST, "POST", "/x", { text: "24,50", replyTo: -3 }, { id: a })).status).toBe(400);
 
     // chamar no privado quem mandou o pedido; abrir de novo não duplica
     const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
