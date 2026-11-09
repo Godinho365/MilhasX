@@ -1,6 +1,6 @@
 "use client";
 // Configurações › Telegram: conectar uma ou mais contas do Telegram (número → código → senha de duas etapas) e
-// escolher, em cada uma, o grupo do balcão de onde o app lê os pedidos. O app só lê; as sessões ficam
+// escolher, em cada uma, o grupo do balcão (Chat Balcões). O app só manda o que o usuário escreve e manda; as sessões ficam
 // criptografadas no servidor.
 import { useState } from "react";
 import { Send, LogOut, RefreshCw, Plus } from "lucide-react";
@@ -75,7 +75,7 @@ export function TelegramTab({ initial }: { initial: TgStatus }) {
       {adding ? (
         <Section title={s.accounts.length ? "Conectar outra conta" : "Conectar sua conta do Telegram"}>
           <form onSubmit={sendCode} className="space-y-4">
-            <p className="text-sm text-muted">Conecte a conta com que você participa do grupo do balcão. O app passa a ler as mensagens do grupo que você escolher, como você já vê no Telegram; ele nunca envia mensagens.</p>
+            <p className="text-sm text-muted">Conecte a conta com que você participa do grupo do balcão. O grupo que você escolher aparece no Chat Balcões, como você já vê no Telegram. O app só manda as mensagens que você escrever e enviar por lá; nunca manda nada sozinho.</p>
             <Field label="Número do Telegram" required>
               <input className="input" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+55 11 99999-8888" required aria-label="Número do Telegram" autoFocus={s.accounts.length > 0} />
             </Field>
@@ -91,7 +91,7 @@ export function TelegramTab({ initial }: { initial: TgStatus }) {
           {full && <p className="mt-1 text-xs text-muted">Limite de {s.max} contas: desconecte uma para conectar outra.</p>}
         </div>
       )}
-      <p className="px-1 text-xs text-muted">O app só lê: não envia, não responde e não entra em grupos. As sessões ficam guardadas criptografadas no servidor. Para encerrar, use Desconectar ou, no Telegram da conta, Configurações › Dispositivos.</p>
+      <p className="px-1 text-xs text-muted">O app só manda o que você escrever e enviar no Chat Balcões: nunca manda nada sozinho e não entra em grupos. As sessões ficam guardadas criptografadas no servidor. Para encerrar, use Desconectar ou, no Telegram da conta, Configurações › Dispositivos.</p>
     </>
   );
 }

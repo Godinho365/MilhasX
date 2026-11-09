@@ -1,6 +1,8 @@
-// Telegram: o usuário conecta a própria conta (pela API oficial de clientes) para o app ler o grupo do balcão.
+// Telegram: o usuário conecta a própria conta (pela API oficial de clientes) para ler o grupo do balcão, mandar
+// mensagem nele e conversar no privado com quem postou (Chat Balcões).
 // O login é em etapas, uma por requisição: enviar o código → confirmar o código → (senha de duas etapas). Entre
-// uma etapa e outra a sessão fica no banco, criptografada (ela dá acesso à conta). O app só lê: nunca envia nada.
+// uma etapa e outra a sessão fica no banco, criptografada (ela dá acesso à conta). O app só manda o que o usuário
+// escreveu e mandou: nunca envia nada sozinho.
 // O servidor precisa de TELEGRAM_API_ID e TELEGRAM_API_HASH (my.telegram.org) e de CREDENTIALS_KEY.
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
@@ -13,11 +15,14 @@ import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { matchAlerts, parseAlertWords, hasAdCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
 import { parseBalcaoAd } from "@/domain/balcao-ads";
 
-/** Como chegar no grupo direto (sem listar os chats da conta): supergrupo/canal precisa do hash de acesso. */
-export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string };
+/** Como chegar no chat direto (sem listar os chats da conta): supergrupo/canal e pessoa precisam do hash de acesso. */
+export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
 export type TgGroup = { id: string; title: string; channel: boolean; peer?: TgPeer };
-/** Mensagem do grupo: quem mandou, quando, o texto e, se tiver, o tipo de anexo (foto, arquivo...). */
-export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null };
+/** Mensagem: quem mandou ("Você" se foi a conta), quando, o texto e, se tiver, o tipo de anexo (foto, arquivo...).
+ *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado). */
+export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean };
+/** Pessoa que mandou uma mensagem no grupo, com o acesso para conversar com ela no privado. */
+export type TgUser = { id: string; hash: string; name: string; username: string | null; self: boolean; bot: boolean };
 export type SignInResult = "OK" | "PASSWORD_NEEDED" | "SIGN_UP_REQUIRED";
 
 /** O que o app usa do Telegram (nos testes, um Telegram simulado). */
@@ -30,9 +35,26 @@ export interface TgClient {
   checkPassword(password: string): Promise<void>;
   me(): Promise<string>;
   groups(): Promise<TgGroup[]>;
-  /** Últimas mensagens do grupo, da mais antiga para a mais nova; minId = só as mais novas que ela. */
+  /** Últimas mensagens do chat (grupo ou privado), da mais antiga para a mais nova; minId = só as mais novas. */
   messages(peer: TgPeer, opts: { limit: number; minId?: number }): Promise<TgMessage[]>;
+  /** Manda a mensagem no chat e devolve como ela ficou. */
+  send(peer: TgPeer, text: string): Promise<TgMessage>;
+  /** Quem mandou a mensagem do grupo, com o acesso para o privado (null = não é de uma pessoa). */
+  author(group: TgPeer, messageId: number): Promise<TgUser | null>;
   logOut(): Promise<void>;
+}
+
+/** O chat no formato da API do Telegram. */
+function inputPeer(p: TgPeer) {
+  if (p.kind === "channel") return new Api.InputPeerChannel({ channelId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
+  if (p.kind === "user") return new Api.InputPeerUser({ userId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
+  return new Api.InputPeerChat({ chatId: returnBigInt(p.id) });
+}
+function toMessage(m: Api.Message): TgMessage {
+  return {
+    id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
+    media: mediaLabel(m.media), out: !!m.out, fromUser: m.fromId instanceof Api.PeerUser || (!m.fromId && m.peerId instanceof Api.PeerUser),
+  };
 }
 
 /** Nome de quem mandou: pessoa (nome ou @usuário) ou o próprio grupo/canal. */
@@ -100,14 +122,17 @@ function gramClient(session: string): TgClient {
           return { id: String(d.id), title: d.title || "(sem nome)", channel: d.isChannel && !d.isGroup, peer };
         }),
     messages: async (peer, { limit, minId }) => {
-      const input = peer.kind === "channel"
-        ? new Api.InputPeerChannel({ channelId: returnBigInt(peer.id), accessHash: returnBigInt(peer.hash) })
-        : new Api.InputPeerChat({ chatId: returnBigInt(peer.id) });
-      const list = await c.getMessages(input, { limit, ...(minId ? { minId } : {}) });
-      return list
-        .filter((m) => m instanceof Api.Message)
-        .map((m) => ({ id: m.id, date: new Date(m.date * 1000).toISOString(), sender: senderName(m.sender), text: m.message ?? "", media: mediaLabel(m.media) }))
-        .reverse();
+      const list = await c.getMessages(inputPeer(peer), { limit, ...(minId ? { minId } : {}) });
+      return list.filter((m) => m instanceof Api.Message).map(toMessage).reverse();
+    },
+    send: async (peer, text) => toMessage(await c.sendMessage(inputPeer(peer), { message: text })),
+    author: async (group, messageId) => {
+      const [m] = await c.getMessages(inputPeer(group), { ids: [messageId] });
+      if (!(m instanceof Api.Message) || !(m.fromId instanceof Api.PeerUser)) return null;
+      // em grupo grande o Telegram manda a pessoa sem o acesso completo: pede o contato dela a partir da mensagem
+      const [u] = await c.invoke(new Api.users.GetUsers({ id: [new Api.InputUserFromMessage({ peer: inputPeer(group), msgId: messageId, userId: m.fromId.userId })] }));
+      if (!(u instanceof Api.User)) return null;
+      return { id: u.id.toString(), hash: (u.accessHash ?? 0).toString(), name: senderName(u), username: u.username ?? null, self: !!u.self, bot: !!u.bot };
     },
     logOut: async () => { await c.invoke(new Api.auth.LogOut()); },
   };
@@ -136,6 +161,17 @@ function tgError(e: unknown): never {
     PHONE_CODE_EXPIRED: [400, "O código expirou: cancele e peça outro"],
     PASSWORD_HASH_INVALID: [400, "Senha de duas etapas errada"],
     API_ID_INVALID: [503, "TELEGRAM_API_ID ou TELEGRAM_API_HASH inválidos no servidor"],
+    // envio
+    PEER_FLOOD: [429, "O Telegram limitou esta conta para mensagens no privado com quem não tem você nos contatos (muitas conversas novas). Tente mais tarde ou pelo app do Telegram."],
+    USER_PRIVACY_RESTRICTED: [403, "Esta pessoa não aceita mensagens de quem não é contato dela"],
+    USER_IS_BLOCKED: [403, "Esta pessoa bloqueou a sua conta"],
+    YOU_BLOCKED_USER: [403, "Você bloqueou esta pessoa no Telegram: desbloqueie para conversar"],
+    INPUT_USER_DEACTIVATED: [404, "Esta conta do Telegram foi apagada"],
+    CHAT_WRITE_FORBIDDEN: [403, "Esta conta não pode escrever neste grupo"],
+    CHAT_SEND_PLAIN_FORBIDDEN: [403, "Este grupo não aceita mensagens de texto desta conta"],
+    USER_BANNED_IN_CHANNEL: [403, "Esta conta está proibida de escrever neste grupo"],
+    MESSAGE_TOO_LONG: [400, "Mensagem longa demais para o Telegram"],
+    MESSAGE_EMPTY: [400, "Escreva a mensagem"],
   };
   const k = known[msg];
   if (k) throw new DomainError(k[0], k[1]);
@@ -356,6 +392,85 @@ export async function chatMessages(userId: string, id: string, opts: { limit?: n
     const ad = m.text ? parseBalcaoAd(m.text) : null; // pedido de compra/venda lido da mensagem (contraproposta não é)
     return { ...m, ad, alerts: m.text ? matchAlerts(m.text, rules, ad) : [] };
   });
+}
+
+/** Texto para mandar: sem espaços sobrando; o Telegram aceita até 4.096 caracteres. */
+function messageText(raw: string) {
+  const text = raw.trim();
+  if (!text) throw new DomainError(400, "Escreva a mensagem");
+  if (text.length > 4096) throw new DomainError(400, "Mensagem longa demais (até 4.096 caracteres)");
+  return text;
+}
+const plain = (m: TgMessage) => ({ ...m, ad: null, alerts: [] as string[] });
+
+/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário). */
+export async function sendToGroup(userId: string, id: string, raw: string) {
+  const text = messageText(raw);
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text)));
+  const ad = parseBalcaoAd(m.text);
+  return { ...m, ad, alerts: [] as string[] };
+}
+
+/* ---------------- Privado ---------------- */
+
+const dmView = (d: { id: string; linkId: string; name: string; username: string | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
+  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle,
+});
+const DM_INCLUDE = { link: { select: { groupTitle: true, accountName: true, phone: true, status: true } } } as const;
+
+/** Conversas no privado abertas (das contas conectadas), da mais antiga para a mais nova. */
+export async function listTelegramDms(userId: string) {
+  const dms = await prisma.telegramDm.findMany({ where: { userId, link: { status: "ACTIVE" } }, include: DM_INCLUDE, orderBy: { createdAt: "asc" } });
+  return dms.map(dmView);
+}
+
+/** Abre (ou reabre) a conversa no privado com quem mandou a mensagem do grupo, pela mesma conta. */
+export async function openTelegramDm(userId: string, id: string, messageId: number) {
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  const u = await guardSession(l, () => withPooled(l, (c) => c.author(peer, messageId)));
+  if (!u) throw new DomainError(400, "Esta mensagem não é de uma pessoa");
+  if (u.self) throw new DomainError(400, "Esta mensagem é sua");
+  if (u.bot) throw new DomainError(400, "Esta mensagem é de um robô do grupo");
+  const data = { peerHash: u.hash, name: u.name, username: u.username };
+  const d = await prisma.telegramDm.upsert({
+    where: { linkId_peerId: { linkId: l.id, peerId: u.id } },
+    create: { userId, linkId: l.id, peerId: u.id, ...data },
+    update: data,
+    include: DM_INCLUDE,
+  });
+  return dmView(d);
+}
+
+async function ownDm(userId: string, dmId: string) {
+  const d = await prisma.telegramDm.findFirst({ where: { id: dmId, userId }, include: { link: true } });
+  if (!d) throw new DomainError(404, "Conversa não encontrada");
+  if (d.link.status !== "ACTIVE") throw new DomainError(409, "A conta do Telegram desta conversa não está conectada");
+  requireEnabled();
+  return d;
+}
+
+/** Mensagens da conversa no privado (minId = só as novas). */
+export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number } = {}) {
+  const d = await ownDm(userId, dmId);
+  const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
+  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId })));
+  return msgs.map(plain);
+}
+
+/** Manda a mensagem no privado (escrita e enviada pelo usuário). */
+export async function sendTelegramDm(userId: string, dmId: string, raw: string) {
+  const text = messageText(raw);
+  const d = await ownDm(userId, dmId);
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text))));
+}
+
+/** Fecha a conversa aqui (no Telegram ela continua). */
+export async function closeTelegramDm(userId: string, dmId: string) {
+  const { count } = await prisma.telegramDm.deleteMany({ where: { id: dmId, userId } });
+  if (!count) throw new DomainError(404, "Conversa não encontrada");
 }
 
 /** Aba Alertas: as mensagens recentes de todos os chats que dispararam algum alerta, da mais nova para a mais

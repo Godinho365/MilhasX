@@ -3,14 +3,14 @@ import { MessagesSquare } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { PageHeader } from "@/components/stat";
 import { Empty, Alert } from "@/components/ui";
-import { telegramStatus, listTelegramAlerts } from "@/server/services/telegram";
+import { telegramStatus, listTelegramAlerts, listTelegramDms } from "@/server/services/telegram";
 import { ChatBalcoesClient } from "./client";
 
-// Chat Balcões: uma aba por grupo de balcão conectado (Configurações › Telegram), com as mensagens, e a aba
-// Alertas (palavras que destacam e avisam das mensagens).
+// Chat Balcões: uma aba por grupo de balcão conectado (Configurações › Telegram), com as mensagens e o envio, as
+// conversas no privado abertas a partir dos grupos e a aba Alertas.
 export default async function ChatBalcoesPage() {
   const user = await requirePageUser();
-  const [st, alerts] = await Promise.all([telegramStatus(user.id), listTelegramAlerts(user.id)]);
+  const [st, alerts, dms] = await Promise.all([telegramStatus(user.id), listTelegramAlerts(user.id), listTelegramDms(user.id)]);
   const chats = st.accounts
     .filter((a) => a.status === "ACTIVE" && a.group)
     .map((a) => ({ id: a.id, title: a.group!.title, account: a.accountName ?? a.phone }));
@@ -25,7 +25,7 @@ export default async function ChatBalcoesPage() {
           <Link href="/app/settings?tab=telegram" className="btn-primary">Conectar o Telegram</Link>
         </Empty>
       ) : (
-        <ChatBalcoesClient chats={chats} initialAlerts={alerts} />
+        <ChatBalcoesClient chats={chats} initialAlerts={alerts} initialDms={dms} />
       )}
     </>
   );

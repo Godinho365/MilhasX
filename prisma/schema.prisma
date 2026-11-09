@@ -141,6 +141,7 @@ model User {
   contractSignatures  ContractSignature[]
   telegramLinks       TelegramLink[]
   telegramAlerts      TelegramAlert[]
+  telegramDms         TelegramDm[]
 }
 
 /// Conta do Telegram do usuário (pode ter várias), conectada para ler o grupo do balcão (só leitura). A sessão dá
@@ -161,8 +162,27 @@ model TelegramLink {
   groupPeer     Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  dms           TelegramDm[]
 
   @@unique([userId, phone])
+  @@index([userId])
+}
+
+/// Conversa no privado aberta pelo Chat Balcões com alguém de um grupo de balcão, por uma das contas do Telegram.
+/// Fecha aqui sem apagar nada no Telegram.
+model TelegramDm {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkId    String
+  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  peerId    String // id da pessoa no Telegram
+  peerHash  String // hash de acesso dela para esta conta (para ler e mandar mensagem)
+  name      String
+  username  String?
+  createdAt DateTime     @default(now())
+
+  @@unique([linkId, peerId])
   @@index([userId])
 }
 

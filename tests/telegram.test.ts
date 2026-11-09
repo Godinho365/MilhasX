@@ -13,6 +13,10 @@ import * as messagesRoute from "@/app/api/telegram/accounts/[id]/messages/route"
 import * as alertsRoute from "@/app/api/telegram/alerts/route";
 import * as alertRoute from "@/app/api/telegram/alerts/[id]/route";
 import * as feedRoute from "@/app/api/telegram/alerts/feed/route";
+import * as dmOpenRoute from "@/app/api/telegram/accounts/[id]/dms/route";
+import * as dmsRoute from "@/app/api/telegram/dms/route";
+import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
+import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
 import { setTelegramClientFactory, normalizePhone, maskPhone, MAX_TELEGRAM_ACCOUNTS, type TgClient, type TgMessage } from "@/server/services/telegram";
 import { matchAlerts, parseAlertWords } from "@/domain/telegram-alerts";
 import { decrypt } from "@/server/services/accounts";
@@ -25,7 +29,9 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
 /** Mensagens dos grupos simulados (pelo id do grupo), da mais antiga para a mais nova. */
-const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media });
+const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true });
+/** O que foi mandado pelo app (no grupo ou no privado), pelo id do chat. */
+let SENT: Record<string, TgMessage[]> = {};
 const MSGS: Record<string, TgMessage[]> = {
   "1234": [msg(1, 10, "Ana", "Compro 100k LATAM a R$ 25"), msg(2, 11, "Bia", "Bom dia, pessoal"), msg(3, 12, "Caio", "", "foto"), msg(4, 13, "Duda", "Vendo Smiles 50k")],
   "5678": [msg(10, 12, "Eva", "compro latam 30K urgente"), msg(11, 14, "Fábio", "Promoção Azul")],
@@ -67,7 +73,18 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
       messages: async (peer, { limit, minId }) => {
         if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
         calls.push(`messages ${peer.id}`);
-        return (MSGS[peer.id] ?? []).filter((m) => !minId || m.id > minId).slice(-limit);
+        return [...(MSGS[peer.id] ?? []), ...(SENT[peer.id] ?? [])].filter((m) => !minId || m.id > minId).slice(-limit);
+      },
+      send: async (peer, text) => {
+        if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
+        calls.push(`send ${peer.kind}:${peer.id} ${text}`);
+        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", text), out: true };
+        (SENT[peer.id] ??= []).push(m);
+        return m;
+      },
+      author: async (group, messageId) => {
+        const m = (MSGS[group.id] ?? []).find((x) => x.id === messageId);
+        return m ? { id: `u-${m.sender}`, hash: `h-${m.sender}`, name: m.sender, username: null, self: false, bot: messageId === 11 } : null;
       },
       logOut: async () => { calls.push(`logOut ${phone()}`); },
     };
@@ -79,6 +96,7 @@ let userId: string;
 beforeEach(async () => {
   await resetDb();
   calls = [];
+  SENT = {};
   setTelegramClientFactory(fake());
   c = new Client();
   userId = (await c.call(register.POST, "POST", "/r", { name: "Ana", email: "ana@x.test", password: "senha-forte-1" })).data.user.id;
@@ -284,5 +302,52 @@ describe("alerta pelo pedido de compra (API)", () => {
     const msgs = (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items;
     expect(msgs[0].ad).toEqual({ kind: "COMPRA", program: "LATAM", miles: 100_000, cpfs: null, cpmCents: 2500 });
     expect(msgs[1].ad).toBeNull(); // conversa
+  });
+});
+
+describe("mandar mensagem e conversar no privado", () => {
+  it("manda no grupo, abre o privado com quem postou, conversa e fecha", async () => {
+    const a = await connected("11999998888", "-1001234");
+    // no grupo
+    expect((await c.call(messagesRoute.POST, "POST", "/x", { text: "   " }, { id: a })).status).toBe(400);
+    const sent = await c.call(messagesRoute.POST, "POST", "/x", { text: " Faço 24 " }, { id: a });
+    expect([sent.status, sent.data.item]).toEqual([201, expect.objectContaining({ text: "Faço 24", sender: "Você", out: true })]);
+    expect(calls).toContain("send channel:1234 Faço 24");
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.at(-1)).toMatchObject({ text: "Faço 24", out: true });
+
+    // chamar no privado quem mandou o pedido; abrir de novo não duplica
+    const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
+    expect(dm).toMatchObject({ name: "Ana", via: "Conta 8888", group: "Balcão de Milhas ASM" });
+    expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item.id).toBe(dm.id);
+    expect(await prisma.telegramDm.findUniqueOrThrow({ where: { id: dm.id } })).toMatchObject({ peerId: "u-Ana", peerHash: "h-Ana" });
+    expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 999 }, { id: a })).data.erro).toMatch(/não é de uma pessoa/);
+
+    // conversa no privado
+    expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items).toEqual([]);
+    expect((await c.call(dmMessagesRoute.POST, "POST", "/x", { text: "Oi! Tenho LATAM" }, { id: dm.id })).status).toBe(201);
+    expect(calls).toContain("send user:u-Ana Oi! Tenho LATAM");
+    expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items).toEqual([expect.objectContaining({ text: "Oi! Tenho LATAM", out: true, ad: null, alerts: [] })]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items).toHaveLength(1);
+
+    // outro usuário não vê nem manda
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).status).toBe(404);
+    expect((await o.call(dmMessagesRoute.POST, "POST", "/x", { text: "x" }, { id: dm.id })).status).toBe(404);
+    expect((await o.call(messagesRoute.POST, "POST", "/x", { text: "x" }, { id: a })).status).toBe(404);
+    expect((await o.call(dmRoute.DELETE, "DELETE", "/x", undefined, { id: dm.id })).status).toBe(404);
+
+    // fechar aqui; desconectar a conta leva as conversas dela
+    expect((await c.call(dmRoute.DELETE, "DELETE", "/x", undefined, { id: dm.id })).status).toBe(200);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items).toEqual([]);
+    await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 2 }, { id: a });
+    await c.call(account.DELETE, "DELETE", "/x", undefined, { id: a });
+    expect(await prisma.telegramDm.count()).toBe(0);
+  });
+
+  it("não abre privado com robô do grupo", async () => {
+    const b = await connected("21977776666", "-1005678");
+    expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 11 }, { id: b })).data.erro).toMatch(/robô/);
+    expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 10 }, { id: b })).status).toBe(201);
   });
 });

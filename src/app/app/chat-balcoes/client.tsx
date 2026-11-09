@@ -1,9 +1,11 @@
 "use client";
-// Chat Balcões: abas com as mensagens de cada grupo de balcão e a aba Alertas. A tela pergunta por mensagens novas
-// de tempos em tempos (só com a aba do navegador visível); mensagem que dispara um alerta fica destacada e avisa.
+// Chat Balcões: abas com as mensagens de cada grupo de balcão, as conversas no privado abertas a partir dos grupos e a
+// aba Alertas. A tela pergunta por mensagens novas de tempos em tempos (só com a aba do navegador visível); mensagem
+// que dispara um alerta fica destacada e avisa. Dá para mandar mensagem no grupo e no privado: o app só manda o que
+// o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
@@ -12,12 +14,16 @@ import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegra
 import { BALCAO_PROGRAMS, type BalcaoAd } from "@/domain/balcao-ads";
 
 type Chat = { id: string; title: string; account: string };
-type Msg = { id: number; date: string; sender: string; text: string; media: string | null; ad: BalcaoAd | null; alerts: string[] };
+export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null };
+type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; ad: BalcaoAd | null; alerts: string[] };
 type FeedMsg = Msg & { chatId: string; chat: string };
+/** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
+type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
 
 const CHAT_POLL_MS = 15_000;
 const FEED_POLL_MS = 30_000;
 const ALERTS_TAB = "alertas";
+const dmKey = (id: string) => `dm:${id}`;
 
 /** Milhas digitadas: "100k", "100.000" ou "100000"; vazio = null; inválido = undefined. */
 function milesInput(raw: string): number | null | undefined {
@@ -47,8 +53,9 @@ function usePolling(fn: () => void, ms: number, on = true) {
   }, [ms, on]);
 }
 
-export function ChatBalcoesClient({ chats, initialAlerts }: { chats: Chat[]; initialAlerts: AlertRule[] }) {
+export function ChatBalcoesClient({ chats, initialAlerts, initialDms }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[] }) {
   const [tab, setTab] = useState(chats[0]!.id);
+  const [dms, setDms] = useState(initialDms);
   const [alerts, setAlerts] = useState(initialAlerts);
   const [feed, setFeed] = useState<FeedMsg[] | null>(null);
   const [feedErrors, setFeedErrors] = useState<{ chat: string; erro: string }[]>([]);
@@ -79,53 +86,70 @@ export function ChatBalcoesClient({ chats, initialAlerts }: { chats: Chat[]; ini
   }, [active, alerts, loadFeed]);
   usePolling(loadFeed, FEED_POLL_MS, active);
 
-  const tabs = [...chats.map((c) => ({ key: c.id, label: c.title, hint: c.account })), { key: ALERTS_TAB, label: "Alertas", hint: `${alerts.filter((a) => a.active).length} ativos` }];
+  /** Chamar no privado quem mandou a mensagem do grupo: abre (ou volta para) a aba da conversa. */
+  async function openDm(chatId: string, messageId: number) {
+    const r = await api<{ item: Dm }>(`/api/telegram/accounts/${chatId}/dms`, "POST", { messageId });
+    if (!r.ok) return toast(r.erro, "error");
+    const dm = r.data.item;
+    setDms((cur) => (cur.some((d) => d.id === dm.id) ? cur : [...cur, dm]));
+    setTab(dmKey(dm.id));
+  }
+  async function closeDm(dm: Dm) {
+    const r = await api(`/api/telegram/dms/${dm.id}`, "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    setDms((cur) => cur.filter((d) => d.id !== dm.id));
+    if (tab === dmKey(dm.id)) setTab(chats[0]!.id);
+  }
+
+  const tabBtn = (key: string, label: React.ReactNode, hint: string, extra?: React.ReactNode) => (
+    <div key={key} className={`-mb-px flex items-center border-b-2 ${tab === key ? "border-accent-light text-white" : "border-transparent text-muted hover:text-zinc-100"}`}>
+      <button type="button" onClick={() => { setTab(key); if (key === ALERTS_TAB) setUnseen(0); }} aria-current={tab === key ? "page" : undefined} title={hint} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium">{label}</button>
+      {extra}
+    </div>
+  );
   return (
     <>
       <nav className="mb-4 flex gap-1 overflow-x-auto border-b border-line" aria-label="Chats dos balcões">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => { setTab(t.key); if (t.key === ALERTS_TAB) setUnseen(0); }}
-            aria-current={tab === t.key ? "page" : undefined}
-            title={t.hint}
-            className={`-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === t.key ? "border-accent-light text-white" : "border-transparent text-muted hover:text-zinc-100"}`}
-          >
-            {t.key === ALERTS_TAB && <Bell className="h-4 w-4" />}
-            {t.label}
-            {t.key === ALERTS_TAB && unseen > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-black">{unseen}</span>}
-          </button>
-        ))}
+        {chats.map((c) => tabBtn(c.id, c.title, `pela conta ${c.account}`))}
+        {dms.map((d) => tabBtn(dmKey(d.id), <><UserRound className="h-4 w-4" />{d.name}</>, `Privado pela conta ${d.via}`,
+          <button type="button" onClick={() => closeDm(d)} className="-ml-1.5 mr-1 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={`Fechar a conversa com ${d.name}`} title="Fechar aqui (no Telegram a conversa continua)"><X className="h-3.5 w-3.5" /></button>))}
+        {tabBtn(ALERTS_TAB, <><Bell className="h-4 w-4" />Alertas{unseen > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-black">{unseen}</span>}</>, `${alerts.filter((a) => a.active).length} ativos`)}
         <Link href="/app/settings?tab=telegram" className="ml-auto flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-zinc-100" title="Contas e grupos do Telegram"><Settings className="h-3.5 w-3.5" />Contas</Link>
       </nav>
       {/* os chats ficam montados: trocar de aba não perde o que já carregou */}
-      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView chat={c} visible={tab === c.id} /></div>)}
+      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} /></div>)}
+      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} /></div>)}
       {tab === ALERTS_TAB && <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={setTab} reload={loadFeed} />}
     </>
   );
 }
 
-/** Mensagens de um grupo: carrega as últimas e depois só as novas (de 15 em 15 segundos, com a aba aberta). */
-function ChatView({ chat, visible }: { chat: Chat; visible: boolean }) {
+/** Mensagens de um grupo ou de uma conversa no privado: carrega as últimas e depois só as novas (de 15 em 15
+ *  segundos, com a aba aberta), com o campo para mandar mensagem embaixo. */
+function ChatView({ source, visible, onDm }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void> }) {
+  const group = source.kind === "group";
+  const url = group ? `/api/telegram/accounts/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
-  const [onlyAds, setOnlyAds] = useState(true); // só os pedidos: esconde contrapropostas e conversa
+  const [onlyAds, setOnlyAds] = useState(group); // grupo: só os pedidos (esconde contrapropostas e conversa)
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [opening, setOpening] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // rolando junto com as mensagens novas (o usuário não subiu para ler as antigas)
-  const shown = msgs && onlyAds ? msgs.filter((m) => m.ad) : msgs;
+  const shown = msgs && onlyAds ? msgs.filter((m) => m.ad || m.out) : msgs;
 
   const load = useCallback(async () => {
     const last = msgs?.at(-1)?.id;
     setLoading(true);
-    const r = await api<{ items: Msg[] }>(`/api/telegram/accounts/${chat.id}/messages?limit=60${last ? `&minId=${last}` : ""}`);
+    const r = await api<{ items: Msg[] }>(`${url}?limit=60${last ? `&minId=${last}` : ""}`);
     setLoading(false);
     if (!r.ok) return setErro(r.erro);
     setErro("");
     if (!last) return setMsgs(r.data.items);
-    if (r.data.items.length) setMsgs((cur) => [...(cur ?? []), ...r.data.items.filter((m) => m.id > last)]);
-  }, [chat.id, msgs]);
+    if (r.data.items.length) setMsgs((cur) => [...(cur ?? []), ...r.data.items.filter((m) => m.id > last && !(cur ?? []).some((x) => x.id === m.id))]);
+  }, [url, msgs]);
 
   useEffect(() => { if (visible && msgs === null) void load(); }, [visible, msgs, load]);
   usePolling(() => { if (msgs !== null) void load(); }, CHAT_POLL_MS, visible);
@@ -134,29 +158,66 @@ function ChatView({ chat, visible }: { chat: Chat; visible: boolean }) {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [msgs, visible, onlyAds]);
 
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!text.trim() || sending) return;
+    setSending(true);
+    const r = await api<{ item: Msg }>(url, "POST", { text });
+    setSending(false);
+    if (!r.ok) return toast(r.erro, "error");
+    setText("");
+    stick.current = true;
+    setMsgs((cur) => (cur?.some((m) => m.id === r.data.item.id) ? cur : [...(cur ?? []), r.data.item]));
+  }
+  async function dm(id: number) {
+    if (!onDm) return;
+    setOpening(id);
+    await onDm(id);
+    setOpening(null);
+  }
+
+  const title = group ? source.chat.title : `${source.dm.name}${source.dm.username ? ` (@${source.dm.username})` : ""}`;
+  const subtitle = group
+    ? `pela conta ${source.chat.account} · atualiza sozinho a cada 15 segundos${msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos em ${msgs.length} mensagens` : ""}`
+    : `privado pela conta ${source.dm.via}${source.dm.group ? ` · do grupo ${source.dm.group}` : ""} · atualiza sozinho a cada 15 segundos`;
   return (
     <div className="card flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold">{chat.title}</p>
-          <p className="truncate text-xs text-muted">pela conta {chat.account} · atualiza sozinho a cada 15 segundos{msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos em ${msgs.length} mensagens` : ""}</p>
+          <p className="truncate font-semibold">{title}</p>
+          <p className="truncate text-xs text-muted">{subtitle}</p>
         </div>
-        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted" title="Esconde as contrapropostas e a conversa">
-          <input type="checkbox" checked={onlyAds} onChange={(e) => setOnlyAds(e.target.checked)} />Só pedidos
-        </label>
+        {group && (
+          <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted" title="Esconde as contrapropostas e a conversa">
+            <input type="checkbox" checked={onlyAds} onChange={(e) => setOnlyAds(e.target.checked)} />Só pedidos
+          </label>
+        )}
         <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => void load()} disabled={loading} aria-label="Atualizar agora" title="Atualizar agora"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
       </div>
       {erro && <div className="p-3"><Alert>{erro}</Alert></div>}
-      <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[65vh] space-y-2 overflow-y-auto p-4">
+      <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[58vh] space-y-2 overflow-y-auto p-4">
         {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
-          : shown.length === 0 ? <p className="text-sm text-muted">{onlyAds ? "Nenhum pedido nas últimas mensagens." : "Nenhuma mensagem neste grupo."}</p>
-          : shown.map((m) => <Bubble key={m.id} m={m} />)}
+          : shown.length === 0 ? <p className="text-sm text-muted">{onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
+          : shown.map((m) => <Bubble key={m.id} m={m} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id} />)}
       </div>
+      <form onSubmit={send} className="flex items-end gap-2 border-t border-line p-3">
+        <textarea
+          className="input min-h-10 flex-1 resize-none text-sm"
+          rows={Math.min(5, Math.max(1, text.split("\n").length))}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
+          maxLength={4096}
+          placeholder={group ? `Mensagem para o grupo ${source.chat.title}` : `Mensagem para ${source.dm.name}`}
+          aria-label={group ? "Mensagem para o grupo" : "Mensagem no privado"}
+        />
+        <button className="btn-primary h-10" disabled={sending || !text.trim()} title="Enviar (Enter; Shift+Enter quebra a linha)"><Send className="h-4 w-4" />{sending ? "Enviando…" : "Enviar"}</button>
+      </form>
     </div>
   );
 }
 
-function Bubble({ m, chat, onOpen }: { m: Msg; chat?: string; onOpen?: () => void }) {
+function Bubble({ m, chat, onOpen, onDm, opening }: { m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean }) {
   const hit = m.alerts.length > 0;
   async function copy() {
     try {
@@ -167,11 +228,12 @@ function Bubble({ m, chat, onOpen }: { m: Msg; chat?: string; onOpen?: () => voi
     }
   }
   return (
-    <div className={`group rounded-xl border px-3 py-2 ${hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"}`}>
+    <div className={`group rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"}`}>
       <div className="flex items-baseline gap-2 text-xs">
         <span className="truncate font-semibold text-zinc-200">{m.sender}</span>
         {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
         <span className="ml-auto shrink-0 text-muted">{when(m.date)}</span>
+        {onDm && <button type="button" onClick={onDm} disabled={opening} className="flex shrink-0 items-center gap-1 text-accent-light opacity-70 hover:opacity-100 group-hover:opacity-100" title="Conversar no privado com quem mandou"><MessageCircle className="h-3.5 w-3.5" />{opening ? "Abrindo…" : "Privado"}</button>}
         {m.text && <button type="button" onClick={copy} className="shrink-0 text-muted opacity-0 hover:text-zinc-100 group-hover:opacity-100" aria-label="Copiar mensagem" title="Copiar"><Copy className="h-3.5 w-3.5" /></button>}
       </div>
       {m.ad && (
