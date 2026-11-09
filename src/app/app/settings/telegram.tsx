@@ -3,7 +3,7 @@
 // escolher, em cada uma, o grupo do balcão (Chat Balcões). O app só manda o que o usuário escreve e manda; as sessões ficam
 // criptografadas no servidor.
 import { useState } from "react";
-import { Send, LogOut, RefreshCw, Plus } from "lucide-react";
+import { Send, LogOut, RefreshCw, Plus, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Field, Alert } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
@@ -15,10 +15,10 @@ type TgAccount = {
   phone: string;
   codeViaApp: boolean;
   accountName: string | null;
-  group: { id: string; title: string } | null;
+  groups: { id: string; groupId: string; title: string }[]; // grupos de balcão no Chat Balcões
 };
-type TgStatus = { enabled: boolean; max: number; accounts: TgAccount[] };
-type TgGroup = { id: string; title: string; channel: boolean };
+type TgStatus = { enabled: boolean; max: number; maxGroups: number; accounts: TgAccount[] };
+type TgGroup = { id: string; title: string; channel: boolean; chosen: boolean };
 type Call = (path: string, method: "POST" | "DELETE", body?: unknown) => Promise<TgStatus | null>;
 
 export function TelegramTab({ initial }: { initial: TgStatus }) {
@@ -68,7 +68,7 @@ export function TelegramTab({ initial }: { initial: TgStatus }) {
       {s.accounts.length > 0 && (
         <Section title={`Contas do Telegram (${s.accounts.length})`}>
           <ul className="divide-y divide-line">
-            {s.accounts.map((a) => <AccountRow key={a.id} account={a} call={call} busy={busy} setErro={setErro} onGone={refresh} />)}
+            {s.accounts.map((a) => <AccountRow key={a.id} account={a} call={call} busy={busy} setErro={setErro} onGone={refresh} maxGroups={s.maxGroups} />)}
           </ul>
         </Section>
       )}
@@ -96,12 +96,12 @@ export function TelegramTab({ initial }: { initial: TgStatus }) {
   );
 }
 
-/** Uma conta: no meio do login (código ou senha) ou conectada (grupo do balcão e desconectar). */
-function AccountRow({ account: a, call, busy, setErro, onGone }: { account: TgAccount; call: Call; busy: boolean; setErro: (e: string) => void; onGone: () => Promise<void> }) {
+/** Uma conta: no meio do login (código ou senha) ou conectada (os grupos de balcão dela e desconectar). */
+function AccountRow({ account: a, call, busy, setErro, onGone, maxGroups }: { account: TgAccount; call: Call; busy: boolean; setErro: (e: string) => void; onGone: () => Promise<void>; maxGroups: number }) {
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
-  const [groups, setGroups] = useState<TgGroup[] | null>(null);
-  const [groupId, setGroupId] = useState(a.group?.id ?? "");
+  const [groups, setGroups] = useState<TgGroup[] | null>(null); // grupos da conta, para adicionar
+  const [groupId, setGroupId] = useState("");
   const [loading, setLoading] = useState(false);
   const base = `/api/telegram/accounts/${a.id}`;
 
@@ -134,14 +134,20 @@ function AccountRow({ account: a, call, busy, setErro, onGone }: { account: TgAc
       return;
     }
     setGroups(r.data.items);
-    if (!groupId && r.data.items[0]) setGroupId(r.data.items[0].id);
+    setGroupId(r.data.items.find((g) => !g.chosen)?.id ?? "");
   }
-  async function saveGroup() {
+  async function addGroup() {
     if (await call(`${base}/groups`, "POST", { groupId })) {
       setGroups(null);
-      toast("Grupo do balcão salvo");
+      toast("Grupo adicionado ao Chat Balcões");
     }
   }
+  async function removeGroup(g: { id: string; title: string }) {
+    const ok = await confirmDialog({ title: `Tirar ${g.title} do Chat Balcões?`, body: "A aba dele some do Chat Balcões. No Telegram você continua no grupo.", confirmLabel: "Tirar" });
+    if (!ok) return;
+    if (await call(`/api/telegram/chats/${g.id}`, "DELETE")) toast("Grupo tirado do Chat Balcões");
+  }
+  const available = groups?.filter((g) => !g.chosen) ?? [];
 
   return (
     <li className="space-y-3 py-4 first:pt-0 last:pb-0">
@@ -177,19 +183,31 @@ function AccountRow({ account: a, call, busy, setErro, onGone }: { account: TgAc
       )}
       {a.status === "ACTIVE" && (
         <div className="space-y-2">
-          <p className="text-sm">{a.group ? <>Grupo do balcão: <b>{a.group.title}</b></> : <span className="text-muted">Nenhum grupo do balcão escolhido.</span>}</p>
+          <p className="text-sm font-medium">Grupos de balcão {a.groups.length > 0 && <span className="text-muted">({a.groups.length})</span>}</p>
+          {a.groups.length ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {a.groups.map((g) => (
+                <li key={g.id} className="flex items-center gap-1 rounded-full border border-line bg-panel2 py-0.5 pl-3 pr-1 text-sm">
+                  {g.title}
+                  <button type="button" onClick={() => removeGroup(g)} disabled={busy} className="rounded-full p-0.5 text-muted hover:text-red-300" aria-label={`Tirar ${g.title} do Chat Balcões`} title="Tirar do Chat Balcões"><X className="h-3.5 w-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-sm text-muted">Nenhum grupo ainda: adicione os grupos de balcão desta conta.</p>}
           {groups ? (
-            groups.length ? (
+            available.length ? (
               <div className="flex flex-wrap gap-2">
-                <select className="input min-w-0 flex-1" value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label={`Grupo do balcão de ${a.accountName ?? a.phone}`}>
-                  {groups.map((g) => <option key={g.id} value={g.id}>{g.title}{g.channel ? " (canal)" : ""}</option>)}
+                <select className="input min-w-0 flex-1" value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label={`Grupo para adicionar de ${a.accountName ?? a.phone}`}>
+                  {available.map((g) => <option key={g.id} value={g.id}>{g.title}{g.channel ? " (canal)" : ""}</option>)}
                 </select>
-                <button type="button" className="btn-primary" onClick={saveGroup} disabled={busy || !groupId}>Salvar</button>
+                <button type="button" className="btn-primary" onClick={addGroup} disabled={busy || !groupId}><Plus className="h-4 w-4" />Adicionar</button>
                 <button type="button" className="btn-ghost" onClick={() => setGroups(null)}>Cancelar</button>
               </div>
-            ) : <p className="text-sm text-muted">Esta conta não participa de nenhum grupo.</p>
+            ) : <p className="text-sm text-muted">{groups.length ? "Todos os grupos desta conta já estão no Chat Balcões." : "Esta conta não participa de nenhum grupo."} <button type="button" className="text-accent-light hover:underline" onClick={() => setGroups(null)}>Fechar</button></p>
           ) : (
-            <button type="button" className="btn-ghost h-8 text-sm" onClick={loadGroups} disabled={busy || loading}><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />{a.group ? "Trocar o grupo" : "Escolher o grupo"}</button>
+            <button type="button" className="btn-ghost h-8 text-sm" onClick={loadGroups} disabled={busy || loading || a.groups.length >= maxGroups} title={a.groups.length >= maxGroups ? `Limite de ${maxGroups} grupos por conta` : undefined}>
+              {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Adicionar grupo
+            </button>
           )}
         </div>
       )}

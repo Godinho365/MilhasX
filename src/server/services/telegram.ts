@@ -281,21 +281,22 @@ function requireEnabled() {
   if (!credentialsEnabled()) throw new DomainError(503, "Telegram desativado: defina CREDENTIALS_KEY no servidor");
 }
 
-const view = (l: Link) => ({
+type LinkWithGroups = Link & { groups: { id: string; groupId: string; title: string; clearedUpTo: number | null }[] };
+const view = (l: LinkWithGroups) => ({
   id: l.id,
   status: l.status as "CODE_SENT" | "PASSWORD_NEEDED" | "ACTIVE",
   phone: maskPhone(l.phone),
   codeViaApp: l.codeViaApp,
   accountName: l.accountName,
-  group: l.groupId ? { id: l.groupId, title: l.groupTitle ?? "" } : null,
-  clearedUpTo: l.clearedUpTo, // chat limpo no app até esta mensagem
+  // grupos de balcão no Chat Balcões (id = o do chat; groupId = o do grupo no Telegram; clearedUpTo = limpo no app)
+  groups: l.groups.map((g) => ({ id: g.id, groupId: g.groupId, title: g.title, clearedUpTo: g.clearedUpTo })),
 });
 export type TelegramAccountView = ReturnType<typeof view>;
 
-/** As contas conectadas (e as que estão no meio do login), da mais antiga para a mais nova. */
+/** As contas conectadas (e as que estão no meio do login), da mais antiga para a mais nova, com os grupos. */
 export async function telegramStatus(userId: string) {
-  const links = await prisma.telegramLink.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
-  return { enabled: telegramEnabled(), max: MAX_TELEGRAM_ACCOUNTS, accounts: links.map(view) };
+  const links = await prisma.telegramLink.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, include: { groups: { orderBy: { createdAt: "asc" } } } });
+  return { enabled: telegramEnabled(), max: MAX_TELEGRAM_ACCOUNTS, maxGroups: MAX_TELEGRAM_GROUPS, accounts: links.map(view) };
 }
 
 /** 1ª etapa: o Telegram manda o código (no app do Telegram ou por SMS). Cada número é uma conta; o mesmo número
@@ -307,7 +308,7 @@ export async function startTelegramLogin(userId: string, rawPhone: string) {
   if (same?.status === "ACTIVE") throw new DomainError(409, "Esta conta do Telegram já está conectada");
   if (!same && (await prisma.telegramLink.count({ where: { userId } })) >= MAX_TELEGRAM_ACCOUNTS) throw new DomainError(409, `Limite de ${MAX_TELEGRAM_ACCOUNTS} contas do Telegram: desconecte uma antes`);
   const sent = await withClient("", async (c) => ({ ...(await c.sendCode(phone)), session: c.saveSession() }));
-  const data = { sessionEnc: encrypt(sent.session), status: "CODE_SENT", phoneCodeHash: sent.phoneCodeHash, codeViaApp: sent.viaApp, accountName: null, groupId: null, groupTitle: null };
+  const data = { sessionEnc: encrypt(sent.session), status: "CODE_SENT", phoneCodeHash: sent.phoneCodeHash, codeViaApp: sent.viaApp, accountName: null };
   await prisma.telegramLink.upsert({ where: { userId_phone: { userId, phone } }, create: { userId, phone, ...data }, update: data });
   return telegramStatus(userId);
 }
@@ -368,31 +369,58 @@ async function activeLink(userId: string, id: string) {
   return l;
 }
 
+/* ---------------- Grupos (chats do Chat Balcões) ---------------- */
+
+/** Até quantos grupos de balcão cada conta tem no Chat Balcões. */
+export const MAX_TELEGRAM_GROUPS = 10;
+
+/** Grupo escolhido (um chat do Chat Balcões) com a conta dele, que precisa estar conectada. */
+async function ownChat(userId: string, chatId: string) {
+  requireEnabled();
+  const c = await prisma.telegramGroup.findFirst({ where: { id: chatId, userId }, include: { link: true } });
+  if (!c) throw new DomainError(404, "Grupo não encontrado no Chat Balcões");
+  if (c.link.status !== "ACTIVE") throw new DomainError(409, "A conta do Telegram deste grupo não está conectada");
+  return c;
+}
+type Chat = Awaited<ReturnType<typeof ownChat>>;
+
 /** Grupos e canais da conta, com o acesso direto a cada um (uso interno). */
 async function accountGroups(l: Link) {
   return guardSession(l, () => withPooled(l, (c) => c.groups()));
 }
 
-/** Grupos e canais da conta, para escolher o do balcão. */
+/** Grupos e canais da conta, para escolher os de balcão (chosen = já está no Chat Balcões). */
 export async function listTelegramGroups(userId: string, id: string) {
-  return (await accountGroups(await activeLink(userId, id))).map(({ id: gid, title, channel }) => ({ id: gid, title, channel }));
+  const l = await activeLink(userId, id);
+  const [all, chosen] = await Promise.all([accountGroups(l), prisma.telegramGroup.findMany({ where: { linkId: l.id }, select: { groupId: true } })]);
+  const set = new Set(chosen.map((c) => c.groupId));
+  return all.map(({ id: gid, title, channel }) => ({ id: gid, title, channel, chosen: set.has(gid) }));
 }
 
-/** Escolhe o grupo do balcão da conta (precisa ser um dos grupos dela); guarda o acesso direto a ele. */
-export async function chooseTelegramGroup(userId: string, id: string, groupId: string) {
-  const g = (await accountGroups(await activeLink(userId, id))).find((x) => x.id === groupId);
+/** Põe um grupo da conta no Chat Balcões (vira uma aba), guardando o acesso direto a ele. */
+export async function addTelegramGroup(userId: string, id: string, groupId: string) {
+  const l = await activeLink(userId, id);
+  const g = (await accountGroups(l)).find((x) => x.id === groupId);
   if (!g) throw new DomainError(404, "Grupo não encontrado nesta conta do Telegram");
-  await prisma.telegramLink.update({ where: { id }, data: { groupId: g.id, groupTitle: g.title, groupPeer: (g.peer ?? null) as Prisma.InputJsonValue } });
+  if (await prisma.telegramGroup.count({ where: { linkId: l.id, groupId } })) throw new DomainError(409, "Este grupo já está no Chat Balcões");
+  if ((await prisma.telegramGroup.count({ where: { linkId: l.id } })) >= MAX_TELEGRAM_GROUPS) throw new DomainError(409, `Limite de ${MAX_TELEGRAM_GROUPS} grupos por conta: tire um antes`);
+  await prisma.telegramGroup.create({ data: { userId, linkId: l.id, groupId: g.id, title: g.title, peer: (g.peer ?? undefined) as Prisma.InputJsonValue | undefined } });
   return telegramStatus(userId);
 }
 
-/** Acesso direto ao grupo do balcão; conta que escolheu o grupo antes de guardar o acesso busca uma vez e guarda. */
-async function groupPeer(l: Link): Promise<TgPeer> {
-  if (!l.groupId) throw new DomainError(409, "Escolha o grupo do balcão desta conta em Configurações › Telegram");
-  if (l.groupPeer) return l.groupPeer as TgPeer;
-  const g = (await accountGroups(l)).find((x) => x.id === l.groupId);
-  if (!g?.peer) throw new DomainError(404, "O grupo do balcão não está mais nesta conta do Telegram: escolha outro em Configurações › Telegram");
-  await prisma.telegramLink.update({ where: { id: l.id }, data: { groupPeer: g.peer as Prisma.InputJsonValue } });
+/** Tira o grupo do Chat Balcões (no Telegram você continua no grupo). */
+export async function removeTelegramGroup(userId: string, chatId: string) {
+  const { count } = await prisma.telegramGroup.deleteMany({ where: { id: chatId, userId } });
+  if (!count) throw new DomainError(404, "Grupo não encontrado no Chat Balcões");
+  return telegramStatus(userId);
+}
+
+/** Acesso direto ao grupo; sem ele guardado, busca nos chats da conta uma vez e guarda. */
+async function chatPeer(c: Chat): Promise<TgPeer> {
+  if (c.peer) return c.peer as TgPeer;
+  const g = (await accountGroups(c.link)).find((x) => x.id === c.groupId);
+  if (!g?.peer) throw new DomainError(404, "O grupo não está mais nesta conta do Telegram: tire e escolha de novo em Configurações › Telegram");
+  await prisma.telegramGroup.update({ where: { id: c.id }, data: { peer: g.peer as Prisma.InputJsonValue } });
   return g.peer;
 }
 
@@ -400,30 +428,30 @@ async function groupPeer(l: Link): Promise<TgPeer> {
 const ALERT_SELECT = { id: true, name: true, words: true, active: true, program: true, maxCpfs: true, minMiles: true, maxMiles: true, minCpmCents: true } as const;
 const activeAlerts = (userId: string): Promise<AlertRule[]> => prisma.telegramAlert.findMany({ where: { userId, active: true }, select: ALERT_SELECT });
 
-/** Mensagens do grupo do balcão da conta (da mais antiga para a mais nova), com os alertas que cada uma dispara.
- *  minId = só as que chegaram depois dela. Ler pelo app não marca nada como lido no Telegram. */
-export async function chatMessages(userId: string, id: string, opts: { limit?: number; minId?: number } = {}) {
-  const l = await activeLink(userId, id);
-  const peer = await groupPeer(l);
-  const minId = Math.max(opts.minId ?? 0, l.clearedUpTo ?? 0) || undefined; // limpo no app: só o que veio depois
+/** Referência do pedido na negociação do CRM Milhas: conta, grupo e mensagem (o número da mensagem é por grupo). */
+const adRef = (linkId: string, groupId: string, messageId: number) => `tg:${linkId}:${groupId}:${messageId}`;
+const brl = (cents: number) => `R$ ${(cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Mensagens do grupo (da mais antiga para a mais nova), com o pedido lido, os alertas que disparam e, se o pedido
+ *  já foi registrado, a negociação do CRM Milhas. minId = só as que chegaram depois dela (e nada do que foi limpo
+ *  no app). Ler pelo app não marca nada como lido no Telegram. */
+export async function chatMessages(userId: string, chatId: string, opts: { limit?: number; minId?: number } = {}) {
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  const minId = Math.max(opts.minId ?? 0, c.clearedUpTo ?? 0) || undefined;
   const [msgs, rules] = await Promise.all([
-    guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
+    guardSession(c.link, () => withPooled(c.link, (cl) => cl.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
     activeAlerts(userId),
   ]);
   const read = msgs.map((m) => {
     const ad = m.text ? parseBalcaoAd(m.text) : null; // pedido de compra/venda lido da mensagem (contraproposta não é)
     return { ...m, ad, alerts: m.text ? matchAlerts(m.text, rules, ad) : [] };
   });
-  // pedidos já registrados no CRM Milhas
-  const refs = read.filter((m) => m.ad).map((m) => adRef(l.id, l.groupId!, m.id));
+  const refs = read.filter((m) => m.ad).map((m) => adRef(c.linkId, c.groupId, m.id));
   const deals = refs.length ? await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true } }) : [];
   const byRef = new Map(deals.map((d) => [d.sourceRef, { id: d.id, number: d.number, stage: d.stage }]));
-  return read.map((m) => ({ ...m, crm: m.ad ? byRef.get(adRef(l.id, l.groupId!, m.id)) ?? null : null }));
+  return read.map((m) => ({ ...m, crm: m.ad ? byRef.get(adRef(c.linkId, c.groupId, m.id)) ?? null : null }));
 }
-
-/** Referência do pedido na negociação do CRM Milhas: conta, grupo e mensagem (o número da mensagem é por grupo). */
-const adRef = (linkId: string, groupId: string, messageId: number) => `tg:${linkId}:${groupId}:${messageId}`;
-const brl = (cents: number) => `R$ ${(cents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
  * Registra o pedido do grupo no CRM Milhas: negociação de balcão (o da lista que bate com o nome do grupo, ou o
@@ -431,17 +459,17 @@ const brl = (cents: number) => `R$ ${(cents / 100).toLocaleString("pt-BR", { min
  * conta mais barata que consegue emitir, e o texto do pedido nas observações. Com contraproposta, já vai para
  * "Negociação". Um pedido vira uma negociação só.
  */
-export async function registerAdInCrm(userId: string, id: string, input: { messageId: number; text: string; sender: string; cpmCents?: number | null }) {
-  const l = await own(userId, id);
-  if (!l.groupId) throw new DomainError(409, "Escolha o grupo do balcão desta conta em Configurações › Telegram");
+export async function registerAdInCrm(userId: string, chatId: string, input: { messageId: number; text: string; sender: string; cpmCents?: number | null }) {
+  const c = await prisma.telegramGroup.findFirst({ where: { id: chatId, userId } });
+  if (!c) throw new DomainError(404, "Grupo não encontrado no Chat Balcões");
   const ad = parseBalcaoAd(input.text);
   if (!ad) throw new DomainError(400, "Esta mensagem não é um pedido");
-  const sourceRef = adRef(l.id, l.groupId, input.messageId);
+  const sourceRef = adRef(c.linkId, c.groupId, input.messageId);
   const existing = await prisma.milesDeal.findFirst({ where: { userId, sourceRef }, select: { number: true } });
   if (existing) throw new DomainError(409, `Este pedido já está no CRM Milhas (#${existing.number})`);
   const cpmCents = input.cpmCents ?? ad.cpmCents;
   const profit = emissionProfit(ad, cpmCents, await emissionAccounts(userId));
-  const group = l.groupTitle?.trim() || "Balcão";
+  const group = c.title.trim() || "Balcão";
   const used = await prisma.milesDeal.findMany({ where: { userId, buyerType: "BALCAO" }, select: { customerName: true }, distinct: ["customerName"] });
   const balcao = balcaoOptions(used.map((u) => u.customerName)).find((b) => normalizeText(group).includes(normalizeText(b))) ?? group;
   const notes = [
@@ -465,45 +493,44 @@ function messageText(raw: string) {
 }
 const plain = (m: TgMessage) => ({ ...m, ad: null, alerts: [] as string[] });
 
-/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário); replyTo = como resposta a uma
- *  mensagem do grupo (a contraproposta a um pedido). */
-export async function sendToGroup(userId: string, id: string, raw: string, replyTo?: number) {
+/** Manda a mensagem no grupo (escrita e enviada pelo usuário); replyTo = como resposta a uma mensagem do grupo
+ *  (a contraproposta a um pedido). */
+export async function sendToGroup(userId: string, chatId: string, raw: string, replyTo?: number) {
   const text = messageText(raw);
-  const l = await activeLink(userId, id);
-  const peer = await groupPeer(l);
-  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text, replyTo)));
-  const ad = parseBalcaoAd(m.text);
-  return { ...m, ad, alerts: [] as string[] };
-}
-
-/** Edita a mensagem da conta no grupo do balcão (a sua contraproposta, por exemplo). */
-export async function editGroupMessage(userId: string, id: string, messageId: number, raw: string) {
-  const text = messageText(raw);
-  const l = await activeLink(userId, id);
-  const peer = await groupPeer(l);
-  const m = await guardSession(l, () => withPooled(l, (c) => c.edit(peer, messageId, text)));
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  const m = await guardSession(c.link, () => withPooled(c.link, (cl) => cl.send(peer, text, replyTo)));
   return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
 }
 
-/** Limpa o chat do grupo só no app (até a mensagem upTo; null = mostra tudo de novo). No Telegram nada muda. */
-export async function clearGroupChat(userId: string, id: string, upTo: number | null) {
-  await own(userId, id);
-  await prisma.telegramLink.update({ where: { id }, data: { clearedUpTo: upTo } });
+/** Edita a sua mensagem no grupo (a contraproposta, por exemplo). */
+export async function editGroupMessage(userId: string, chatId: string, messageId: number, raw: string) {
+  const text = messageText(raw);
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  const m = await guardSession(c.link, () => withPooled(c.link, (cl) => cl.edit(peer, messageId, text)));
+  return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
 }
 
-/** Exclui a mensagem da conta no grupo do balcão, para todos. */
-export async function deleteGroupMessage(userId: string, id: string, messageId: number) {
-  const l = await activeLink(userId, id);
-  const peer = await groupPeer(l);
-  await guardSession(l, () => withPooled(l, (c) => c.remove(peer, messageId)));
+/** Exclui a sua mensagem no grupo, para todos. */
+export async function deleteGroupMessage(userId: string, chatId: string, messageId: number) {
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  await guardSession(c.link, () => withPooled(c.link, (cl) => cl.remove(peer, messageId)));
+}
+
+/** Limpa o chat do grupo só no app (até a mensagem upTo; null = mostra tudo de novo). No Telegram nada muda. */
+export async function clearGroupChat(userId: string, chatId: string, upTo: number | null) {
+  const { count } = await prisma.telegramGroup.updateMany({ where: { id: chatId, userId }, data: { clearedUpTo: upTo } });
+  if (!count) throw new DomainError(404, "Grupo não encontrado no Chat Balcões");
 }
 
 /* ---------------- Privado ---------------- */
 
-const dmView = (d: { id: string; linkId: string; name: string; username: string | null; clearedUpTo: number | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
-  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle, clearedUpTo: d.clearedUpTo,
+const dmView = (d: { id: string; linkId: string; name: string; username: string | null; groupTitle: string | null; clearedUpTo: number | null; link: { accountName: string | null; phone: string } }) => ({
+  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.groupTitle, clearedUpTo: d.clearedUpTo,
 });
-const DM_INCLUDE = { link: { select: { groupTitle: true, accountName: true, phone: true, status: true } } } as const;
+const DM_INCLUDE = { link: { select: { accountName: true, phone: true, status: true } } } as const;
 
 /** Conversas no privado abertas (das contas conectadas), da mais antiga para a mais nova. */
 export async function listTelegramDms(userId: string) {
@@ -511,18 +538,18 @@ export async function listTelegramDms(userId: string) {
   return dms.map(dmView);
 }
 
-/** Abre (ou reabre) a conversa no privado com quem mandou a mensagem do grupo, pela mesma conta. */
-export async function openTelegramDm(userId: string, id: string, messageId: number) {
-  const l = await activeLink(userId, id);
-  const peer = await groupPeer(l);
-  const u = await guardSession(l, () => withPooled(l, (c) => c.author(peer, messageId)));
+/** Abre (ou reabre) a conversa no privado com quem mandou a mensagem do grupo, pela conta do grupo. */
+export async function openTelegramDm(userId: string, chatId: string, messageId: number) {
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  const u = await guardSession(c.link, () => withPooled(c.link, (cl) => cl.author(peer, messageId)));
   if (!u) throw new DomainError(400, "Esta mensagem não é de uma pessoa");
   if (u.self) throw new DomainError(400, "Esta mensagem é sua");
   if (u.bot) throw new DomainError(400, "Esta mensagem é de um robô do grupo");
-  const data = { peerHash: u.hash, name: u.name, username: u.username };
+  const data = { peerHash: u.hash, name: u.name, username: u.username, groupTitle: c.title };
   const d = await prisma.telegramDm.upsert({
-    where: { linkId_peerId: { linkId: l.id, peerId: u.id } },
-    create: { userId, linkId: l.id, peerId: u.id, ...data },
+    where: { linkId_peerId: { linkId: c.linkId, peerId: u.id } },
+    create: { userId, linkId: c.linkId, peerId: u.id, ...data },
     update: data,
     include: DM_INCLUDE,
   });
@@ -537,11 +564,11 @@ async function ownDm(userId: string, dmId: string) {
   return d;
 }
 
-/** Mensagens da conversa no privado (minId = só as novas). */
+/** Mensagens da conversa no privado (minId = só as novas; nada do que foi limpo no app). */
 export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number } = {}) {
   const d = await ownDm(userId, dmId);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
-  const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined; // limpa no app: só o que veio depois
+  const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined;
   const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId })));
   return msgs.map(plain);
 }
@@ -581,13 +608,13 @@ export async function closeTelegramDm(userId: string, dmId: string) {
  *  antiga. Um chat que falhar não derruba os outros (vai em errors). */
 export async function alertFeed(userId: string) {
   requireEnabled();
-  const links = await prisma.telegramLink.findMany({ where: { userId, status: "ACTIVE", groupId: { not: null } }, orderBy: { createdAt: "asc" } });
-  const results = await Promise.all(links.map(async (l) => {
+  const chats = await prisma.telegramGroup.findMany({ where: { userId, link: { status: "ACTIVE" } }, orderBy: { createdAt: "asc" } });
+  const results = await Promise.all(chats.map(async (c) => {
     try {
-      const msgs = await chatMessages(userId, l.id, { limit: 100 });
-      return { items: msgs.filter((m) => m.alerts.length).map((m) => ({ ...m, chatId: l.id, chat: l.groupTitle ?? "" })), error: null };
+      const msgs = await chatMessages(userId, c.id, { limit: 100 });
+      return { items: msgs.filter((m) => m.alerts.length).map((m) => ({ ...m, chatId: c.id, chat: c.title })), error: null };
     } catch (e) {
-      return { items: [], error: { chatId: l.id, chat: l.groupTitle ?? "", erro: e instanceof DomainError ? e.message : "Não deu para ler este chat agora" } };
+      return { items: [], error: { chatId: c.id, chat: c.title, erro: e instanceof DomainError ? e.message : "Não deu para ler este chat agora" } };
     }
   }));
   return {

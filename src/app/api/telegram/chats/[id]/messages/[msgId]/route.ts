@@ -9,7 +9,7 @@ const msgId = (raw: string | undefined) => {
   return n;
 };
 
-// Edita (PATCH) ou exclui (DELETE) uma mensagem sua no grupo do balcão da conta (a contraproposta, por exemplo)
+// Edita (PATCH) ou exclui (DELETE) uma mensagem sua no grupo (a contraproposta, por exemplo)
 export const PATCH = route(async (req, { params }) => {
   const u = await requireUser(req);
   const p = await params;

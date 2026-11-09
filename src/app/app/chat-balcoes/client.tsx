@@ -97,7 +97,7 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
 
   /** Chamar no privado quem mandou a mensagem do grupo: abre (ou volta para) a aba da conversa. */
   async function openDm(chatId: string, messageId: number) {
-    const r = await api<{ item: Dm }>(`/api/telegram/accounts/${chatId}/dms`, "POST", { messageId });
+    const r = await api<{ item: Dm }>(`/api/telegram/chats/${chatId}/dms`, "POST", { messageId });
     if (!r.ok) return toast(r.erro, "error");
     const dm = r.data.item;
     setDms((cur) => (cur.some((d) => d.id === dm.id) ? cur : [...cur, dm]));
@@ -138,7 +138,7 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
  *  atendê-lo pela sua conta mais barata que consegue emitir (sem conta com saldo, não mostra). */
 function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; accounts?: EmissionAccount[] }) {
   const group = source.kind === "group";
-  const url = group ? `/api/telegram/accounts/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
+  const url = group ? `/api/telegram/chats/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
@@ -150,7 +150,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   const [editing, setEditing] = useState<Msg | null>(null); // a sua mensagem que está sendo editada
   // limpo só no app até esta mensagem (no Telegram nada muda)
   const [cleared, setCleared] = useState<number | null>((group ? source.chat.clearedUpTo : source.dm.clearedUpTo) ?? null);
-  const clearUrl = group ? `/api/telegram/accounts/${source.chat.id}/clear` : `/api/telegram/dms/${source.dm.id}/clear`;
+  const clearUrl = group ? `/api/telegram/chats/${source.chat.id}/clear` : `/api/telegram/dms/${source.dm.id}/clear`;
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // rolando junto com as mensagens novas (o usuário não subiu para ler as antigas)
@@ -230,7 +230,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   async function registerCrm(ad: Msg, cpmCents?: number) {
     if (!group) return;
     setRegistering(ad.id);
-    const r = await api<{ item: { id: string; number: number; stage: string } }>(`/api/telegram/accounts/${source.chat.id}/crm`, "POST", { messageId: ad.id, text: ad.text, sender: ad.sender, cpmCents: cpmCents ?? null });
+    const r = await api<{ item: { id: string; number: number; stage: string } }>(`/api/telegram/chats/${source.chat.id}/crm`, "POST", { messageId: ad.id, text: ad.text, sender: ad.sender, cpmCents: cpmCents ?? null });
     setRegistering(null);
     if (!r.ok) return toast(r.erro, "error");
     const crm = { id: r.data.item.id, number: r.data.item.number, stage: r.data.item.stage };

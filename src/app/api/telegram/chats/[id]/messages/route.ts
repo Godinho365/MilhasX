@@ -2,7 +2,7 @@ import { route, json, parseBody, requireUser } from "@/server/http";
 import { telegramSendSchema } from "@/server/schemas";
 import { chatMessages, sendToGroup } from "@/server/services/telegram";
 
-// Mensagens do grupo do balcão da conta (Chat Balcões); ?minId= traz só as que chegaram depois. POST manda uma
+// Mensagens do grupo (Chat Balcões); ?minId= traz só as que chegaram depois. POST manda uma
 // mensagem no grupo (escrita pelo usuário).
 export const GET = route(async (req, { params }) => {
   const u = await requireUser(req);
