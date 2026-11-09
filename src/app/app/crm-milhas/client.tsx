@@ -14,6 +14,7 @@ import type { DealView } from "@/server/services/miles-deals";
 import { parseLatamScreen } from "@/domain/latam-screen";
 import { LATAM_BOOKMARKLET, LATAM_COPY_BOOKMARKLET, fromLatamPayload, latamPayload } from "@/domain/latam-fill";
 import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/domain/deal-message";
+import { pixBrCode } from "@/domain/pix-brcode";
 import { priceOptions, roeOf } from "@/domain/pricing";
 import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 import { cardDueDay } from "@/domain/finance";
@@ -766,6 +767,15 @@ function IssuedMessage({ deal }: { deal: DealView }) {
     toast("Dados do PIX salvos");
   }
   const wa = whatsappLink(deal.customerPhone, text);
+  // PIX copia e cola com o valor já incluso: o mesmo código que vai na mensagem, mostrado como QR e para copiar
+  const code = pix ? pixBrCode({ pix, amountCents: deal.chargeCents }) : null;
+  const [qr, setQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!code) return setQr(null);
+    let alive = true;
+    void import("qrcode").then((Q) => Q.toDataURL(code, { margin: 1, width: 240, errorCorrectionLevel: "M" }).then((url) => { if (alive) setQr(url); }).catch(() => {}));
+    return () => { alive = false; };
+  }, [code]);
   if (!loaded) return null;
   return (
     <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Mensagem de emissão">
@@ -783,6 +793,7 @@ function IssuedMessage({ deal }: { deal: DealView }) {
           <label className="text-xs"><span className="mb-1 block text-muted">Chave PIX</span><input className="input h-9" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} maxLength={140} /></label>
           <label className="text-xs"><span className="mb-1 block text-muted">Nome do recebedor</span><input className="input h-9" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={100} /></label>
           <label className="text-xs"><span className="mb-1 block text-muted">Banco</span><input className="input h-9" value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} maxLength={60} /></label>
+          <label className="text-xs sm:col-span-2"><span className="mb-1 block text-muted">Cidade do recebedor <span className="text-[10px]">(entra no QR do PIX)</span></span><input className="input h-9" value={form.city ?? ""} onChange={(e) => setForm({ ...form, city: e.target.value })} maxLength={15} placeholder="Ex.: São Paulo" /></label>
           <div className="flex justify-end gap-2 sm:col-span-2">
             {pix && <button type="button" className="btn-ghost h-8 text-xs" onClick={() => { setForm(pix); setEditPix(false); }}>Cancelar</button>}
             <button type="button" className="btn-primary h-8 text-xs" onClick={savePix}>Salvar PIX</button>
@@ -795,6 +806,16 @@ function IssuedMessage({ deal }: { deal: DealView }) {
         {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Abrir no WhatsApp</a>}
         <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(build(pix))}>Refazer texto</button>
       </div>
+      {code && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-panel2 p-3" aria-label="PIX copia e cola">
+          {qr && <img src={qr} alt="QR Code do PIX" width={128} height={128} className="h-32 w-32 shrink-0 rounded bg-white p-1" />}
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-xs text-muted">PIX copia e cola{deal.chargeCents != null ? <> com o valor já incluso (<b className="text-zinc-100">{fmtBRL(deal.chargeCents)}</b>)</> : ""}. O comprador escaneia o QR ou cola o código no app do banco — já vai na mensagem acima.</p>
+            <p className="break-all rounded bg-panel px-2 py-1 font-mono text-[10px] text-muted">{code}</p>
+            <button type="button" className="btn-ghost h-8 text-xs" onClick={() => navigator.clipboard.writeText(code).then(() => toast("Código PIX copiado"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar código PIX</button>
+          </div>
+        </div>
+      )}
       <p className="text-xs text-muted">Anexe o bilhete (PDF ou print) na conversa do WhatsApp antes de enviar.</p>
     </section>
   );

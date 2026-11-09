@@ -210,6 +210,7 @@ export const preferenceSchema = z.object({
       key: z.string().trim().min(1, "Informe a chave PIX").max(140),
       name: z.string().trim().max(100).default(""),
       bank: z.string().trim().max(60).default(""),
+      city: z.string().trim().max(60).optional(), // cidade do recebedor, para o PIX copia e cola (QR)
     })
     .nullable()
     .optional(),

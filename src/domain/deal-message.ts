@@ -3,9 +3,11 @@
 // Duas versões: cliente final (quem viaja) e revendedor (balcão/agência que compra as milhas para
 // emitir para o cliente dele — o tom é de parceria e o bilhete é para repassar).
 
+import { pixBrCode } from "./pix-brcode";
+
 export const PIX_KEY_TYPES = { CPF: "CPF", CNPJ: "CNPJ", EMAIL: "E-mail", TELEFONE: "Telefone", ALEATORIA: "Chave aleatória" } as const;
 export type PixKeyType = keyof typeof PIX_KEY_TYPES;
-export type PixInfo = { keyType: PixKeyType; key: string; name: string; bank: string };
+export type PixInfo = { keyType: PixKeyType; key: string; name: string; bank: string; city?: string };
 
 const brl = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/ /g, " ");
 
@@ -43,6 +45,9 @@ export function issuedMessage(i: { buyerName: string; reseller?: boolean; locato
       lines.push(`🔑 Chave PIX (${PIX_KEY_TYPES[i.pix.keyType]}): ${formatPixKey(i.pix)}`);
       if (i.pix.name.trim()) lines.push(`👤 ${i.pix.name.trim()}`);
       if (i.pix.bank.trim()) lines.push(`🏦 ${i.pix.bank.trim()}`);
+      // PIX copia e cola com o valor já incluso: o comprador cola no banco e paga sem digitar nada
+      const code = pixBrCode({ pix: i.pix, amountCents: i.chargeCents });
+      if (code) lines.push("", "📲 *PIX copia e cola* (valor já incluso):", code);
     }
     lines.push("", "Assim que fizer o PIX, me envie o comprovante, por favor.");
   }
