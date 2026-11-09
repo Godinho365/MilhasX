@@ -666,6 +666,14 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
     toast(msg);
     onChanged(r.data.item);
   }
+  // Gera o link e já abre o WhatsApp do titular com a mensagem pronta. A aba abre de forma síncrona, com o link
+  // que o próprio app monta (não precisa esperar o servidor), para o navegador não bloquear a janela.
+  function generateAndSend() {
+    if (!preview) return;
+    const msg = faceCheckMessage(deal.holderName, preview.url);
+    window.open(whatsappLink(deal.holderPhone, msg) ?? `https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+    void save({ link, status: "PENDING" }, deal.holderPhone ? "Link gerado e WhatsApp do titular aberto" : "Link gerado: escolha o contato do titular no WhatsApp");
+  }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
   // com o telefone do titular cadastrado, o WhatsApp abre direto na conversa dele; sem, você escolhe o contato
   const wa = fc.url ? (whatsappLink(deal.holderPhone, faceCheckMessage(deal.holderName, fc.url)) ?? `https://wa.me/?text=${encodeURIComponent(faceCheckMessage(deal.holderName, fc.url))}`) : null;
@@ -691,7 +699,8 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
               </label>
               {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser do cadastro.unico.app e ter o id.</p>)}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Gerar link novo</button>
+                <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={generateAndSend} title="Gera o link e abre o WhatsApp do titular com a mensagem pronta"><Send className="h-3.5 w-3.5" />Gerar e enviar ao titular</button>
+                <button type="button" className="btn-ghost h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Só gerar</button>
                 <button type="button" className="btn-ghost h-8 text-xs" disabled={busy} onClick={() => save({ status: "NOT_NEEDED" }, "Marcado: validação não pedida")}>A LATAM não pediu</button>
               </div>
             </div>
@@ -709,6 +718,16 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
               <p className="text-xs text-muted">Depois que o titular concluir: volte à página da emissão na LATAM, atualize (F5) e continue até o pagamento.</p>
             </div>
           )}
+          <details className="text-xs text-muted">
+            <summary className="cursor-pointer select-none hover:text-zinc-100">Como funciona a validação facial</summary>
+            <ol className="mt-1 list-decimal space-y-1 pl-4">
+              <li>Na emissão, a LATAM mostra um link de validação (cadastro.unico.app). Cole ele no campo acima.</li>
+              <li>O app monta o link certo (…/process/…) e, em <b>Gerar e enviar ao titular</b>, abre o WhatsApp dele com a mensagem pronta.</li>
+              <li>O titular abre no celular e faz a validação facial — é ele mesmo que valida (leva ~1 min).</li>
+              <li>Quando ele avisar que terminou, clique em <b>Titular concluiu a validação</b>.</li>
+              <li>Volte à página da LATAM, atualize (F5) e siga até o pagamento.</li>
+            </ol>
+          </details>
         </>
       )}
     </section>
