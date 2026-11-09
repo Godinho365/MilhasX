@@ -12,5 +12,5 @@ export const GET = route(async (req, { params }) => {
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);
   const b = await parseBody(req, telegramSendSchema);
-  return json({ ok: true, item: await sendTelegramDm(u.id, (await params).id!, b.text) }, 201);
+  return json({ ok: true, item: await sendTelegramDm(u.id, (await params).id!, b.text, b.replyTo) }, 201);
 });

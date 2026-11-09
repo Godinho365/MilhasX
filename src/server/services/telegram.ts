@@ -19,8 +19,9 @@ import { parseBalcaoAd } from "@/domain/balcao-ads";
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
 export type TgGroup = { id: string; title: string; channel: boolean; peer?: TgPeer };
 /** Mensagem: quem mandou ("Você" se foi a conta), quando, o texto e, se tiver, o tipo de anexo (foto, arquivo...).
- *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado). */
-export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean };
+ *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado); replyTo = é resposta
+ *  a esta mensagem (contraproposta a um pedido, por exemplo). */
+export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null };
 /** Pessoa que mandou uma mensagem no grupo, com o acesso para conversar com ela no privado. */
 export type TgUser = { id: string; hash: string; name: string; username: string | null; self: boolean; bot: boolean };
 export type SignInResult = "OK" | "PASSWORD_NEEDED" | "SIGN_UP_REQUIRED";
@@ -37,8 +38,12 @@ export interface TgClient {
   groups(): Promise<TgGroup[]>;
   /** Últimas mensagens do chat (grupo ou privado), da mais antiga para a mais nova; minId = só as mais novas. */
   messages(peer: TgPeer, opts: { limit: number; minId?: number }): Promise<TgMessage[]>;
-  /** Manda a mensagem no chat e devolve como ela ficou. */
-  send(peer: TgPeer, text: string): Promise<TgMessage>;
+  /** Manda a mensagem no chat (replyTo = como resposta a uma mensagem) e devolve como ela ficou. */
+  send(peer: TgPeer, text: string, replyTo?: number): Promise<TgMessage>;
+  /** Troca o texto de uma mensagem da conta. */
+  edit(peer: TgPeer, id: number, text: string): Promise<TgMessage>;
+  /** Apaga uma mensagem da conta para todos. */
+  remove(peer: TgPeer, id: number): Promise<void>;
   /** Quem mandou a mensagem do grupo, com o acesso para o privado (null = não é de uma pessoa). */
   author(group: TgPeer, messageId: number): Promise<TgUser | null>;
   logOut(): Promise<void>;
@@ -54,6 +59,7 @@ function toMessage(m: Api.Message): TgMessage {
   return {
     id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
     media: mediaLabel(m.media), out: !!m.out, fromUser: m.fromId instanceof Api.PeerUser || (!m.fromId && m.peerId instanceof Api.PeerUser),
+    replyTo: m.replyTo instanceof Api.MessageReplyHeader ? m.replyTo.replyToMsgId ?? null : null,
   };
 }
 
@@ -125,7 +131,9 @@ function gramClient(session: string): TgClient {
       const list = await c.getMessages(inputPeer(peer), { limit, ...(minId ? { minId } : {}) });
       return list.filter((m) => m instanceof Api.Message).map(toMessage).reverse();
     },
-    send: async (peer, text) => toMessage(await c.sendMessage(inputPeer(peer), { message: text })),
+    send: async (peer, text, replyTo) => toMessage(await c.sendMessage(inputPeer(peer), { message: text, ...(replyTo ? { replyTo } : {}) })),
+    edit: async (peer, id, text) => toMessage(await c.editMessage(inputPeer(peer), { message: id, text })),
+    remove: async (peer, id) => { await c.deleteMessages(inputPeer(peer), [id], { revoke: true }); },
     author: async (group, messageId) => {
       const [m] = await c.getMessages(inputPeer(group), { ids: [messageId] });
       if (!(m instanceof Api.Message) || !(m.fromId instanceof Api.PeerUser)) return null;
@@ -172,6 +180,12 @@ function tgError(e: unknown): never {
     USER_BANNED_IN_CHANNEL: [403, "Esta conta está proibida de escrever neste grupo"],
     MESSAGE_TOO_LONG: [400, "Mensagem longa demais para o Telegram"],
     MESSAGE_EMPTY: [400, "Escreva a mensagem"],
+    // editar e excluir
+    MESSAGE_AUTHOR_REQUIRED: [403, "Só dá para editar as suas mensagens"],
+    MESSAGE_DELETE_FORBIDDEN: [403, "Só dá para excluir as suas mensagens"],
+    MESSAGE_EDIT_TIME_EXPIRED: [400, "Passou o prazo do Telegram para editar esta mensagem"],
+    MESSAGE_NOT_MODIFIED: [400, "A mensagem ficou igual"],
+    MESSAGE_ID_INVALID: [404, "Mensagem não encontrada no Telegram"],
   };
   const k = known[msg];
   if (k) throw new DomainError(k[0], k[1]);
@@ -202,6 +216,9 @@ async function withClient<T>(session: string, fn: (c: TgClient) => Promise<T>): 
 type Pooled = { c: TgClient; key: string; ready: Promise<void>; idle?: ReturnType<typeof setTimeout> };
 const g = globalThis as unknown as { __tgPool?: Map<string, Pooled> };
 const pool: Map<string, Pooled> = (g.__tgPool ??= new Map());
+// código recarregado (servidor de desenvolvimento): a conexão aberta pela versão anterior não serve mais
+const LOADED_AT = Date.now();
+const poolKey = (sessionEnc: string) => `${LOADED_AT}:${sessionEnc}`;
 function dropPooled(id: string) {
   const p = pool.get(id);
   if (!p) return;
@@ -211,13 +228,13 @@ function dropPooled(id: string) {
 }
 async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: TgClient) => Promise<T>): Promise<T> {
   let p = pool.get(link.id);
-  if (p && p.key !== link.sessionEnc) {
+  if (p && p.key !== poolKey(link.sessionEnc)) {
     dropPooled(link.id);
     p = undefined;
   }
   if (!p) {
     const c = makeClient(decrypt(link.sessionEnc));
-    p = { c, key: link.sessionEnc, ready: c.connect() };
+    p = { c, key: poolKey(link.sessionEnc), ready: c.connect() };
     pool.set(link.id, p);
   }
   const cur = p;
@@ -268,6 +285,7 @@ const view = (l: Link) => ({
   codeViaApp: l.codeViaApp,
   accountName: l.accountName,
   group: l.groupId ? { id: l.groupId, title: l.groupTitle ?? "" } : null,
+  clearedUpTo: l.clearedUpTo, // chat limpo no app até esta mensagem
 });
 export type TelegramAccountView = ReturnType<typeof view>;
 
@@ -384,8 +402,9 @@ const activeAlerts = (userId: string): Promise<AlertRule[]> => prisma.telegramAl
 export async function chatMessages(userId: string, id: string, opts: { limit?: number; minId?: number } = {}) {
   const l = await activeLink(userId, id);
   const peer = await groupPeer(l);
+  const minId = Math.max(opts.minId ?? 0, l.clearedUpTo ?? 0) || undefined; // limpo no app: só o que veio depois
   const [msgs, rules] = await Promise.all([
-    guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId }))),
+    guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
     activeAlerts(userId),
   ]);
   return msgs.map((m) => {
@@ -403,20 +422,43 @@ function messageText(raw: string) {
 }
 const plain = (m: TgMessage) => ({ ...m, ad: null, alerts: [] as string[] });
 
-/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário). */
-export async function sendToGroup(userId: string, id: string, raw: string) {
+/** Manda a mensagem no grupo do balcão da conta (escrita e enviada pelo usuário); replyTo = como resposta a uma
+ *  mensagem do grupo (a contraproposta a um pedido). */
+export async function sendToGroup(userId: string, id: string, raw: string, replyTo?: number) {
   const text = messageText(raw);
   const l = await activeLink(userId, id);
   const peer = await groupPeer(l);
-  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text)));
+  const m = await guardSession(l, () => withPooled(l, (c) => c.send(peer, text, replyTo)));
   const ad = parseBalcaoAd(m.text);
   return { ...m, ad, alerts: [] as string[] };
 }
 
+/** Edita a mensagem da conta no grupo do balcão (a sua contraproposta, por exemplo). */
+export async function editGroupMessage(userId: string, id: string, messageId: number, raw: string) {
+  const text = messageText(raw);
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  const m = await guardSession(l, () => withPooled(l, (c) => c.edit(peer, messageId, text)));
+  return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
+}
+
+/** Limpa o chat do grupo só no app (até a mensagem upTo; null = mostra tudo de novo). No Telegram nada muda. */
+export async function clearGroupChat(userId: string, id: string, upTo: number | null) {
+  await own(userId, id);
+  await prisma.telegramLink.update({ where: { id }, data: { clearedUpTo: upTo } });
+}
+
+/** Exclui a mensagem da conta no grupo do balcão, para todos. */
+export async function deleteGroupMessage(userId: string, id: string, messageId: number) {
+  const l = await activeLink(userId, id);
+  const peer = await groupPeer(l);
+  await guardSession(l, () => withPooled(l, (c) => c.remove(peer, messageId)));
+}
+
 /* ---------------- Privado ---------------- */
 
-const dmView = (d: { id: string; linkId: string; name: string; username: string | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
-  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle,
+const dmView = (d: { id: string; linkId: string; name: string; username: string | null; clearedUpTo: number | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
+  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle, clearedUpTo: d.clearedUpTo,
 });
 const DM_INCLUDE = { link: { select: { groupTitle: true, accountName: true, phone: true, status: true } } } as const;
 
@@ -456,15 +498,34 @@ async function ownDm(userId: string, dmId: string) {
 export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number } = {}) {
   const d = await ownDm(userId, dmId);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
-  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId })));
+  const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined; // limpa no app: só o que veio depois
+  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId })));
   return msgs.map(plain);
 }
 
-/** Manda a mensagem no privado (escrita e enviada pelo usuário). */
-export async function sendTelegramDm(userId: string, dmId: string, raw: string) {
+/** Manda a mensagem no privado (escrita e enviada pelo usuário); replyTo = como resposta a uma mensagem da conversa. */
+export async function sendTelegramDm(userId: string, dmId: string, raw: string, replyTo?: number) {
   const text = messageText(raw);
   const d = await ownDm(userId, dmId);
-  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text))));
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text, replyTo))));
+}
+
+/** Edita ou exclui (text null) uma mensagem sua na conversa no privado. */
+export async function changeDmMessage(userId: string, dmId: string, messageId: number, raw: string | null) {
+  const d = await ownDm(userId, dmId);
+  const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
+  if (raw == null) {
+    await guardSession(d.link, () => withPooled(d.link, (c) => c.remove(peer, messageId)));
+    return null;
+  }
+  const text = messageText(raw);
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.edit(peer, messageId, text))));
+}
+
+/** Limpa a conversa no privado só no app (até a mensagem upTo; null = mostra tudo de novo). */
+export async function clearDmChat(userId: string, dmId: string, upTo: number | null) {
+  const { count } = await prisma.telegramDm.updateMany({ where: { id: dmId, userId }, data: { clearedUpTo: upTo } });
+  if (!count) throw new DomainError(404, "Conversa não encontrada");
 }
 
 /** Fecha a conversa aqui (no Telegram ela continua). */

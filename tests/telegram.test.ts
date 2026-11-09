@@ -2,7 +2,7 @@
 // conta e desconectar. Usa um Telegram simulado: nada sai para o Telegram de verdade.
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { randomBytes } from "node:crypto";
-import { resetDb, Client } from "./helpers";
+import { resetDb, Client, seedPrograms } from "./helpers";
 import * as register from "@/app/api/auth/register/route";
 import * as accounts from "@/app/api/telegram/accounts/route";
 import * as account from "@/app/api/telegram/accounts/[id]/route";
@@ -17,6 +17,15 @@ import * as dmOpenRoute from "@/app/api/telegram/accounts/[id]/dms/route";
 import * as dmsRoute from "@/app/api/telegram/dms/route";
 import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
+import * as clearRoute from "@/app/api/telegram/accounts/[id]/clear/route";
+import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
+import * as msgRoute from "@/app/api/telegram/accounts/[id]/messages/[msgId]/route";
+import * as dmMsgRoute from "@/app/api/telegram/dms/[id]/messages/[msgId]/route";
+import * as holders from "@/app/api/holders/route";
+import * as milesAccounts from "@/app/api/accounts/route";
+import * as entries from "@/app/api/entries/route";
+import { emissionAccounts } from "@/server/services/capacity";
+import { emissionProfit } from "@/domain/balcao-ads";
 import { setTelegramClientFactory, normalizePhone, maskPhone, MAX_TELEGRAM_ACCOUNTS, type TgClient, type TgMessage } from "@/server/services/telegram";
 import { matchAlerts, parseAlertWords } from "@/domain/telegram-alerts";
 import { decrypt } from "@/server/services/accounts";
@@ -29,7 +38,7 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
 /** Mensagens dos grupos simulados (pelo id do grupo), da mais antiga para a mais nova. */
-const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true });
+const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true, replyTo: null });
 /** O que foi mandado pelo app (no grupo ou no privado), pelo id do chat. */
 let SENT: Record<string, TgMessage[]> = {};
 const MSGS: Record<string, TgMessage[]> = {
@@ -75,12 +84,25 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
         calls.push(`messages ${peer.id}`);
         return [...(MSGS[peer.id] ?? []), ...(SENT[peer.id] ?? [])].filter((m) => !minId || m.id > minId).slice(-limit);
       },
-      send: async (peer, text) => {
+      send: async (peer, text, replyTo) => {
         if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
-        calls.push(`send ${peer.kind}:${peer.id} ${text}`);
-        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", text), out: true };
+        calls.push(`send ${peer.kind}:${peer.id} ${text}${replyTo ? ` ↩${replyTo}` : ""}`);
+        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", text), out: true, replyTo: replyTo ?? null };
         (SENT[peer.id] ??= []).push(m);
         return m;
+      },
+      edit: async (peer, id, text) => {
+        const m = (SENT[peer.id] ?? []).find((x) => x.id === id);
+        if (!m) throw rpc("MESSAGE_AUTHOR_REQUIRED");
+        if (m.text === text) throw rpc("MESSAGE_NOT_MODIFIED");
+        calls.push(`edit ${peer.kind}:${peer.id} #${id} ${text}`);
+        m.text = text;
+        return { ...m };
+      },
+      remove: async (peer, id) => {
+        if (!(SENT[peer.id] ?? []).some((x) => x.id === id)) throw rpc("MESSAGE_DELETE_FORBIDDEN");
+        calls.push(`remove ${peer.kind}:${peer.id} #${id}`);
+        SENT[peer.id] = SENT[peer.id]!.filter((x) => x.id !== id);
       },
       author: async (group, messageId) => {
         const m = (MSGS[group.id] ?? []).find((x) => x.id === messageId);
@@ -313,7 +335,12 @@ describe("mandar mensagem e conversar no privado", () => {
     const sent = await c.call(messagesRoute.POST, "POST", "/x", { text: " Faço 24 " }, { id: a });
     expect([sent.status, sent.data.item]).toEqual([201, expect.objectContaining({ text: "Faço 24", sender: "Você", out: true })]);
     expect(calls).toContain("send channel:1234 Faço 24");
-    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.at(-1)).toMatchObject({ text: "Faço 24", out: true });
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.at(-1)).toMatchObject({ text: "Faço 24", out: true, replyTo: null });
+    // contraproposta: resposta ao pedido
+    const offer = await c.call(messagesRoute.POST, "POST", "/x", { text: "24,50", replyTo: 1 }, { id: a });
+    expect([offer.status, offer.data.item.replyTo]).toEqual([201, 1]);
+    expect(calls).toContain("send channel:1234 24,50 ↩1");
+    expect((await c.call(messagesRoute.POST, "POST", "/x", { text: "24,50", replyTo: -3 }, { id: a })).status).toBe(400);
 
     // chamar no privado quem mandou o pedido; abrir de novo não duplica
     const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
@@ -349,5 +376,84 @@ describe("mandar mensagem e conversar no privado", () => {
     const b = await connected("21977776666", "-1005678");
     expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 11 }, { id: b })).data.erro).toMatch(/robô/);
     expect((await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 10 }, { id: b })).status).toBe(201);
+  });
+});
+
+describe("editar e excluir a sua mensagem", () => {
+  it("edita e exclui a sua contraproposta no grupo e a sua mensagem no privado; a dos outros não", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const offer = (await c.call(messagesRoute.POST, "POST", "/x", { text: "27", replyTo: 1 }, { id: a })).data.item;
+    const edited = await c.call(msgRoute.PATCH, "PATCH", "/x", { text: "26,50" }, { id: a, msgId: String(offer.id) });
+    expect([edited.status, edited.data.item]).toEqual([200, expect.objectContaining({ id: offer.id, text: "26,50", replyTo: 1 })]);
+    expect((await c.call(msgRoute.PATCH, "PATCH", "/x", { text: "26,50" }, { id: a, msgId: String(offer.id) })).data.erro).toMatch(/ficou igual/);
+    // mensagem de outra pessoa
+    expect((await c.call(msgRoute.PATCH, "PATCH", "/x", { text: "x" }, { id: a, msgId: "1" })).status).toBe(403);
+    expect((await c.call(msgRoute.DELETE, "DELETE", "/x", undefined, { id: a, msgId: "1" })).status).toBe(403);
+    expect((await c.call(msgRoute.DELETE, "DELETE", "/x", undefined, { id: a, msgId: "abc" })).status).toBe(400);
+    expect((await c.call(msgRoute.DELETE, "DELETE", "/x", undefined, { id: a, msgId: String(offer.id) })).status).toBe(200);
+    expect(calls).toEqual(expect.arrayContaining([`edit channel:1234 #${offer.id} 26,50`, `remove channel:1234 #${offer.id}`]));
+    expect((await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.some((m: { id: number }) => m.id === offer.id)).toBe(false);
+
+    // no privado
+    const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
+    const sent = (await c.call(dmMessagesRoute.POST, "POST", "/x", { text: "Oi" }, { id: dm.id })).data.item;
+    expect((await c.call(dmMsgRoute.PATCH, "PATCH", "/x", { text: "Oi, Ana!" }, { id: dm.id, msgId: String(sent.id) })).data.item.text).toBe("Oi, Ana!");
+    expect((await c.call(dmMsgRoute.DELETE, "DELETE", "/x", undefined, { id: dm.id, msgId: String(sent.id) })).status).toBe(200);
+    // outro usuário não mexe
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(msgRoute.DELETE, "DELETE", "/x", undefined, { id: a, msgId: "1" })).status).toBe(404);
+    expect((await o.call(dmMsgRoute.PATCH, "PATCH", "/x", { text: "x" }, { id: dm.id, msgId: "1" })).status).toBe(404);
+  });
+});
+
+describe("contas para emitir os pedidos (lucro)", () => {
+  it("saldo livre sem o reservado em negociações abertas e custo médio do milheiro", async () => {
+    const p = await seedPrograms();
+    const h = (await c.call(holders.POST, "POST", "/h", { name: "Ana" })).data.item.id;
+    const lat = (await c.call(milesAccounts.POST, "POST", "/a", { holderId: h, programId: p.latam.id })).data.item.id;
+    await c.call(entries.POST, "POST", "/e", { accountId: lat, type: "PURCHASE", points: 100_000, occurredAt: "2026-11-01", costs: [{ type: "PONTOS", amountCents: 200_000 }] });
+    await prisma.milesDeal.create({ data: { userId, number: 1, buyerType: "BALCAO", customerName: "Balcão", stage: "NEGOTIATION", accountId: lat, points: 30_000 } });
+    // conta sem saldo não entra
+    await c.call(milesAccounts.POST, "POST", "/a", { holderId: h, programId: p.livelo.id });
+    const accs = await emissionAccounts(userId);
+    expect(accs).toEqual([expect.objectContaining({ id: lat, programCode: "LATAM", available: 70_000, costCpmCents: 2000 })]);
+    // lucro do pedido "Compro 50k LATAM 1 CPF 25" pela conta: 50 × (25 − 20) = R$ 250
+    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 1 }, 2500, accs)).toMatchObject({ accountId: lat, profitCents: 25_000, perCpfCents: 25_000, costCpmCents: 2000, leftoverMiles: 20_000, leftoverCostCents: 40_000, cpfLeft: accs[0]!.cpfFree == null ? null : accs[0]!.cpfFree - 1 });
+    // 2 CPFs: o lucro por CPF é a metade
+    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accs)).toMatchObject({ profitCents: 25_000, perCpfCents: 12_500 });
+    // não cabe no saldo livre: nada
+    expect(emissionProfit({ program: "LATAM", miles: 80_000, cpfs: 1 }, 2500, accs)).toBeNull();
+  });
+});
+
+describe("limpar o chat só no app", () => {
+  it("some com as mensagens até a escolhida; as novas aparecem; mostrar de novo traz tudo; no Telegram nada muda", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const ids = async () => (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.map((m: { id: number }) => m.id);
+    expect(await ids()).toEqual([1, 2, 3, 4]);
+    expect((await c.call(clearRoute.POST, "POST", "/x", { upTo: 4 }, { id: a })).status).toBe(200);
+    expect(await ids()).toEqual([]);
+    expect((await c.call(accounts.GET, "GET", "/x")).data.item.accounts[0].clearedUpTo).toBe(4);
+    // mensagem nova depois de limpar aparece
+    const sent = (await c.call(messagesRoute.POST, "POST", "/x", { text: "Bom dia" }, { id: a })).data.item;
+    expect(await ids()).toEqual([sent.id]);
+    // nada foi apagado no Telegram
+    expect(calls.some((x) => x.startsWith("remove"))).toBe(false);
+    await c.call(clearRoute.POST, "POST", "/x", { upTo: null }, { id: a });
+    expect(await ids()).toEqual([1, 2, 3, 4, sent.id]);
+
+    // no privado
+    const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
+    const oi = (await c.call(dmMessagesRoute.POST, "POST", "/x", { text: "Oi" }, { id: dm.id })).data.item;
+    await c.call(dmClearRoute.POST, "POST", "/x", { upTo: oi.id }, { id: dm.id });
+    expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items).toEqual([]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items[0].clearedUpTo).toBe(oi.id);
+
+    // de outro usuário: não
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(clearRoute.POST, "POST", "/x", { upTo: 1 }, { id: a })).status).toBe(404);
+    expect((await o.call(dmClearRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
   });
 });

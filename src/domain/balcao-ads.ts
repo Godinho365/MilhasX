@@ -55,6 +55,49 @@ function findCpm(rest: string) {
   return cents != null && cents >= 100 && cents <= 50_000 ? cents : null;
 }
 
+/** Código do programa das contas (Central de Contas) de cada programa dos anúncios. */
+export const PROGRAM_CODE: Record<BalcaoProgram, string> = {
+  LATAM: "LATAM", Smiles: "SMILES", Azul: "AZUL", AAdvantage: "AADVANTAGE", TAP: "TAP", Avios: "AVIOS", "Flying Blue": "FLYINGBLUE", Copa: "COPA", Livelo: "LIVELO", Esfera: "ESFERA",
+};
+
+/** Conta que pode emitir: saldo livre (sem o reservado em negociações abertas), CPFs livres (null = sem limite) e
+ *  custo médio do milheiro. */
+export type EmissionAccount = { id: string; label: string; programCode: string; available: number; cpfFree: number | null; costCpmCents: number };
+
+/** Lucro de atender o pedido por `cpmCents` com a conta mais barata que consegue emitir (programa, saldo e CPFs):
+ *  o total, por CPF (sem a quantidade no pedido, 1) e a sobra (milhas que ficam na conta depois e quanto custaram,
+ *  e os CPFs que continuam livres; null = conta sem limite de CPFs).
+ *  null quando nenhuma conta consegue ou não há preço. */
+export function emissionProfit(ad: { program: BalcaoProgram; miles: number; cpfs: number | null }, cpmCents: number | null, accounts: EmissionAccount[]) {
+  if (cpmCents == null) return null;
+  const code = PROGRAM_CODE[ad.program];
+  const cpfs = ad.cpfs ?? 1;
+  const fit = accounts.filter((a) => a.programCode === code && a.available >= ad.miles && (a.cpfFree == null || a.cpfFree >= cpfs));
+  if (!fit.length) return null;
+  const best = fit.reduce((x, y) => (y.costCpmCents < x.costCpmCents ? y : x));
+  const profitCents = Math.round((ad.miles * (cpmCents - best.costCpmCents)) / 1000);
+  const leftoverMiles = best.available - ad.miles;
+  return {
+    accountId: best.id, account: best.label, costCpmCents: best.costCpmCents, accounts: fit.length,
+    profitCents,
+    perCpfCents: Math.round(profitCents / cpfs),
+    leftoverMiles,
+    leftoverCostCents: Math.round((leftoverMiles * best.costCpmCents) / 1000),
+    cpfLeft: best.cpfFree == null ? null : best.cpfFree - cpfs,
+  };
+}
+
+/** Milheiro de uma contraproposta ("24,5", "17,00", "24?75", "95 voo próximo", "R$ 105,00, e comigo..."), em
+ *  centavos; null quando a mensagem é um pedido ou não traz um valor que pareça milheiro. */
+export function parseCounterOffer(text: string) {
+  if (parseBalcaoAd(text)) return null;
+  const t = normalizeText(text);
+  const m = t.match(/(?<![\d.,])(\d{1,3})(?:[.,?](\d{1,2}))?(?![\d]|[.,]\d)/);
+  if (!m) return null;
+  const cents = Number(m[1]) * 100 + (m[2] ? Number(m[2].padEnd(2, "0")) : 0);
+  return cents >= 100 && cents <= 50_000 ? cents : null;
+}
+
 /** O anúncio da mensagem, ou null quando não é anúncio (contraproposta, conversa, bot, crédito...). */
 export function parseBalcaoAd(text: string): BalcaoAd | null {
   const t = normalizeText(text).replace(/\s+/g, " ").trim();

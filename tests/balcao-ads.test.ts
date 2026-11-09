@@ -1,6 +1,6 @@
 // Leitor dos anúncios dos grupos de balcão, com os jeitos de escrever que aparecem nos grupos.
 import { describe, it, expect } from "vitest";
-import { parseBalcaoAd } from "@/domain/balcao-ads";
+import { parseBalcaoAd, parseCounterOffer, emissionProfit, type EmissionAccount } from "@/domain/balcao-ads";
 import { matchAlerts, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
 
 const ad = (text: string) => parseBalcaoAd(text);
@@ -35,6 +35,15 @@ describe("anúncios do balcão", () => {
   });
 });
 
+describe("contrapropostas", () => {
+  it("lê o milheiro oferecido", () => {
+    expect(["17", "24,5", "16,75", "24?75", "17,00", "95 voo próximo", "24,5 conta própria", "R$ 105,00, e comigo o compromisso é com a sua emissão garantida"].map(parseCounterOffer))
+      .toEqual([1700, 2450, 1675, 2475, 1700, 9500, 2450, 10500]);
+    // pedido, conversa sem valor e números que não são milheiro
+    expect(["Compro 135k latam\n4 cpf\n25 reais", "Bom dia", "Emitido para @fulano", "0", "1500"].map(parseCounterOffer)).toEqual([null, null, null, null, null]);
+  });
+});
+
 describe("alertas pelo pedido de compra", () => {
   const rule = (o: Partial<AlertRule>): AlertRule => ({ id: "1", name: "A", words: [], active: true, ...o });
   it("programa, até N CPFs, faixa de milhas e milheiro mínimo; só pedidos de compra", () => {
@@ -55,5 +64,21 @@ describe("alertas pelo pedido de compra", () => {
   it("descreve o alerta em uma linha", () => {
     expect(describeAlert({ words: ["urgente"], program: "Smiles", maxCpfs: 2, minMiles: 100_000, maxMiles: 300_000, minCpmCents: 1600 })).toBe('Smiles · até 2 CPFs · 100k a 300k milhas · CPM a partir de R$ 16,00 · "urgente"');
     expect(describeAlert({ words: [], maxCpfs: 1, minMiles: 79_644 })).toBe("até 1 CPF · a partir de 79.644 milhas");
+  });
+});
+
+describe("lucro com as suas contas", () => {
+  const acc = (o: Partial<EmissionAccount>): EmissionAccount => ({ id: "a", label: "LATAM Ana", programCode: "LATAM", available: 100_000, cpfFree: 5, costCpmCents: 2000, ...o });
+  it("conta mais barata que consegue emitir; por CPF, sobra de milhas e de CPFs", () => {
+    const accounts = [acc({}), acc({ id: "b", label: "LATAM Bia", costCpmCents: 1800, available: 60_000, cpfFree: null }), acc({ id: "c", programCode: "SMILES", costCpmCents: 1000 })];
+    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accounts)).toEqual({
+      accountId: "b", account: "LATAM Bia", costCpmCents: 1800, accounts: 2, profitCents: 35_000, perCpfCents: 17_500, leftoverMiles: 10_000, leftoverCostCents: 18_000, cpfLeft: null,
+    });
+    // a mais barata não tem saldo: vai para a outra, que deixa 3 CPFs livres
+    expect(emissionProfit({ program: "LATAM", miles: 70_000, cpfs: 2 }, 2500, accounts)).toMatchObject({ accountId: "a", leftoverMiles: 30_000, cpfLeft: 3 });
+    // CPFs livres não bastam, sem preço ou sem conta do programa: nada
+    expect(emissionProfit({ program: "LATAM", miles: 70_000, cpfs: 6 }, 2500, accounts)).toBeNull();
+    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 1 }, null, accounts)).toBeNull();
+    expect(emissionProfit({ program: "Azul", miles: 1_000, cpfs: 1 }, 2500, accounts)).toBeNull();
   });
 });

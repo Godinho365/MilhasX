@@ -534,7 +534,12 @@ export const telegramPhoneSchema = z.object({ phone: z.string().trim().min(8, "I
 export const telegramCodeSchema = z.object({ code: z.string().trim().min(1, "Informe o código").max(12) });
 export const telegramPasswordSchema = z.object({ password: z.string().min(1, "Informe a senha de duas etapas").max(256) });
 export const telegramGroupSchema = z.object({ groupId: z.string().trim().regex(/^-?\d{1,20}$/, "Grupo inválido") });
-export const telegramSendSchema = z.object({ text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)") });
+export const telegramSendSchema = z.object({
+  text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)"),
+  replyTo: z.number().int().positive().optional(), // como resposta a esta mensagem (a contraproposta a um pedido)
+});
+export const telegramEditSchema = z.object({ text: z.string().trim().min(1, "Escreva a mensagem").max(4096, "Mensagem longa demais (até 4.096 caracteres)") });
+export const telegramClearSchema = z.object({ upTo: z.number().int().positive().nullable() }); // null = mostrar tudo de novo
 export const telegramDmOpenSchema = z.object({ messageId: z.number().int().positive() });
 const optInt = (min: number, max: number, msg: string) => z.number({ invalid_type_error: msg }).int(msg).min(min, msg).max(max, msg).nullable().optional();
 export const telegramAlertSchema = z
