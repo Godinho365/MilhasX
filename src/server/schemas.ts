@@ -528,6 +528,12 @@ export const saleRefundSchema = z.object({
   date: dateStr,
 });
 
+// Telegram: login da conta do usuário em etapas e o grupo do balcão
+export const telegramPhoneSchema = z.object({ phone: z.string().trim().min(8, "Informe o número com DDD").max(30) });
+export const telegramCodeSchema = z.object({ code: z.string().trim().min(1, "Informe o código").max(12) });
+export const telegramPasswordSchema = z.object({ password: z.string().min(1, "Informe a senha de duas etapas").max(256) });
+export const telegramGroupSchema = z.object({ groupId: z.string().trim().regex(/^-?\d{1,20}$/, "Grupo inválido") });
+
 export const salePaymentSchema = z.object({
   paid: z.boolean(),
   date: dateStr.optional(),
