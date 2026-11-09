@@ -1,6 +1,7 @@
 // Mensagem de emissão do CRM Milhas: agradecimento, localizador e cobrança pelo PIX.
 import { describe, it, expect } from "vitest";
 import { formatPixKey, issuedMessage } from "@/domain/deal-message";
+import { whatsappLink } from "@/domain/orders";
 
 const pix = { keyType: "CPF" as const, key: "15526547701", name: "Fulano de Tal", bank: "Nubank" };
 
@@ -47,5 +48,18 @@ describe("mensagem de emissão", () => {
   it("formata CPF e CNPJ; outras chaves como foram digitadas", () => {
     expect(formatPixKey({ keyType: "CNPJ", key: "12345678000199" })).toBe("12.345.678/0001-99");
     expect(formatPixKey({ keyType: "EMAIL", key: " a@b.com " })).toBe("a@b.com");
+  });
+
+  it("sem espaço inquebrável/estreito nos valores (não vira � no WhatsApp)", () => {
+    const m = issuedMessage({ buyerName: "Ana", locator: "LA1", passengers: ["Ana Lima"], points: 8673, taxesCents: 3575, chargeCents: 26125, pix });
+    expect(m).not.toMatch(/[  ]/); // só espaço normal
+    expect(m).toContain("R$ 35,75"); // com espaço normal
+  });
+});
+
+describe("link do WhatsApp", () => {
+  it("troca espaço inquebrável/estreito por espaço normal no texto", () => {
+    expect(whatsappLink("11999998888", "R$ 10 e R$ 20")).toBe(`https://wa.me/5511999998888?text=${encodeURIComponent("R$ 10 e R$ 20")}`);
+    expect(whatsappLink("", "oi")).toBeNull();
   });
 });

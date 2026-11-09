@@ -9,7 +9,8 @@ export const PIX_KEY_TYPES = { CPF: "CPF", CNPJ: "CNPJ", EMAIL: "E-mail", TELEFO
 export type PixKeyType = keyof typeof PIX_KEY_TYPES;
 export type PixInfo = { keyType: PixKeyType; key: string; name: string; bank: string; city?: string };
 
-const brl = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/ /g, " ");
+// "R$ " sem espaço especial: o espaço inquebrável (U+00A0) e o estreito (U+202F) viram � em alguns WhatsApp
+const brl = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/[  ]/g, " ");
 
 /** Chave formatada para leitura (CPF/CNPJ com pontuação); as outras como foram digitadas. */
 export function formatPixKey(p: Pick<PixInfo, "keyType" | "key">) {
