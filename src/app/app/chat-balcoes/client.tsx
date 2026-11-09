@@ -286,6 +286,7 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
           : shown.map((m) => (
             <Bubble key={m.id} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
               profit={group && m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null}
+              profitAt={group && m.ad ? (cents) => emissionProfit(m.ad!, cents, accounts) : undefined}
               onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id}
               onEdit={m.out && m.text ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
               onEditOffer={edit} onDeleteOffer={remove} editingId={editing?.id} />
@@ -333,10 +334,11 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
 type Profit = ReturnType<typeof emissionProfit>;
 
 /** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
- *  offers: as contrapropostas ao pedido; profit: o lucro de atender o pedido pelo milheiro dele com a sua conta. */
-function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers, profit, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId }: {
+ *  offers: as contrapropostas ao pedido; profit: o lucro de atender o pedido pelo milheiro dele com a sua conta;
+ *  profitAt: o lucro por outro milheiro (o da sua contraproposta). */
+function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, offers, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId }: {
   m: Msg; chat?: string; onOpen?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; quoted?: Msg | null; offers?: Msg[];
-  profit?: Profit; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
+  profit?: Profit; profitAt?: (cpmCents: number) => Profit; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
 }) {
   const hit = m.alerts.length > 0;
   async function copy() {
@@ -377,7 +379,7 @@ function Bubble({ m, chat, onOpen, onDm, opening, onReply, replying, quoted, off
       {m.media && <p className="mt-1 text-xs italic text-muted">[{m.media}]</p>}
       {m.text && <p className={`mt-1 whitespace-pre-wrap break-words ${m.ad ? "text-xs text-muted" : "text-sm"}`}>{m.text}</p>}
       {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
-      {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} />}
+      {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} />}
     </div>
   );
 }
@@ -401,31 +403,39 @@ function ProfitLine({ profit: p, cpmCents, compact }: { profit: NonNullable<Prof
 }
 
 /** Contrapropostas dos membros a um pedido: do menor milheiro para o maior (sem valor por último), as 5 primeiras e
- *  o resto ao abrir. A sua aparece como "Você". */
-function Offers({ offers, onEdit, onDelete, editingId }: { offers: Msg[]; onEdit?: (m: Msg) => void; onDelete?: (m: Msg) => void; editingId?: number }) {
+ *  o resto ao abrir. A sua aparece sempre, como "Você", com o lucro pelo seu preço (lucro, por CPF, sobra, CPFs
+ *  livres e a conta), igual ao do pedido. */
+function Offers({ offers, onEdit, onDelete, editingId, profitAt }: { offers: Msg[]; onEdit?: (m: Msg) => void; onDelete?: (m: Msg) => void; editingId?: number; profitAt?: (cpmCents: number) => Profit }) {
   const [all, setAll] = useState(false);
   const rows = offers
     .map((o) => ({ o, cents: parseCounterOffer(o.text) }))
     .sort((a, b) => (a.cents ?? Infinity) - (b.cents ?? Infinity) || a.o.id - b.o.id);
   const best = rows[0]?.cents ?? null;
-  const visible = all ? rows : rows.slice(0, 5);
+  const visible = all ? rows : rows.filter((r, i) => i < 5 || r.o.out);
   return (
     <div className="mt-2 rounded-lg border border-line bg-black/10 px-2.5 py-1.5" aria-label="Contrapropostas">
       <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
         {offers.length} {offers.length === 1 ? "contraproposta" : "contrapropostas"}{best != null && <span className="normal-case tracking-normal"> · menor {fmtBRL(best)}</span>}
       </p>
       <ul className="space-y-0.5">
-        {visible.map(({ o, cents }) => (
-          <li key={o.id} className={`flex items-baseline gap-2 text-xs ${o.out ? "font-semibold text-accent-light" : ""} ${editingId === o.id ? "rounded bg-accent-soft" : ""}`}>
-            <span className={`w-20 shrink-0 tabular-nums ${cents != null && cents === best ? "font-semibold text-emerald-300" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
-            <span className="min-w-0 flex-1 truncate" title={o.text}>{o.sender}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
-            {o.out && onEdit && <button type="button" onClick={() => onEdit(o)} className="shrink-0 self-center text-muted hover:text-zinc-100" aria-label="Editar a sua contraproposta" title="Editar a sua contraproposta"><Pencil className="h-3.5 w-3.5" /></button>}
-            {o.out && onDelete && <button type="button" onClick={() => onDelete(o)} className="shrink-0 self-center text-muted hover:text-red-300" aria-label="Excluir a sua contraproposta" title="Excluir a sua contraproposta"><Trash2 className="h-3.5 w-3.5" /></button>}
-            <span className="shrink-0 text-muted">{when(o.date)}</span>
-          </li>
-        ))}
+        {visible.map(({ o, cents }) => {
+          const mine = o.out && cents != null && profitAt ? profitAt(cents) : null; // o lucro pelo seu preço
+          return (
+            <li key={o.id} className={`text-xs ${o.out ? "font-semibold text-accent-light" : ""} ${editingId === o.id ? "rounded bg-accent-soft" : ""}`}>
+              <div className="flex items-baseline gap-2">
+                <span className={`w-20 shrink-0 tabular-nums ${cents != null && cents === best ? "font-semibold text-emerald-300" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
+                <span className="min-w-0 flex-1 truncate" title={o.text}>{o.sender}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
+                {o.out && onEdit && <button type="button" onClick={() => onEdit(o)} className="shrink-0 self-center text-muted hover:text-zinc-100" aria-label="Editar a sua contraproposta" title="Editar a sua contraproposta"><Pencil className="h-3.5 w-3.5" /></button>}
+                {o.out && onDelete && <button type="button" onClick={() => onDelete(o)} className="shrink-0 self-center text-muted hover:text-red-300" aria-label="Excluir a sua contraproposta" title="Excluir a sua contraproposta"><Trash2 className="h-3.5 w-3.5" /></button>}
+                <span className="shrink-0 font-normal text-muted">{when(o.date)}</span>
+              </div>
+              {mine && <div className="mb-1 ml-[5.5rem] font-normal"><ProfitLine profit={mine} cpmCents={cents!} compact /></div>}
+            </li>
+          );
+        })}
       </ul>
-      {rows.length > 5 && <button type="button" onClick={() => setAll(!all)} className="mt-0.5 text-[11px] text-accent-light hover:underline">{all ? "Mostrar menos" : `Ver todas (${rows.length})`}</button>}
+      {rows.length > visible.length && <button type="button" onClick={() => setAll(true)} className="mt-0.5 text-[11px] text-accent-light hover:underline">Ver todas ({rows.length})</button>}
+      {all && rows.length > 5 && <button type="button" onClick={() => setAll(false)} className="mt-0.5 text-[11px] text-accent-light hover:underline">Mostrar menos</button>}
     </div>
   );
 }
