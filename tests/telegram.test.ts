@@ -417,7 +417,7 @@ describe("contas para emitir os pedidos (lucro)", () => {
     const accs = await emissionAccounts(userId);
     expect(accs).toEqual([expect.objectContaining({ id: lat, programCode: "LATAM", available: 70_000, costCpmCents: 2000 })]);
     // lucro do pedido "Compro 50k LATAM 1 CPF 25" pela conta: 50 × (25 − 20) = R$ 250
-    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 1 }, 2500, accs)).toMatchObject({ accountId: lat, profitCents: 25_000, perCpfCents: 25_000, costCpmCents: 2000, leftoverMiles: 20_000, leftoverCostCents: 40_000 });
+    expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 1 }, 2500, accs)).toMatchObject({ accountId: lat, profitCents: 25_000, perCpfCents: 25_000, costCpmCents: 2000, leftoverMiles: 20_000, leftoverCostCents: 40_000, cpfLeft: accs[0]!.cpfFree == null ? null : accs[0]!.cpfFree - 1 });
     // 2 CPFs: o lucro por CPF é a metade
     expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accs)).toMatchObject({ profitCents: 25_000, perCpfCents: 12_500 });
     // não cabe no saldo livre: nada

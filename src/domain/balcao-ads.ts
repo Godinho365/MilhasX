@@ -65,7 +65,8 @@ export const PROGRAM_CODE: Record<BalcaoProgram, string> = {
 export type EmissionAccount = { id: string; label: string; programCode: string; available: number; cpfFree: number | null; costCpmCents: number };
 
 /** Lucro de atender o pedido por `cpmCents` com a conta mais barata que consegue emitir (programa, saldo e CPFs):
- *  o total, por CPF (sem a quantidade no pedido, 1) e a sobra (milhas que ficam na conta depois e quanto custaram).
+ *  o total, por CPF (sem a quantidade no pedido, 1) e a sobra (milhas que ficam na conta depois e quanto custaram,
+ *  e os CPFs que continuam livres; null = conta sem limite de CPFs).
  *  null quando nenhuma conta consegue ou não há preço. */
 export function emissionProfit(ad: { program: BalcaoProgram; miles: number; cpfs: number | null }, cpmCents: number | null, accounts: EmissionAccount[]) {
   if (cpmCents == null) return null;
@@ -82,6 +83,7 @@ export function emissionProfit(ad: { program: BalcaoProgram; miles: number; cpfs
     perCpfCents: Math.round(profitCents / cpfs),
     leftoverMiles,
     leftoverCostCents: Math.round((leftoverMiles * best.costCpmCents) / 1000),
+    cpfLeft: best.cpfFree == null ? null : best.cpfFree - cpfs,
   };
 }
 

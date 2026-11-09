@@ -364,6 +364,7 @@ function ProfitLine({ profit: p, cpmCents, compact }: { profit: NonNullable<Prof
       </span>
       <span className={gain ? "text-emerald-300" : "text-red-300"}>{fmtBRL(p.perCpfCents)} por CPF</span>
       <span className="text-muted">sobra {fmtPts(p.leftoverMiles)} milhas{p.leftoverMiles > 0 ? ` (${fmtBRL(p.leftoverCostCents)} de custo)` : ""}</span>
+      <span className="text-muted">· {p.cpfLeft == null ? "CPFs sem limite" : `${p.cpfLeft} ${p.cpfLeft === 1 ? "CPF livre" : "CPFs livres"}`}</span>
       <span className="text-muted">· {p.account}</span>
     </p>
   );
