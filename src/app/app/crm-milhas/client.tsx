@@ -312,12 +312,27 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
           <PriceHelper costCpmCents={acc.cpmCents} avgSaleCpmCents={avgSaleCpmCents} points={nPoints} cpfs={Number(passengers) || 1} currentCpmCents={cpmCents} onPick={(c) => setCpm(fmtBRL(c))} />
         ) : null}
         <Field label="Observações"><textarea className="input min-h-20" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field>
-        {deal && <BuyerPage deal={deal} />}
-        {deal && <Emission deal={deal} />}
+        {/* página do comprador, verificação e bilhete: só a partir de "Aguardando dados / emissão" (ou se já houver
+            bilhete, comprovante ou venda) */}
+        {deal && (emissionOpen(deal) ? (
+          <>
+            <BuyerPage deal={deal} />
+            <Emission deal={deal} />
+          </>
+        ) : (
+          <p className="rounded-xl border border-dashed border-line p-3 text-sm text-muted">
+            A página do comprador, a verificação facial e o bilhete aparecem quando a negociação estiver em <b className="text-zinc-200">{DEAL_STAGE_LABELS.AWAITING}</b>.
+            {onMove && <> <button type="button" className="font-medium text-accent-light hover:underline" onClick={() => onMove("AWAITING")}>Mover agora</button></>}
+          </p>
+        ))}
       </form>
     </Modal>
   );
 }
+
+/** A emissão (página do comprador, verificação facial e bilhete) começa em "Aguardando dados / emissão"; antes,
+ *  só aparece se a negociação já tiver bilhete, comprovante ou venda. */
+const emissionOpen = (d: DealView) => d.stage === "AWAITING" || d.stage === "ISSUED" || d.stage === "PAID" || !!d.ticket || !!d.receipt || !!d.saleId;
 
 /** Em que fatura a taxa entra: a do dia da venda (lançada com o bilhete); antes disso, a de hoje é uma previsão. */
 function taxCardHint(card: CardOpt | undefined, deal: DealView | null, taxesCents: number | null) {
