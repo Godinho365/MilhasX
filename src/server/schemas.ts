@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MANUAL_CREDIT_TYPES, MANUAL_DEBIT_TYPES, CREDIT_TYPES, DEBIT_TYPES, type EntryType } from "@/domain/ledger";
+import { BALCAO_PROGRAMS } from "@/domain/balcao-ads";
 
 type ManualType = (typeof MANUAL_CREDIT_TYPES)[number] | (typeof MANUAL_DEBIT_TYPES)[number];
 const MANUAL = [...MANUAL_CREDIT_TYPES, ...MANUAL_DEBIT_TYPES] as [ManualType, ...ManualType[]];
@@ -533,11 +534,19 @@ export const telegramPhoneSchema = z.object({ phone: z.string().trim().min(8, "I
 export const telegramCodeSchema = z.object({ code: z.string().trim().min(1, "Informe o código").max(12) });
 export const telegramPasswordSchema = z.object({ password: z.string().min(1, "Informe a senha de duas etapas").max(256) });
 export const telegramGroupSchema = z.object({ groupId: z.string().trim().regex(/^-?\d{1,20}$/, "Grupo inválido") });
-export const telegramAlertSchema = z.object({
-  name: z.string().trim().max(60).optional(),
-  words: z.array(z.string().trim().max(40, "Palavra longa demais")).min(1, "Informe ao menos uma palavra").max(10, "Até 10 palavras por alerta"),
-  active: z.boolean().optional(),
-});
+const optInt = (min: number, max: number, msg: string) => z.number({ invalid_type_error: msg }).int(msg).min(min, msg).max(max, msg).nullable().optional();
+export const telegramAlertSchema = z
+  .object({
+    name: z.string().trim().max(80).optional(),
+    words: z.array(z.string().trim().max(40, "Palavra longa demais")).max(10, "Até 10 palavras por alerta").default([]),
+    program: z.enum(BALCAO_PROGRAMS).nullable().optional(),
+    maxCpfs: optInt(1, 99, "CPFs: de 1 a 99"),
+    minMiles: optInt(0, 100_000_000, "Milhas inválidas"),
+    maxMiles: optInt(1, 100_000_000, "Milhas inválidas"),
+    minCpmCents: optInt(1, 1_000_000, "Milheiro inválido"),
+    active: z.boolean().optional(),
+  })
+  .refine((a) => a.minMiles == null || a.maxMiles == null || a.minMiles <= a.maxMiles, { message: "As milhas mínimas passam das máximas", path: ["minMiles"] });
 
 export const salePaymentSchema = z.object({
   paid: z.boolean(),

@@ -270,3 +270,19 @@ describe("Chat Balcões", () => {
     expect((await o.call(feedRoute.GET, "GET", "/x")).data).toEqual({ ok: true, items: [], errors: [] });
   });
 });
+
+describe("alerta pelo pedido de compra (API)", () => {
+  it("cria com programa e milheiro mínimo, com o nome descrevendo o pedido, e a mensagem traz o pedido lido", async () => {
+    const a = await connected("11999998888", "-1001234");
+    await connected("21977776666", "-1005678");
+    const r = await c.call(alertsRoute.POST, "POST", "/x", { program: "LATAM", minCpmCents: 2000, maxCpfs: 2 });
+    expect([r.status, r.data.items[0].name]).toEqual([201, "LATAM · até 2 CPFs · CPM a partir de R$ 20,00"]);
+    expect((await c.call(alertsRoute.POST, "POST", "/x", { program: "Gol" })).status).toBe(400);
+    expect((await c.call(alertsRoute.POST, "POST", "/x", { minMiles: 300_000, maxMiles: 100_000 })).status).toBe(400);
+    // "compro latam 30K urgente" não tem preço: não passa no milheiro mínimo
+    expect((await c.call(feedRoute.GET, "GET", "/x")).data.items.map((m: { id: number }) => m.id)).toEqual([1]);
+    const msgs = (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items;
+    expect(msgs[0].ad).toEqual({ kind: "COMPRA", program: "LATAM", miles: 100_000, cpfs: null, cpmCents: 2500 });
+    expect(msgs[1].ad).toBeNull(); // conversa
+  });
+});

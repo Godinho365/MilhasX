@@ -10,7 +10,8 @@ import { returnBigInt } from "telegram/Helpers";
 import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
-import { matchAlerts, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
+import { matchAlerts, parseAlertWords, hasAdCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
+import { parseBalcaoAd } from "@/domain/balcao-ads";
 
 /** Como chegar no grupo direto (sem listar os chats da conta): supergrupo/canal precisa do hash de acesso. */
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string };
@@ -338,8 +339,9 @@ async function groupPeer(l: Link): Promise<TgPeer> {
   return g.peer;
 }
 
-const activeAlerts = (userId: string): Promise<AlertRule[]> =>
-  prisma.telegramAlert.findMany({ where: { userId, active: true }, select: { id: true, name: true, words: true, active: true } });
+/** Campos do alerta (o que ele pede). */
+const ALERT_SELECT = { id: true, name: true, words: true, active: true, program: true, maxCpfs: true, minMiles: true, maxMiles: true, minCpmCents: true } as const;
+const activeAlerts = (userId: string): Promise<AlertRule[]> => prisma.telegramAlert.findMany({ where: { userId, active: true }, select: ALERT_SELECT });
 
 /** Mensagens do grupo do balcão da conta (da mais antiga para a mais nova), com os alertas que cada uma dispara.
  *  minId = só as que chegaram depois dela. Ler pelo app não marca nada como lido no Telegram. */
@@ -350,7 +352,10 @@ export async function chatMessages(userId: string, id: string, opts: { limit?: n
     guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId }))),
     activeAlerts(userId),
   ]);
-  return msgs.map((m) => ({ ...m, alerts: m.text ? matchAlerts(m.text, rules) : [] }));
+  return msgs.map((m) => {
+    const ad = m.text ? parseBalcaoAd(m.text) : null; // pedido de compra/venda lido da mensagem (contraproposta não é)
+    return { ...m, ad, alerts: m.text ? matchAlerts(m.text, rules, ad) : [] };
+  });
 }
 
 /** Aba Alertas: as mensagens recentes de todos os chats que dispararam algum alerta, da mais nova para a mais
@@ -378,18 +383,23 @@ export async function alertFeed(userId: string) {
 export const MAX_TELEGRAM_ALERTS = 50;
 
 export const listTelegramAlerts = (userId: string) =>
-  prisma.telegramAlert.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, words: true, active: true } });
+  prisma.telegramAlert.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: ALERT_SELECT });
 
-/** Cria (id null) ou muda um alerta. Sem nome, o nome são as palavras. */
-export async function saveTelegramAlert(userId: string, id: string | null, input: { name?: string; words: string[]; active?: boolean }) {
-  const words = parseAlertWords(input.words.join(","));
-  if (!words.length) throw new DomainError(400, "Informe ao menos uma palavra");
-  const name = input.name?.trim() || words.join(" + ");
+export type AlertInput = { name?: string; words?: string[]; program?: string | null; maxCpfs?: number | null; minMiles?: number | null; maxMiles?: number | null; minCpmCents?: number | null; active?: boolean };
+
+/** Cria (id null) ou muda um alerta: pelo pedido de compra (programa, CPFs, milhas, milheiro) e/ou por palavras.
+ *  Sem nome, o nome é o que ele pede. */
+export async function saveTelegramAlert(userId: string, id: string | null, input: AlertInput) {
+  const words = parseAlertWords((input.words ?? []).join(","));
+  const criteria = { program: input.program || null, maxCpfs: input.maxCpfs ?? null, minMiles: input.minMiles ?? null, maxMiles: input.maxMiles ?? null, minCpmCents: input.minCpmCents ?? null };
+  const byAd = hasAdCriteria({ id: "", name: "", active: true, words, ...criteria });
+  if (!byAd && !words.length) throw new DomainError(400, "Escolha o que o alerta procura: programa, CPFs, milhas, milheiro ou palavras");
+  const name = input.name?.trim() || (byAd ? describeAlert({ words, ...criteria }) : words.join(" + "));
   if (!id) {
     if ((await prisma.telegramAlert.count({ where: { userId } })) >= MAX_TELEGRAM_ALERTS) throw new DomainError(409, `Limite de ${MAX_TELEGRAM_ALERTS} alertas`);
-    await prisma.telegramAlert.create({ data: { userId, name, words, active: input.active ?? true } });
+    await prisma.telegramAlert.create({ data: { userId, name, words, ...criteria, active: input.active ?? true } });
   } else {
-    const { count } = await prisma.telegramAlert.updateMany({ where: { id, userId }, data: { name, words, ...(input.active !== undefined ? { active: input.active } : {}) } });
+    const { count } = await prisma.telegramAlert.updateMany({ where: { id, userId }, data: { name, words, ...criteria, ...(input.active !== undefined ? { active: input.active } : {}) } });
     if (!count) throw new DomainError(404, "Alerta não encontrado");
   }
   return listTelegramAlerts(userId);

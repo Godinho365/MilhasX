@@ -166,15 +166,21 @@ model TelegramLink {
   @@index([userId])
 }
 
-/// Alerta do Chat Balcões: destaca e avisa quando uma mensagem dos grupos tem todas as palavras dele.
+/// Alerta do Chat Balcões: destaca e avisa das mensagens dos grupos. Pelo pedido de compra (programa, até N CPFs,
+/// faixa de milhas, milheiro mínimo) e/ou por palavras (todas precisam aparecer).
 model TelegramAlert {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  words     String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  words       String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
+  program     String? // vazio = qualquer programa
+  maxCpfs     Int? // pedido de até N CPFs
+  minMiles    Int?
+  maxMiles    Int?
+  minCpmCents Int? // milheiro oferecido de pelo menos
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
   @@index([userId])
 }
