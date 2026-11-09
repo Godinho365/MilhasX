@@ -603,6 +603,7 @@ model UserPreference {
   valuesMode         String    @default("VISIBLE")
   notifications      Json      @default("{}")
   pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
+  emissionTerms      String? // termo de emissão mandado ao comprador antes de emitir (vazio = o padrão do MilhasX)
   metricsHidden      String[]  @default([]) // blocos escondidos na página Métricas ("vendas.mix", ...)
 }
 
@@ -1196,6 +1197,7 @@ model MilesDeal {
   faceCheckUrl    String? // verificação antes da emissão: link da validação facial (formato novo)
   faceCheckStatus String? // PENDING | DONE | NOT_NEEDED; o bilhete só entra com DONE ou NOT_NEEDED
   faceCheckAt     DateTime?
+  termsSentAt     DateTime? // quando o termo de emissão foi mandado ao comprador (antes de emitir)
   saleId          String?           @unique // venda criada ao chegar em "Pago"
   sale            Sale?             @relation(fields: [saleId], references: [id], onDelete: SetNull)
   ticket          MilesDealTicket? // bilhete anexado: só com ele a negociação está "Emitida"

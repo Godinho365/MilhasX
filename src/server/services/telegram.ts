@@ -14,8 +14,8 @@ import { prisma, DomainError } from "../db";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { matchAlerts, parseAlertWords, hasAdCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
 import { parseBalcaoAd, emissionProfit } from "@/domain/balcao-ads";
-import { balcaoForGroup } from "@/domain/miles-deals";
-import { createDeal, moveDeal } from "./miles-deals";
+import { balcaoForGroup, buyerDataFromMessages } from "@/domain/miles-deals";
+import { createDeal, markDealTermsSent, moveDeal } from "./miles-deals";
 import { emissionAccounts } from "./capacity";
 
 /** Como chegar no chat direto (sem listar os chats da conta): supergrupo/canal e pessoa precisam do hash de acesso. */
@@ -565,6 +565,32 @@ export async function openDmFromDeal(userId: string, dealId: string) {
   const chat = await prisma.telegramGroup.findFirst({ where: { userId, linkId: ref[1], groupId: ref[2] }, select: { id: true } });
   if (!chat) throw new DomainError(409, "O grupo deste pedido não está mais no Chat Balcões: adicione de novo em Configurações › Telegram");
   return openTelegramDm(userId, chat.id, Number(ref[3]));
+}
+
+/** Quanto antes da negociação ser criada ainda conta como conversa dela (o pedido às vezes é registrado depois de
+ *  ele já ter mandado os dados). */
+const DEAL_CHAT_MARGIN_MS = 3 * 3600_000;
+
+/** Dados dos passageiros que o comprador mandou no privado (negociação registrada pelo Chat Balcões): as
+ *  mensagens dele desde pouco antes da negociação, juntas para o leitor de passageiros, e o último link da LATAM
+ *  (o pedido pronto). Só lê; nada é mandado. */
+export async function dealBuyerData(userId: string, dealId: string) {
+  const deal = await prisma.milesDeal.findFirst({ where: { id: dealId, userId }, select: { createdAt: true } });
+  if (!deal) throw new DomainError(404, "Negociação não encontrada");
+  const dm = await openDmFromDeal(userId, dealId);
+  const d = await ownDm(userId, dm.id);
+  const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
+  const since = new Date(deal.createdAt.getTime() - DEAL_CHAT_MARGIN_MS);
+  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: 100 })));
+  const theirs = msgs.filter((m) => !m.out && m.text.trim() && new Date(m.date) >= since);
+  return { dmId: dm.id, contact: dm.name, since: since.toISOString(), messages: theirs.length, ...buyerDataFromMessages(theirs.map((m) => m.text)) };
+}
+
+/** Manda o termo de emissão (o texto que o usuário conferiu) no privado para quem está negociando e anota quando. */
+export async function sendDealTerms(userId: string, dealId: string, raw: string) {
+  const dm = await openDmFromDeal(userId, dealId);
+  await sendTelegramDm(userId, dm.id, raw);
+  return markDealTermsSent(userId, dealId);
 }
 
 async function ownDm(userId: string, dmId: string) {

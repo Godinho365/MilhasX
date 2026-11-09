@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck, ImageUp } from "lucide-react";
+import { Plus, Search, Coins, MessageCircle, Trash2, Receipt, Link2, ExternalLink, Copy, UserCheck, ImageUp, Send } from "lucide-react";
 import { api } from "@/lib/api";
 import { refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtPts, parseBRLToCents, fmtDate, fmtDateTime, fmtDay as fmtDayBR } from "@/lib/format";
@@ -17,6 +17,7 @@ import { PIX_KEY_TYPES, issuedMessage, type PixInfo, type PixKeyType } from "@/d
 import { priceOptions, roeOf } from "@/domain/pricing";
 import { FACE_CHECK_LABELS, faceCheckMessage, unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
 import { cardDueDay } from "@/domain/finance";
+import { DEFAULT_EMISSION_TERMS, emissionTermsText } from "@/domain/emission-terms";
 import { brDay } from "@/domain/brasilia";
 
 type Customer = { id: string; name: string; phone: string | null };
@@ -316,7 +317,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             bilhete, comprovante ou venda) */}
         {deal && (emissionOpen(deal) ? (
           <>
-            <BuyerPage deal={deal} />
+            <BuyerPage deal={deal} onOrderLink={locked ? undefined : changeOrderLink} />
             <Emission deal={deal} />
           </>
         ) : (
@@ -412,6 +413,7 @@ function Emission({ deal: initial }: { deal: DealView }) {
   const verified = deal.faceCheck.status === "DONE" || deal.faceCheck.status === "NOT_NEEDED";
   return (
     <>
+      <EmissionTerms deal={deal} onChanged={(d) => { setDeal(d); refreshSafe(router); }} />
       <FaceCheck deal={deal} onChanged={(d) => { setDeal(d); refreshSafe(router); }} />
       <FileBox
         title="Bilhete" what="bilhete" url={`/api/miles-deals/${deal.id}/ticket`} file={deal.ticket} removable={!deal.saleId}
@@ -566,6 +568,83 @@ export function DealsList({ active, archived, customers, accounts, cards = [], a
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
       {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} cards={cards} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/* ---------------- Termo de emissão ---------------- */
+
+/** Antes de emitir: o comprador confere o print da reserva e autoriza a emissão nos termos deste texto (prazo de
+ *  pagamento, cancelamento, pós-venda). Pedido do Chat Balcões: vai no privado do Telegram, depois de confirmar;
+ *  senão, copiar ou WhatsApp e marcar como enviado. O texto pode ser salvo como padrão. */
+function EmissionTerms({ deal, onChanged }: { deal: DealView; onChanged: (d: DealView) => void }) {
+  const [saved, setSaved] = useState<string | null>(null); // o padrão salvo pelo usuário (null = o do MilhasX)
+  const [text, setText] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (deal.ticket) return;
+    api<{ item: { emissionTerms: string | null } }>("/api/preferences").then((r) => {
+      const t = r.ok ? r.data.item.emissionTerms : null;
+      setSaved(t);
+      setText(emissionTermsText(t));
+      setLoaded(true);
+    });
+  }, [deal.id, !!deal.ticket]); // eslint-disable-line react-hooks/exhaustive-deps
+  // já emitida: só o registro de quando o termo foi mandado
+  if (deal.ticket) return deal.termsSentAt ? <p className="text-xs text-muted">Termo de emissão enviado em {fmtDateTime(deal.termsSentAt)}.</p> : null;
+  if (!loaded) return null;
+  const standard = emissionTermsText(saved);
+  async function saveDefault() {
+    const r = await api<{ item: { emissionTerms: string | null } }>("/api/preferences", "PATCH", { emissionTerms: text });
+    if (!r.ok) return toast(r.erro, "error");
+    setSaved(r.data.item.emissionTerms);
+    toast("Termo salvo como padrão para as próximas negociações");
+  }
+  async function send(telegram: boolean) {
+    if (telegram && !(await confirmDialog({ title: `Mandar o termo para ${deal.telegramContact} no privado do Telegram?`, body: "A mensagem sai pela sua conta do Telegram, com o texto que está na caixa.", confirmLabel: "Mandar" }))) return;
+    setBusy(true);
+    const r = await api<{ item: DealView }>(`/api/miles-deals/${deal.id}/terms`, "POST", telegram ? { text } : {});
+    setBusy(false);
+    if (!r.ok) return toast(r.erro, "error");
+    toast(telegram ? `Termo enviado para ${deal.telegramContact}` : "Termo marcado como enviado");
+    onChanged(r.data.item);
+  }
+  const wa = !deal.telegramContact ? whatsappLink(deal.customerPhone, text) : null;
+  return (
+    <section className="space-y-3 rounded-xl border border-line p-3" aria-label="Termo de emissão">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Termo de emissão</h3>
+        {deal.termsSentAt ? <span className="text-xs font-medium text-ok">✅ Enviado em {fmtDateTime(deal.termsSentAt)}</span> : <span className="text-xs font-medium text-amber-300">Ainda não enviado</span>}
+      </div>
+      <p className="text-xs text-muted">
+        Antes de emitir: mande o print da reserva e este termo, e só emita depois que o comprador autorizar.
+        {deal.telegramContact && " O print vai pelo Telegram; a resposta aparece na conversa (Mandar mensagem, no alto)."}
+      </p>
+      <textarea className="input min-h-[200px] text-xs leading-relaxed" value={text} onChange={(e) => setText(e.target.value)} maxLength={4000} aria-label="Texto do termo de emissão" />
+      <div className="flex flex-wrap items-center gap-2">
+        {deal.telegramContact ? (
+          <button type="button" className="btn-primary h-8 text-xs" onClick={() => send(true)} disabled={busy || !text.trim()}>
+            <Send className="h-3.5 w-3.5" />{busy ? "Mandando…" : deal.termsSentAt ? "Mandar de novo" : `Mandar para ${deal.telegramContact}`}
+          </button>
+        ) : (
+          <>
+            <button type="button" className="btn-primary h-8 text-xs" onClick={() => navigator.clipboard.writeText(text).then(() => toast("Termo copiado"), () => {})}><Copy className="h-3.5 w-3.5" />Copiar termo</button>
+            {wa && <a className="btn-ghost h-8 text-xs" href={wa} target="_blank" rel="noopener noreferrer"><MessageCircle className="h-3.5 w-3.5" />Abrir no WhatsApp</a>}
+            {!deal.termsSentAt && <button type="button" className="btn-ghost h-8 text-xs" onClick={() => send(false)} disabled={busy}>Marcar como enviado</button>}
+          </>
+        )}
+        <span className="flex-1" />
+        {text.trim() !== standard.trim() && (
+          <>
+            <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(standard)}>Desfazer</button>
+            <button type="button" className="text-xs text-accent-light hover:underline" onClick={saveDefault}>Salvar como padrão</button>
+          </>
+        )}
+        {saved && text.trim() === standard.trim() && standard.trim() !== DEFAULT_EMISSION_TERMS.trim() && (
+          <button type="button" className="text-xs text-muted hover:text-zinc-100" onClick={() => setText(DEFAULT_EMISSION_TERMS)}>Texto original</button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -747,19 +826,45 @@ const toRow = (p: Passenger): PaxRow => {
 };
 const emptyRow = (): PaxRow => ({ firstName: "", lastName: "", cpf: "", birthDate: "", gender: "", email: "", phone: "" });
 
-/** O comprador mandou os dados pelo WhatsApp/Telegram: colar a mensagem (o sistema separa os campos) ou digitar. */
-function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved: (d: DealView) => void; onCancel: () => void }) {
+type ChatData = { dmId: string; contact: string; since: string; messages: number; text: string; latamLink: string | null };
+
+/** O comprador mandou os dados pelo WhatsApp/Telegram: colar a mensagem (o sistema separa os campos) ou digitar.
+ *  Negociação do Chat Balcões: "Pegar da conversa" lê o que ele mandou no privado (e o link pronto da LATAM). */
+function PassengersEditor({ deal, onSaved, onCancel, onOrderLink, autoFetch }: { deal: DealView; onSaved: (d: DealView) => void; onCancel: () => void; onOrderLink?: (link: string) => void; autoFetch?: boolean }) {
   const [rows, setRows] = useState<PaxRow[]>(() => (deal.passengersData.length ? deal.passengersData.map(toRow) : Array.from({ length: deal.passengers ?? 1 }, emptyRow)));
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [chat, setChat] = useState<ChatData | null>(null);
+  const [fetching, setFetching] = useState(false);
   const set = (i: number, p: Partial<PaxRow>) => setRows((l) => l.map((r, j) => (j === i ? { ...r, ...p } : r)));
-  function read(value = text) {
+  function read(value = text, quiet = false) {
     // texto do favorito "Copiar da LATAM" (passageiros já preenchidos na tela da LATAM) ou mensagem livre
     const found = fromLatamPayload(value) ?? parsePassengersText(value);
-    if (!found.length) return toast("Não encontrei CPF ou data de nascimento no texto", "error");
+    if (!found.length) return quiet ? 0 : (toast("Não encontrei CPF ou data de nascimento no texto", "error"), 0);
     setRows(found.map(toRow));
-    toast(`${found.length} ${found.length === 1 ? "passageiro lido" : "passageiros lidos"}: confira os campos`);
+    const more = deal.passengers && found.length > deal.passengers ? ` (a negociação tem ${deal.passengers} ${deal.passengers === 1 ? "CPF" : "CPFs"})` : "";
+    toast(`${found.length} ${found.length === 1 ? "passageiro lido" : "passageiros lidos"}${more}: confira os campos`);
+    return found.length;
   }
+  // lê as mensagens dele no privado do Telegram (só lê) e preenche; o texto fica na caixa para conferir
+  async function fromTelegram() {
+    setFetching(true);
+    const r = await api<{ item: ChatData }>(`/api/miles-deals/${deal.id}/telegram-data`);
+    setFetching(false);
+    if (!r.ok) return toast(r.erro, "error");
+    const c = r.data.item;
+    setChat(c);
+    if (c.text) setText(c.text);
+    const n = c.text ? read(c.text, true) : 0;
+    if (!n && !c.latamLink) toast(`Nenhum dado de passageiro nas mensagens de ${c.contact} desde ${fmtDateTime(c.since)}`, "error");
+    else if (!n) toast(`${c.contact} mandou o link pronto da LATAM`);
+  }
+  const fetched = useRef(false); // uma leitura só ao abrir (o React de desenvolvimento roda o efeito duas vezes)
+  useEffect(() => {
+    if (!autoFetch || !deal.telegramContact || fetched.current) return;
+    fetched.current = true;
+    void fromTelegram();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   async function save() {
     const bad = rows.findIndex((r) => !r.firstName.trim() || !r.lastName.trim() || r.cpf.replace(/\D/g, "").length !== 11 || !r.birthDate);
     if (bad >= 0) return toast(`Passageiro ${bad + 1}: preencha nome, sobrenome, CPF (11 dígitos) e nascimento`, "error");
@@ -778,7 +883,28 @@ function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved
         <span className="mb-1 block text-muted">Colar a mensagem do comprador (WhatsApp, Telegram…) ou o que o favorito <b>Copiar da LATAM</b> copiou</span>
         <textarea className="input min-h-[80px] text-sm" value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const v = e.clipboardData.getData("text"); if (fromLatamPayload(v)) { e.preventDefault(); setText(v); read(v); } }} placeholder={"Nicolas Eduardo Amaral\nCPF 037.355.180-01\nNasc. 23/03/2002"} aria-label="Mensagem do comprador" />
       </label>
-      <button type="button" className="btn-ghost h-8 text-xs" onClick={() => read()} disabled={!text.trim()}>Ler texto</button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-ghost h-8 text-xs" onClick={() => read()} disabled={!text.trim()}>Ler texto</button>
+        {deal.telegramContact && (
+          <button type="button" className="btn-ghost h-8 text-xs" onClick={fromTelegram} disabled={fetching}>
+            <MessageCircle className="h-3.5 w-3.5" />{fetching ? "Lendo a conversa…" : `Pegar da conversa com ${deal.telegramContact}`}
+          </button>
+        )}
+      </div>
+      {chat && (
+        <div className="space-y-1.5 rounded-lg border border-line px-3 py-2 text-xs text-muted" aria-label="Lido da conversa">
+          <p>Li {chat.messages} {chat.messages === 1 ? "mensagem" : "mensagens"} de {chat.contact} desde {fmtDateTime(chat.since)}. Confira os campos antes de salvar.</p>
+          {chat.latamLink && (
+            <div className="flex flex-wrap items-center gap-2 text-zinc-200">
+              <span className="min-w-0 flex-1 break-all">Ele mandou o link pronto da LATAM: <span className="font-mono text-[11px] text-muted">{chat.latamLink}</span></span>
+              <a className="btn-ghost h-8 text-xs" href={chat.latamLink} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" />Abrir</a>
+              {onOrderLink && deal.orderLink !== chat.latamLink && (
+                <button type="button" className="btn-ghost h-8 text-xs" onClick={() => { onOrderLink(chat.latamLink!); toast("Link do pedido preenchido: salve a negociação"); }}>Usar como link do pedido</button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {rows.map((r, i) => (
         <fieldset key={i} className="space-y-2 rounded-lg border border-line p-2">
           <legend className="flex w-full items-center justify-between px-1 text-xs font-semibold">
@@ -811,7 +937,7 @@ function PassengersEditor({ deal, onSaved, onCancel }: { deal: DealView; onSaved
 const fmtCpf = (v: string) => (v.length === 11 ? `${v.slice(0, 3)}.${v.slice(3, 6)}.${v.slice(6, 9)}-${v.slice(9)}` : v);
 const fmtDay = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split("-").reverse().join("/") : v);
 
-function BuyerPage({ deal: initial }: { deal: DealView }) {
+function BuyerPage({ deal: initial, onOrderLink }: { deal: DealView; onOrderLink?: (link: string) => void }) {
   const router = useRouter();
   const [link, setLink] = useState<string | null>(null);
   const [deal, setDeal] = useState(initial);
@@ -848,7 +974,7 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
   }
   const copy = (text: string, what: string) => navigator.clipboard.writeText(text).then(() => toast(`${what} copiado`), () => {});
   const [install, setInstall] = useState(false);
-  const [editingPax, setEditingPax] = useState(false);
+  const [editingPax, setEditingPax] = useState<false | "edit" | "chat">(false); // "chat" = já abre lendo a conversa
   const paxSaved = (d: DealView) => { setDeal(d); setEditingPax(false); refreshSafe(router); };
   const latamLink = deal.orderLink && /latamairlines\.com/.test(deal.orderLink) ? deal.orderLink : null;
   return (
@@ -861,12 +987,12 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
       <p className="text-xs text-muted">O comprador vê o resumo (milhas, CPFs, taxas e total), envia os dados dos passageiros e, com o localizador salvo, vê a emissão confirmada.</p>
       {link && <p className="break-all rounded-lg bg-panel2 px-2.5 py-1.5 font-mono text-[11px] text-muted">{link}</p>}
       {editingPax ? (
-        <PassengersEditor deal={deal} onSaved={paxSaved} onCancel={() => setEditingPax(false)} />
+        <PassengersEditor deal={deal} onSaved={paxSaved} onCancel={() => setEditingPax(false)} onOrderLink={onOrderLink} autoFetch={editingPax === "chat"} />
       ) : deal.passengersData.length > 0 ? (
         <div className="space-y-2">
           <p className="flex items-center gap-2 text-xs text-muted">
             <span className="flex-1">Recebidos em {fmtDateTime(deal.passengersAt!)}</span>
-            <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Editar passageiros</button>
+            <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax("edit")}>Editar passageiros</button>
           </p>
           <div className="flex flex-wrap items-center gap-2" aria-label="Preencher na LATAM">
             <button type="button" className="btn-primary h-8 text-xs" onClick={() => copy(latamPayload(deal.passengersData), "Passageiros para a LATAM")}><Copy className="h-3.5 w-3.5" />Copiar para a LATAM</button>
@@ -891,10 +1017,11 @@ function BuyerPage({ deal: initial }: { deal: DealView }) {
           ))}
         </div>
       ) : (
-        <p className="flex items-center gap-2 text-xs text-amber-300">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-300">
           Ainda sem dados dos passageiros.
           <button type="button" className="text-accent-light hover:underline disabled:opacity-60" onClick={() => void reload(true)} disabled={checking}>{checking ? "Verificando…" : "Verificar agora"}</button>
-          <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax(true)}>Informar passageiros</button>
+          {deal.telegramContact && <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax("chat")}>Pegar da conversa do Telegram</button>}
+          <button type="button" className="text-accent-light hover:underline" onClick={() => setEditingPax("edit")}>Informar passageiros</button>
           <button type="button" className="text-accent-light hover:underline" onClick={() => setInstall(true)}>Já está na LATAM?</button>
         </p>
       )}

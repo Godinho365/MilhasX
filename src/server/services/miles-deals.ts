@@ -72,6 +72,7 @@ const view = (d: Row) => {
     locator: d.locator,
     // verificação antes da emissão (validação facial do titular)
     faceCheck: { url: d.faceCheckUrl, status: (d.faceCheckStatus as FaceCheckStatus | null) ?? null, at: d.faceCheckAt?.toISOString() ?? null },
+    termsSentAt: d.termsSentAt?.toISOString() ?? null, // termo de emissão mandado ao comprador
     holderName: d.account?.holder.name ?? null,
     holderPhone: d.account?.holder.phone ?? null,
     // só com o bilhete anexado a negociação está emitida
@@ -517,6 +518,13 @@ export async function publicDealTicket(slug: string, token: string) {
   if (!d?.ticket) return null;
   const t = await prisma.milesDealTicket.findUniqueOrThrow({ where: { dealId: d.id } });
   return { name: t.name, mime: t.mime, data: Buffer.from(t.data) };
+}
+
+/** Termo de emissão mandado ao comprador (pelo Telegram, pelo app, ou por fora: copiado/WhatsApp): anota quando. */
+export async function markDealTermsSent(userId: string, id: string, at = new Date()) {
+  const d = await own(userId, id);
+  await prisma.milesDeal.update({ where: { id: d.id }, data: { termsSentAt: at } });
+  return getDeal(userId, id);
 }
 
 /** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */

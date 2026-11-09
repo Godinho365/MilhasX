@@ -21,6 +21,11 @@ import * as crmRoute from "@/app/api/telegram/chats/[id]/crm/route";
 import * as chatRoute from "@/app/api/telegram/chats/[id]/route";
 import * as dealDmRoute from "@/app/api/miles-deals/[id]/telegram-dm/route";
 import * as dealsRoute from "@/app/api/miles-deals/route";
+import * as dealDataRoute from "@/app/api/miles-deals/[id]/telegram-data/route";
+import * as termsRoute from "@/app/api/miles-deals/[id]/terms/route";
+import * as prefsRoute from "@/app/api/preferences/route";
+import { parsePassengersText } from "@/domain/miles-deals";
+import { DEFAULT_EMISSION_TERMS, emissionTermsText } from "@/domain/emission-terms";
 import * as clearRoute from "@/app/api/telegram/chats/[id]/clear/route";
 import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
 import * as msgRoute from "@/app/api/telegram/chats/[id]/messages/[msgId]/route";
@@ -535,5 +540,65 @@ describe("negociação vinda do Chat Balcões: com quem está negociando", () =>
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await o.call(dealDmRoute.POST, "POST", "/x", undefined, { id: deal.id })).status).toBe(404);
+  });
+});
+
+describe("negociação vinda do Chat Balcões: dados do comprador e termo de emissão", () => {
+  /** Mensagem no privado com a Ana, `min` minutos a partir de agora (a negociação é criada agora). */
+  const dm = (id: number, min: number, text: string, out = false): TgMessage => ({ id, date: new Date(Date.now() + min * 60_000).toISOString(), sender: out ? "Você" : "Ana", text, media: null, out, fromUser: true, replyTo: null });
+
+  it("pega os passageiros e o link pronto da LATAM do privado, sem mandar nada", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    MSGS["u-Ana"] = [
+      dm(1, -3 * 24 * 60, "Bruno Costa\n529.982.247-25\n12/01/1987"), // de uma negociação antiga: fica de fora
+      dm(2, 1, "Bom dia! Segue os dados"),
+      dm(3, 2, "Ana Lima Souza\n111.444.777-35\n05/06/1990"),
+      dm(4, 3, "Carla Dias\n390.533.447-05\n03/04/1995", true), // mandada pela conta: fica de fora
+      dm(5, 4, "https://www.latamairlines.com/br/pt/v2/passageiros?orderId=LA123"),
+    ];
+    try {
+      const r = await c.call(dealDataRoute.GET, "GET", "/x", undefined, { id: deal.id });
+      expect(r.status).toBe(200);
+      expect(r.data.item).toMatchObject({ contact: "Ana", messages: 3, latamLink: "https://www.latamairlines.com/br/pt/v2/passageiros?orderId=LA123" });
+      expect(parsePassengersText(r.data.item.text).map((p) => [p.name, p.cpf, p.birthDate])).toEqual([["Ana Lima Souza", "11144477735", "1990-06-05"]]);
+      expect(calls.filter((x) => x.startsWith("send "))).toEqual([]);
+      // negociação feita à mão: não tem conversa para ler
+      const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+      expect((await c.call(dealDataRoute.GET, "GET", "/x", undefined, { id: manual.id })).status).toBe(400);
+    } finally {
+      delete MSGS["u-Ana"];
+    }
+  });
+
+  it("manda o termo no privado e anota quando; feita à mão, só marca como enviado", async () => {
+    const asm = await connected("11999998888", "-1001234");
+    const deal = (await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: asm })).data.item;
+    expect(deal.termsSentAt).toBeNull();
+    const r = await c.call(termsRoute.POST, "POST", "/x", { text: "  Termo de teste  " }, { id: deal.id });
+    expect(r.status).toBe(200);
+    expect(r.data.item.termsSentAt).toEqual(expect.any(String));
+    expect(calls.filter((x) => x.startsWith("send "))).toEqual(["send user:u-Ana Termo de teste"]);
+
+    const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
+    expect((await c.call(termsRoute.POST, "POST", "/x", { text: "Termo" }, { id: manual.id })).status).toBe(400);
+    expect((await c.call(termsRoute.POST, "POST", "/x", {}, { id: manual.id })).data.item.termsSentAt).toEqual(expect.any(String));
+    expect(calls.filter((x) => x.startsWith("send "))).toHaveLength(1);
+
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(termsRoute.POST, "POST", "/x", {}, { id: deal.id })).status).toBe(404);
+  });
+
+  it("o texto do termo: o padrão do MilhasX ou o salvo pelo usuário", async () => {
+    const get = async () => (await c.call(prefsRoute.GET, "GET", "/x")).data.item.emissionTerms;
+    expect(await get()).toBeNull();
+    expect(emissionTermsText(null)).toBe(DEFAULT_EMISSION_TERMS);
+    await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: "Meu termo" });
+    expect(await get()).toBe("Meu termo");
+    // salvar igual ao padrão (ou vazio) volta para o padrão
+    await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: DEFAULT_EMISSION_TERMS });
+    expect(await get()).toBeNull();
+    expect((await c.call(prefsRoute.PATCH, "PATCH", "/x", { emissionTerms: "x".repeat(4001) })).status).toBe(400);
   });
 });
