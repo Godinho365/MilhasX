@@ -331,6 +331,7 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             bilhete, comprovante ou venda) */}
         {deal && (emissionOpen(deal) ? (
           <>
+            <EmissionSteps deal={deal} />
             <BuyerPage deal={deal} onOrderLink={locked ? undefined : changeOrderLink} />
             <Emission deal={deal} />
           </>
@@ -582,6 +583,51 @@ export function DealsList({ active, archived, customers, accounts, cards = [], a
       <section className="card overflow-hidden" aria-label="Negociações arquivadas"><h2 className="border-b border-line px-5 py-3 font-semibold">Negociações arquivadas <span className="text-muted">{archived.length}</span></h2>{table(archived, "Nenhuma negociação arquivada.")}</section>
       {deal && <DealDialog key={deal.id + deal.stage + (deal.archivedAt ?? "")} deal={deal} customers={customers} accounts={accounts} cards={cards} balcoes={balcoes} avgSaleCpmCents={avgSaleCpmCents} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/* ---------------- Passos da emissão (modo guiado) ---------------- */
+
+/** Uma faixa no topo da emissão com a sequência de passos: o que já está feito, e o próximo destacado.
+ *  Clicar num passo rola até a seção dele. Reduz cliques e o "caçar botão". */
+function EmissionSteps({ deal }: { deal: DealView }) {
+  const verified = deal.faceCheck.status === "DONE" || deal.faceCheck.status === "NOT_NEEDED";
+  const steps = [
+    { label: "Passageiros", done: deal.passengersData.length > 0, section: "Página do comprador" as string | null },
+    ...(deal.telegramContact ? [{ label: "Termo", done: !!deal.termsSentAt, section: deal.ticket ? null : "Termo de emissão" }] : []),
+    { label: "Verificação", done: verified, section: "Verificação" },
+    { label: "Bilhete", done: !!deal.ticket, section: "Bilhete" },
+    { label: "Pagamento", done: !!deal.paidAt || !!deal.receipt, section: "Comprovante de pagamento" },
+  ];
+  const nextIdx = steps.findIndex((s) => !s.done);
+  const doneCount = steps.filter((s) => s.done).length;
+  const go = (section: string | null) => { if (section) document.querySelector(`[role=dialog] [aria-label="${section}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  return (
+    <section className="space-y-2 rounded-xl border border-line bg-panel2/40 p-3" aria-label="Passos da emissão">
+      <div className="flex items-center gap-2">
+        <h3 className="mr-auto text-sm font-semibold">Passos da emissão</h3>
+        <span className="text-xs tabular-nums text-muted">{doneCount}/{steps.length}</span>
+      </div>
+      <ol className="flex flex-wrap gap-1.5">
+        {steps.map((s, i) => {
+          const isNext = i === nextIdx;
+          return (
+            <li key={s.label}>
+              <button type="button" onClick={() => go(s.section)} aria-current={isNext ? "step" : undefined}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors ${s.done ? "border-green-500/40 bg-green-500/10 text-green-300" : isNext ? "border-accent-light bg-accent-soft text-white" : "border-line text-muted hover:text-zinc-100"}`}>
+                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-semibold ${s.done ? "bg-green-500 text-black" : isNext ? "bg-accent-light text-black" : "bg-panel text-muted"}`}>{s.done ? "✓" : i + 1}</span>
+                {s.label}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {nextIdx >= 0 ? (
+        <p className="text-xs text-muted">Próximo: <button type="button" className="font-medium text-accent-light hover:underline" onClick={() => go(steps[nextIdx]!.section)}>{steps[nextIdx]!.label}</button></p>
+      ) : (
+        <p className="text-xs text-green-300">Tudo pronto — emissão concluída e paga. ✅</p>
+      )}
+    </section>
   );
 }
 
