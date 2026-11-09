@@ -13,8 +13,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { matchAlerts, parseAlertWords, hasAdCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
-import { parseBalcaoAd, emissionProfit, normalizeText } from "@/domain/balcao-ads";
-import { balcaoOptions } from "@/domain/miles-deals";
+import { parseBalcaoAd, emissionProfit } from "@/domain/balcao-ads";
+import { balcaoForGroup } from "@/domain/miles-deals";
 import { createDeal, moveDeal } from "./miles-deals";
 import { emissionAccounts } from "./capacity";
 
@@ -471,7 +471,7 @@ export async function registerAdInCrm(userId: string, chatId: string, input: { m
   const profit = emissionProfit(ad, cpmCents, await emissionAccounts(userId));
   const group = c.title.trim() || "Balcão";
   const used = await prisma.milesDeal.findMany({ where: { userId, buyerType: "BALCAO" }, select: { customerName: true }, distinct: ["customerName"] });
-  const balcao = balcaoOptions(used.map((u) => u.customerName)).find((b) => normalizeText(group).includes(normalizeText(b))) ?? group;
+  const balcao = balcaoForGroup(group, used.map((u) => u.customerName));
   const notes = [
     `Pedido de ${input.sender} no grupo ${group}:`,
     input.text.trim().slice(0, 1500),

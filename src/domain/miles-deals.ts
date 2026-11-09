@@ -23,6 +23,21 @@ export function balcaoOptions(usedNames: string[]) {
   return [...new Set([...DEFAULT_BALCOES, ...usedNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
+/** Palavras do nome, minúsculas e sem acentos ("BALCÃO Milhas VIP - Pro" → ["balcao", "milhas", "vip", "pro"]). */
+const nameWords = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/** Balcão da negociação vinda de um grupo do Telegram: o da lista (padrões e já usados) cujo nome está inteiro no
+ *  nome do grupo, o mais completo ("BALCÃO MILHAS VIP PRO" → "Balcão Milhas VIP"); nome de uma palavra só
+ *  ("balcao") não vale. Sem nenhum, o nome do grupo. */
+export function balcaoForGroup(groupTitle: string, usedNames: string[]) {
+  const g = ` ${nameWords(groupTitle).join(" ")} `;
+  const match = balcaoOptions(usedNames)
+    .map((b) => ({ b, w: nameWords(b) }))
+    .filter(({ w }) => w.length >= 2 && g.includes(` ${w.join(" ")} `))
+    .sort((x, y) => y.w.length - x.w.length)[0];
+  return match?.b ?? groupTitle.trim();
+}
+
 /** Valor da venda: pontos pelo preço do milheiro. */
 export const dealTotalCents = (points: number | null, saleCpmCents: number | null) => (points && saleCpmCents ? Math.round((points * saleCpmCents) / 1000) : null);
 
