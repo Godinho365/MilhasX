@@ -17,6 +17,8 @@ import * as dmOpenRoute from "@/app/api/telegram/accounts/[id]/dms/route";
 import * as dmsRoute from "@/app/api/telegram/dms/route";
 import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
+import * as clearRoute from "@/app/api/telegram/accounts/[id]/clear/route";
+import * as dmClearRoute from "@/app/api/telegram/dms/[id]/clear/route";
 import * as msgRoute from "@/app/api/telegram/accounts/[id]/messages/[msgId]/route";
 import * as dmMsgRoute from "@/app/api/telegram/dms/[id]/messages/[msgId]/route";
 import * as holders from "@/app/api/holders/route";
@@ -422,5 +424,36 @@ describe("contas para emitir os pedidos (lucro)", () => {
     expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accs)).toMatchObject({ profitCents: 25_000, perCpfCents: 12_500 });
     // não cabe no saldo livre: nada
     expect(emissionProfit({ program: "LATAM", miles: 80_000, cpfs: 1 }, 2500, accs)).toBeNull();
+  });
+});
+
+describe("limpar o chat só no app", () => {
+  it("some com as mensagens até a escolhida; as novas aparecem; mostrar de novo traz tudo; no Telegram nada muda", async () => {
+    const a = await connected("11999998888", "-1001234");
+    const ids = async () => (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items.map((m: { id: number }) => m.id);
+    expect(await ids()).toEqual([1, 2, 3, 4]);
+    expect((await c.call(clearRoute.POST, "POST", "/x", { upTo: 4 }, { id: a })).status).toBe(200);
+    expect(await ids()).toEqual([]);
+    expect((await c.call(accounts.GET, "GET", "/x")).data.item.accounts[0].clearedUpTo).toBe(4);
+    // mensagem nova depois de limpar aparece
+    const sent = (await c.call(messagesRoute.POST, "POST", "/x", { text: "Bom dia" }, { id: a })).data.item;
+    expect(await ids()).toEqual([sent.id]);
+    // nada foi apagado no Telegram
+    expect(calls.some((x) => x.startsWith("remove"))).toBe(false);
+    await c.call(clearRoute.POST, "POST", "/x", { upTo: null }, { id: a });
+    expect(await ids()).toEqual([1, 2, 3, 4, sent.id]);
+
+    // no privado
+    const dm = (await c.call(dmOpenRoute.POST, "POST", "/x", { messageId: 1 }, { id: a })).data.item;
+    const oi = (await c.call(dmMessagesRoute.POST, "POST", "/x", { text: "Oi" }, { id: dm.id })).data.item;
+    await c.call(dmClearRoute.POST, "POST", "/x", { upTo: oi.id }, { id: dm.id });
+    expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items).toEqual([]);
+    expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items[0].clearedUpTo).toBe(oi.id);
+
+    // de outro usuário: não
+    const o = new Client();
+    await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
+    expect((await o.call(clearRoute.POST, "POST", "/x", { upTo: 1 }, { id: a })).status).toBe(404);
+    expect((await o.call(dmClearRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
   });
 });

@@ -5,7 +5,7 @@
 // o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
@@ -13,8 +13,8 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
 import { BALCAO_PROGRAMS, emissionProfit, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
 
-type Chat = { id: string; title: string; account: string };
-export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null };
+type Chat = { id: string; title: string; account: string; clearedUpTo?: number | null };
+export type Dm = { id: string; linkId: string; name: string; username: string | null; via: string; group: string | null; clearedUpTo?: number | null };
 type Msg = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; ad: BalcaoAd | null; alerts: string[] };
 type FeedMsg = Msg & { chatId: string; chat: string };
 /** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
@@ -146,6 +146,9 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
   const [opening, setOpening] = useState<number | null>(null);
   const [replying, setReplying] = useState<Msg | null>(null); // a mensagem que vai ser respondida (contraproposta)
   const [editing, setEditing] = useState<Msg | null>(null); // a sua mensagem que está sendo editada
+  // limpo só no app até esta mensagem (no Telegram nada muda)
+  const [cleared, setCleared] = useState<number | null>((group ? source.chat.clearedUpTo : source.dm.clearedUpTo) ?? null);
+  const clearUrl = group ? `/api/telegram/accounts/${source.chat.id}/clear` : `/api/telegram/dms/${source.dm.id}/clear`;
   const input = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // rolando junto com as mensagens novas (o usuário não subiu para ler as antigas)
@@ -220,6 +223,26 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
     setMsgs((cur) => (cur ?? []).filter((x) => x.id !== m.id));
     toast("Mensagem excluída");
   }
+  /** Limpa o chat só aqui: as mensagens até agora somem da tela; as novas continuam chegando. */
+  async function clearChat() {
+    const last = msgs?.at(-1)?.id;
+    if (!last) return;
+    const ok = await confirmDialog({ title: "Limpar este chat?", body: "As mensagens somem só daqui do app; no Telegram continuam. As novas continuam aparecendo, e dá para mostrar as antigas de novo.", confirmLabel: "Limpar" });
+    if (!ok) return;
+    const r = await api(clearUrl, "POST", { upTo: last });
+    if (!r.ok) return toast(r.erro, "error");
+    cancel();
+    setCleared(last);
+    setMsgs([]);
+    toast("Chat limpo");
+  }
+  async function showAgain() {
+    const r = await api(clearUrl, "POST", { upTo: null });
+    if (!r.ok) return toast(r.erro, "error");
+    setCleared(null);
+    stick.current = true;
+    setMsgs(null); // carrega de novo as últimas mensagens
+  }
   async function dm(id: number) {
     if (!onDm) return;
     setOpening(id);
@@ -247,12 +270,19 @@ function ChatView({ source, visible, onDm, accounts = [] }: { source: Source; vi
             <input type="checkbox" checked={onlyAds} onChange={(e) => setOnlyAds(e.target.checked)} />Só pedidos
           </label>
         )}
+        <button type="button" className="btn-subtle h-8 gap-1 px-2 text-xs" onClick={clearChat} disabled={!msgs?.length} aria-label="Limpar o chat aqui" title="Limpa só aqui no app; no Telegram as mensagens continuam"><Eraser className="h-4 w-4" />Limpar</button>
         <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => void load()} disabled={loading} aria-label="Atualizar agora" title="Atualizar agora"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
       </div>
+      {cleared != null && (
+        <div className="flex items-center gap-2 border-b border-line bg-panel2 px-4 py-1.5 text-xs text-muted">
+          <Eraser className="h-3.5 w-3.5" />Chat limpo aqui: aparecem só as mensagens novas.
+          <button type="button" onClick={showAgain} className="font-medium text-accent-light hover:underline">Mostrar de novo</button>
+        </div>
+      )}
       {erro && <div className="p-3"><Alert>{erro}</Alert></div>}
       <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[58vh] space-y-2 overflow-y-auto p-4">
         {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
-          : shown.length === 0 ? <p className="text-sm text-muted">{onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
+          : shown.length === 0 ? <p className="text-sm text-muted">{cleared != null && !msgs?.length ? "Chat limpo. As mensagens novas aparecem aqui." : onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
           : shown.map((m) => (
             <Bubble key={m.id} m={m} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} offers={m.ad ? offers.get(m.id) : undefined}
               profit={group && m.ad ? emissionProfit(m.ad, m.ad.cpmCents, accounts) : null}

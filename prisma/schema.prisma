@@ -160,6 +160,7 @@ model TelegramLink {
   groupId       String? // grupo do balcão escolhido
   groupTitle    String?
   groupPeer     Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
+  clearedUpTo   Int? // chat limpo no app até esta mensagem (no Telegram nada muda)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   dms           TelegramDm[]
@@ -178,9 +179,10 @@ model TelegramDm {
   link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
   peerId    String // id da pessoa no Telegram
   peerHash  String // hash de acesso dela para esta conta (para ler e mandar mensagem)
-  name      String
-  username  String?
-  createdAt DateTime     @default(now())
+  name        String
+  username    String?
+  clearedUpTo Int? // conversa limpa no app até esta mensagem (no Telegram nada muda)
+  createdAt   DateTime     @default(now())
 
   @@unique([linkId, peerId])
   @@index([userId])

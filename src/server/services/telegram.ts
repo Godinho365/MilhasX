@@ -285,6 +285,7 @@ const view = (l: Link) => ({
   codeViaApp: l.codeViaApp,
   accountName: l.accountName,
   group: l.groupId ? { id: l.groupId, title: l.groupTitle ?? "" } : null,
+  clearedUpTo: l.clearedUpTo, // chat limpo no app até esta mensagem
 });
 export type TelegramAccountView = ReturnType<typeof view>;
 
@@ -401,8 +402,9 @@ const activeAlerts = (userId: string): Promise<AlertRule[]> => prisma.telegramAl
 export async function chatMessages(userId: string, id: string, opts: { limit?: number; minId?: number } = {}) {
   const l = await activeLink(userId, id);
   const peer = await groupPeer(l);
+  const minId = Math.max(opts.minId ?? 0, l.clearedUpTo ?? 0) || undefined; // limpo no app: só o que veio depois
   const [msgs, rules] = await Promise.all([
-    guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId }))),
+    guardSession(l, () => withPooled(l, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
     activeAlerts(userId),
   ]);
   return msgs.map((m) => {
@@ -440,6 +442,12 @@ export async function editGroupMessage(userId: string, id: string, messageId: nu
   return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
 }
 
+/** Limpa o chat do grupo só no app (até a mensagem upTo; null = mostra tudo de novo). No Telegram nada muda. */
+export async function clearGroupChat(userId: string, id: string, upTo: number | null) {
+  await own(userId, id);
+  await prisma.telegramLink.update({ where: { id }, data: { clearedUpTo: upTo } });
+}
+
 /** Exclui a mensagem da conta no grupo do balcão, para todos. */
 export async function deleteGroupMessage(userId: string, id: string, messageId: number) {
   const l = await activeLink(userId, id);
@@ -449,8 +457,8 @@ export async function deleteGroupMessage(userId: string, id: string, messageId: 
 
 /* ---------------- Privado ---------------- */
 
-const dmView = (d: { id: string; linkId: string; name: string; username: string | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
-  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle,
+const dmView = (d: { id: string; linkId: string; name: string; username: string | null; clearedUpTo: number | null; link: { groupTitle: string | null; accountName: string | null; phone: string } }) => ({
+  id: d.id, linkId: d.linkId, name: d.name, username: d.username, via: d.link.accountName ?? maskPhone(d.link.phone), group: d.link.groupTitle, clearedUpTo: d.clearedUpTo,
 });
 const DM_INCLUDE = { link: { select: { groupTitle: true, accountName: true, phone: true, status: true } } } as const;
 
@@ -490,7 +498,8 @@ async function ownDm(userId: string, dmId: string) {
 export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number } = {}) {
   const d = await ownDm(userId, dmId);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
-  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId: opts.minId })));
+  const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined; // limpa no app: só o que veio depois
+  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId })));
   return msgs.map(plain);
 }
 
@@ -511,6 +520,12 @@ export async function changeDmMessage(userId: string, dmId: string, messageId: n
   }
   const text = messageText(raw);
   return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.edit(peer, messageId, text))));
+}
+
+/** Limpa a conversa no privado só no app (até a mensagem upTo; null = mostra tudo de novo). */
+export async function clearDmChat(userId: string, dmId: string, upTo: number | null) {
+  const { count } = await prisma.telegramDm.updateMany({ where: { id: dmId, userId }, data: { clearedUpTo: upTo } });
+  if (!count) throw new DomainError(404, "Conversa não encontrada");
 }
 
 /** Fecha a conversa aqui (no Telegram ela continua). */

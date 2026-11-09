@@ -15,7 +15,7 @@ export default async function ChatBalcoesPage() {
   const [st, alerts, dms, accounts] = await Promise.all([telegramStatus(user.id), listTelegramAlerts(user.id), listTelegramDms(user.id), emissionAccounts(user.id)]);
   const chats = st.accounts
     .filter((a) => a.status === "ACTIVE" && a.group)
-    .map((a) => ({ id: a.id, title: a.group!.title, account: a.accountName ?? a.phone }));
+    .map((a) => ({ id: a.id, title: a.group!.title, account: a.accountName ?? a.phone, clearedUpTo: a.clearedUpTo }));
   return (
     <>
       <PageHeader title="Chat Balcões" subtitle="As mensagens dos grupos dos balcões, com alertas" />
