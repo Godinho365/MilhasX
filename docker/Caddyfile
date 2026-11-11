@@ -1,0 +1,8 @@
+gomilhasx.com {
+	encode zstd gzip
+	reverse_proxy app:3100
+}
+
+www.gomilhasx.com {
+	redir https://gomilhasx.com{uri} permanent
+}
