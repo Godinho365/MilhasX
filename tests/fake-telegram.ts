@@ -1,7 +1,7 @@
 // Telegram simulado para o gateway do Chat Balcões (e os testes de tempo real): o histórico de cada chat e os eventos
 // mandados a quem está conectado. Nada sai para o Telegram de verdade.
 import type { TgClient, TgPeer } from "@/server/services/telegram";
-import { peerKey, type LiveClient, type LiveEvent, type LiveMessage } from "@/gateway/live";
+import { peerKey, type ChannelDiff, type LiveClient, type LiveEvent, type LiveMessage } from "@/gateway/live";
 
 export const rpcErr = (errorMessage: string, seconds?: number) => Object.assign(new Error(errorMessage), { errorMessage, ...(seconds ? { seconds } : {}) });
 export const iso = (min: number) => new Date(Date.UTC(2026, 10, 11, 12, min)).toISOString();
@@ -25,6 +25,17 @@ export class FakeTelegram {
   failPing = false;
   failMessages: Error | null = null;
   calls: string[] = [];
+  /** Supergrupo: cada mudança aumenta o contador (pts); a diferença devolve as mudanças depois de um contador. */
+  ops = new Map<string, { pts: number; kind: "new" | "edit" | "delete"; m?: LiveMessage; ids?: number[] }[]>();
+  diffCalls = 0;
+  diffTimeout = 1;
+  private bump(peer: TgPeer, op: { kind: "new" | "edit" | "delete"; m?: LiveMessage; ids?: number[] }) {
+    if (peer.kind !== "channel") return;
+    const k = peerKey(peer);
+    const list = this.ops.get(k) ?? [];
+    list.push({ pts: (list.at(-1)?.pts ?? 100) + 1, ...op, ...(op.m ? { m: { ...op.m } } : {}) });
+    this.ops.set(k, list);
+  }
   files: { name: string; size: number }[] = [];
   private nextId = 5000;
 
@@ -37,15 +48,18 @@ export class FakeTelegram {
   add(peer: TgPeer, m: LiveMessage, emit = true) {
     this.list(peer).push(m);
     this.list(peer).sort((a, b) => a.id - b.id);
+    this.bump(peer, { kind: "new", m });
     if (emit) for (const l of this.listeners) l({ kind: "new", peerId: peerKey(peer), message: { ...m }, receivedAt: Date.now() }); // como o GramJS: um objeto por evento
   }
   edit(peer: TgPeer, id: number, text: string, editDate: string, emit = true) {
     const m = this.list(peer).find((x) => x.id === id)!;
     Object.assign(m, { text, editDate });
+    this.bump(peer, { kind: "edit", m });
     if (emit) for (const l of this.listeners) l({ kind: "edit", peerId: peerKey(peer), message: { ...m }, receivedAt: Date.now() });
   }
   remove(peer: TgPeer, ids: number[], emit = true) {
     this.chats.set(peerKey(peer), this.list(peer).filter((m) => !ids.includes(m.id)));
+    this.bump(peer, { kind: "delete", ids });
     if (emit) for (const l of this.listeners) l({ kind: "delete", peerId: peer.kind === "channel" ? peerKey(peer) : null, ids, receivedAt: Date.now() });
   }
 
@@ -96,6 +110,18 @@ export class FakeTelegram {
         const all = self.list(peer);
         if (reverse) return all.filter((m) => m.id > (minId ?? 0)).slice(0, limit).map((m) => ({ ...m }));
         return all.filter((m) => !minId || m.id > minId).slice(-limit).map((m) => ({ ...m }));
+      },
+      channelPts: async (peer) => self.ops.get(peerKey(peer))?.at(-1)?.pts ?? 100,
+      channelDiff: async (peer, pts): Promise<ChannelDiff> => {
+        self.diffCalls++;
+        const list = (self.ops.get(peerKey(peer)) ?? []).filter((o) => o.pts > pts);
+        const page = list.slice(0, 100);
+        return {
+          pts: page.at(-1)?.pts ?? pts, timeout: self.diffTimeout, final: list.length <= 100, tooLong: false,
+          newMessages: page.filter((o) => o.kind === "new").map((o) => ({ ...o.m! })),
+          edits: page.filter((o) => o.kind === "edit").map((o) => ({ ...o.m! })),
+          deleted: page.filter((o) => o.kind === "delete").flatMap((o) => o.ids!),
+        };
       },
       stop: async () => { if (mine) self.listeners.delete(mine); },
     };

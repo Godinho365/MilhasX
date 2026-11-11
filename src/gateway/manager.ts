@@ -12,18 +12,27 @@ import { SESSION_ENDED, type TgClient, type TgMessage, type TgPeer } from "@/ser
 import { RPC_METHODS, type RpcMethod } from "@/server/telegram-rpc";
 import { userChannel, type Bus } from "./bus";
 import { peerKey, type LiveClient, type LiveEvent, type LiveFactory, type LiveMessage } from "./live";
-import { Router, catchUpChat, ingestDelete, ingestMessage, prune } from "./store";
+import { Router, catchUpChat, ingestDelete, ingestMessage, prune, type ChatTarget } from "./store";
 
 export type LinkState = "starting" | "connected" | "backoff" | "revoked" | "stopped";
 export type LinkStatus = { state: LinkState; since: string; lastEventAt: string | null; lastCatchupAt: string | null; reconnects: number; error: string | null };
 
 /** Esperas entre tentativas de reconectar (a última se repete). */
 const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
-export type Timings = { leaderTtlMs: number; leaderEveryMs: number; refreshEveryMs: number; pingEveryMs: number; pingTimeoutMs: number; catchupEveryMs: number; statusEveryMs: number; pruneEveryMs: number; startTimeoutMs: number; backoffMs: number[] };
+export type Timings = { leaderTtlMs: number; leaderEveryMs: number; refreshEveryMs: number; pingEveryMs: number; pingTimeoutMs: number; catchupEveryMs: number; statusEveryMs: number; pruneEveryMs: number; startTimeoutMs: number; backoffMs: number[]; channelMinMs: number; channelMaxMs: number; channelPushedMs: number; channelStatsEveryMs: number };
 export const DEFAULT_TIMINGS: Timings = {
   leaderTtlMs: 30_000, leaderEveryMs: 10_000, refreshEveryMs: 15_000, pingEveryMs: 60_000, pingTimeoutMs: 20_000,
   catchupEveryMs: 10 * 60_000, statusEveryMs: 30_000, pruneEveryMs: 3600_000, startTimeoutMs: 45_000, backoffMs: BACKOFF_MS,
+  // diferença de supergrupo: entre 1 e 2 s quando o Telegram não está empurrando os eventos do chat; 15 s (só rede de
+  // segurança) quando está. TG_CHANNEL_MIN_MS ajusta o mínimo.
+  channelMinMs: Number(process.env.TG_CHANNEL_MIN_MS) || 1000, channelMaxMs: 2000, channelPushedMs: 15_000, channelStatsEveryMs: 5 * 60_000,
 };
+/** Sem evento empurrado de um supergrupo há este tempo: o Telegram não está empurrando; a diferença acelera. */
+const PUSH_FRESH_MS = 60_000;
+
+/** Um supergrupo acompanhado pela diferença de canal: o contador, quando chegou o último evento empurrado e os números
+ *  do período (para o log). */
+type ChannelSync = { chat: ChatTarget; pts: number | null; lastPushAt: number; minMs: number; timer?: ReturnType<typeof setTimeout>; stats: { calls: number; viaDiff: number; viaPush: number; floods: number; lastTimeout: number | null } };
 
 const errMsg = (e: unknown) => (e && typeof e === "object" && "errorMessage" in e ? String((e as { errorMessage: unknown }).errorMessage) : e instanceof Error ? e.message : String(e));
 const withTimeout = <T>(p: Promise<T>, ms: number, what: string) => {
@@ -43,6 +52,7 @@ class LinkRunner {
   private gen = 0; // cada (re)conexão tem um número: timers e eventos da anterior são ignorados
   ready: Promise<void>;
   private resolveReady!: () => void;
+  private channels = new Map<string, ChannelSync>();
 
   constructor(private gw: Gateway, readonly linkId: string, readonly userId: string, readonly sessionEnc: string) {
     this.ready = new Promise((r) => { this.resolveReady = r; });
@@ -81,7 +91,8 @@ class LinkRunner {
       this.resolveReady();
       this.every(t.pingEveryMs, () => void this.watchdog(gen));
       this.every(t.catchupEveryMs, () => void this.catchUp(gen));
-      void this.catchUp(gen);
+      this.every(t.channelStatsEveryMs, () => this.logChannelStats());
+      void this.catchUp(gen).then(() => this.syncChannels(gen));
     } catch (e) {
       if (gen === this.gen) await this.fail(e);
     }
@@ -114,6 +125,8 @@ class LinkRunner {
 
   private async teardown() {
     this.gen++;
+    for (const ch of this.channels.values()) clearTimeout(ch.timer);
+    this.channels.clear();
     for (const t of this.timers.splice(0)) clearTimeout(t); // no Node serve para setTimeout e setInterval
     const live = this.live;
     this.live = null;
@@ -130,6 +143,8 @@ class LinkRunner {
     if (e.kind === "delete") return void (await ingestDelete(this.gw.bus, this.gw.router, this.linkId, e.peerId, e.ids, e.receivedAt));
     const chat = await this.gw.router.route(this.linkId, e.peerId);
     if (!chat) return; // chat que o app não acompanha
+    const ch = this.channels.get(chat.id);
+    if (ch) { ch.lastPushAt = Date.now(); ch.stats.viaPush++; } // o Telegram está empurrando este supergrupo
     if (e.kind === "read") {
       // checks de leitura: só avisa (a tela pergunta de novo ao abrir a conversa)
       if (chat.kind === "DM") await this.gw.bus.publish(userChannel(chat.userId), { type: "dm.read", chatKind: "DM", chatId: chat.id, maxId: e.maxId, receivedAt: e.receivedAt }).catch(() => {});
@@ -159,6 +174,85 @@ class LinkRunner {
     this.status.lastCatchupAt = new Date().toISOString();
     log("info", "tg.catchup", { linkId: this.linkId, chats: groups.length + watched.size, created, updated, deleted });
     this.gw.reportStatus(this);
+    if (this.channels.size) void this.syncChannels(gen); // grupo novo no app desde a última vez
+  }
+
+  /* ---------- Diferença de supergrupo (o Telegram não empurra tudo de grupo grande) ---------- */
+
+  /** Começa a acompanhar cada supergrupo da conta que ainda não está sendo acompanhado (e larga os que saíram). */
+  async syncChannels(gen = this.gen) {
+    if (gen !== this.gen || !this.live?.channelDiff || !this.live.channelPts) return;
+    const { groups } = await this.gw.router.chats(this.linkId);
+    const ids = new Set(groups.map((g) => g.id));
+    for (const [id, ch] of this.channels) if (!ids.has(id)) { clearTimeout(ch.timer); this.channels.delete(id); }
+    for (const chat of groups) {
+      if (chat.peer.kind !== "channel" || this.channels.has(chat.id)) continue;
+      const ch: ChannelSync = { chat, pts: null, lastPushAt: 0, minMs: this.gw.timings.channelMinMs, stats: { calls: 0, viaDiff: 0, viaPush: 0, floods: 0, lastTimeout: null } };
+      this.channels.set(chat.id, ch);
+      void this.channelTick(ch, gen);
+    }
+  }
+
+  private scheduleChannel(ch: ChannelSync, gen: number, ms: number) {
+    clearTimeout(ch.timer);
+    ch.timer = setTimeout(() => void this.channelTick(ch, gen), ms);
+    ch.timer.unref?.();
+  }
+
+  /** Uma volta: pede o que mudou desde o contador, grava (pela fila da conta) e marca a próxima volta. */
+  private async channelTick(ch: ChannelSync, gen: number) {
+    const live = this.live;
+    if (gen !== this.gen || !live?.channelDiff || !live.channelPts || this.channels.get(ch.chat.id) !== ch) return;
+    const t = this.gw.timings;
+    try {
+      if (ch.pts == null) {
+        ch.pts = await live.channelPts(ch.chat.peer);
+        if (ch.pts == null) return this.scheduleChannel(ch, gen, 60_000); // sem contador: tenta de novo depois
+      }
+      ch.stats.calls++;
+      const d = await live.channelDiff(ch.chat.peer, ch.pts);
+      const receivedAt = Date.now();
+      if (gen !== this.gen) return;
+      ch.stats.lastTimeout = d.timeout;
+      if (d.tooLong) {
+        await this.enqueue(() => catchUpChat(this.gw.bus, live, ch.chat)); // ficou atrás demais: relê o chat
+      } else if (d.newMessages.length || d.edits.length || d.deleted.length) {
+        await this.enqueue(async () => {
+          for (const m of d.newMessages) if ((await ingestMessage(this.gw.bus, ch.chat, m, "new", receivedAt)) === "created") ch.stats.viaDiff++;
+          for (const m of d.edits) await ingestMessage(this.gw.bus, ch.chat, m, "edit", receivedAt);
+          if (d.deleted.length) await ingestDelete(this.gw.bus, this.gw.router, this.linkId, peerKey(ch.chat.peer), d.deleted, receivedAt);
+        });
+      }
+      ch.pts = d.pts;
+      if (!d.final) return this.scheduleChannel(ch, gen, 0); // tem mais: continua já
+      const pushed = Date.now() - ch.lastPushAt < PUSH_FRESH_MS;
+      // o ritmo que o Telegram sugere, limitado a 2 s; nunca abaixo do mínimo (que sobe se ele pedir calma)
+      const suggested = (d.timeout ?? 0) * 1000;
+      const wait = pushed ? t.channelPushedMs : Math.min(Math.max(ch.minMs, suggested), Math.max(ch.minMs, t.channelMaxMs));
+      this.scheduleChannel(ch, gen, wait);
+    } catch (e) {
+      const msg = errMsg(e);
+      if (SESSION_ENDED.includes(msg)) return void (await this.fail(e));
+      const seconds = e && typeof e === "object" && "seconds" in e ? Number((e as { seconds: unknown }).seconds) || 0 : 0;
+      if (seconds || msg.startsWith("FLOOD")) {
+        // o Telegram pediu calma: espera o que ele mandou e volta mais devagar neste chat
+        ch.stats.floods++;
+        ch.minMs = Math.min(ch.minMs * 2, 30_000);
+        log("warn", "tg.channel_flood", { linkId: this.linkId, seconds, minMs: ch.minMs });
+        return this.scheduleChannel(ch, gen, Math.max(seconds * 1000, ch.minMs));
+      }
+      if (msg === "CHANNEL_INVALID" || msg === "CHANNEL_PRIVATE") ch.pts = null;
+      log("warn", "tg.channel_diff_failed", { linkId: this.linkId, error: msg });
+      this.scheduleChannel(ch, gen, 5_000);
+    }
+  }
+
+  /** De quantos em quantos minutos: por supergrupo, quantas mensagens vieram pela diferença e quantas empurradas. */
+  private logChannelStats() {
+    for (const ch of this.channels.values()) {
+      log("info", "tg.channel_stats", { linkId: this.linkId, chatId: ch.chat.id, ...ch.stats, minMs: ch.minMs, pushing: Date.now() - ch.lastPushAt < PUSH_FRESH_MS });
+      ch.stats = { calls: 0, viaDiff: 0, viaPush: 0, floods: 0, lastTimeout: ch.stats.lastTimeout };
+    }
   }
 
   /** O que a mensagem mandada pelo app vira no banco na hora (sem esperar o evento do Telegram voltar). */

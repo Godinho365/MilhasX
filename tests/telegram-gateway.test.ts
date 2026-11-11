@@ -189,6 +189,54 @@ describe("gateway: conexão permanente, eventos, reconexão e liderança", () =>
   });
 });
 
+describe("supergrupo que o Telegram não empurra (grupo grande)", () => {
+  const SYNC = { ...FAST, channelMinMs: 50, channelMaxMs: 100, channelPushedMs: 2000 };
+
+  it("a diferença do canal traz nova, editada e apagada em instantes, sem esperar a recuperação de 10 min", async () => {
+    gw = new Gateway({ factory: tgFake.factory, bus, timings: SYNC });
+    await gw.start();
+    await waitFor(() => gw!.runner(linkId)?.status.state === "connected");
+    await waitFor(() => tgFake.diffCalls > 0); // começou a acompanhar
+    const at = Date.now();
+    tgFake.add(GROUP, lm(60, "Compro 120k LATAM 24"), false); // o Telegram NÃO empurrou o evento
+    await waitFor(async () => (await prisma.telegramMessage.count({ where: { msgId: 60 } })) === 1, 2000);
+    expect(Date.now() - at).toBeLessThan(1000);
+    tgFake.edit(GROUP, 60, "Compro 120k LATAM 23", iso(50), false);
+    await waitFor(async () => (await rows({ msgId: 60 }))[0]?.text === "Compro 120k LATAM 23", 2000);
+    tgFake.remove(GROUP, [60], false);
+    await waitFor(async () => (await rows({ msgId: 60 }))[0]?.deletedAt != null, 2000);
+    expect(types().filter((t) => t.endsWith(":60"))).toEqual(["message.new:60", "message.edit:60", "message.delete:60"]);
+  });
+
+  it("quando o Telegram empurra e a diferença também traz, grava e avisa uma vez só; e a diferença desacelera", async () => {
+    gw = new Gateway({ factory: tgFake.factory, bus, timings: SYNC });
+    await gw.start();
+    await waitFor(() => tgFake.diffCalls > 0);
+    for (let i = 0; i < 5; i++) tgFake.add(GROUP, lm(70 + i, `pedido ${i}`)); // empurrado E na diferença
+    await waitFor(async () => (await prisma.telegramMessage.count({ where: { msgId: { gte: 70, lte: 74 } } })) === 5);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(types().filter((t) => /:7[0-4]$/.test(t))).toEqual(["message.new:70", "message.new:71", "message.new:72", "message.new:73", "message.new:74"]);
+    // com eventos empurrados chegando, a diferença vira só rede de segurança (bem mais devagar)
+    const before = tgFake.diffCalls;
+    await new Promise((r) => setTimeout(r, 600));
+    expect(tgFake.diffCalls - before).toBeLessThanOrEqual(1);
+  });
+
+  it("o Telegram pede calma (FLOOD_WAIT): espera e segue mais devagar, sem derrubar a conta", async () => {
+    gw = new Gateway({ factory: tgFake.factory, bus, timings: SYNC });
+    await gw.start();
+    await waitFor(() => tgFake.diffCalls > 0);
+    const r = gw.runner(linkId)!;
+    const live = r.live!;
+    const orig = live.channelDiff!;
+    let floods = 0;
+    live.channelDiff = async (p, pts) => { if (floods++ === 0) throw rpcErr("FLOOD_WAIT_1", 1); return orig(p, pts); };
+    tgFake.add(GROUP, lm(80, "depois da calma"), false);
+    await waitFor(async () => (await prisma.telegramMessage.count({ where: { msgId: 80 } })) === 1, 4000);
+    expect(r.status.state).toBe("connected");
+  });
+});
+
 describe("site pelo gateway (rede interna)", () => {
   async function serve() {
     gw = new Gateway({ factory: tgFake.factory, bus, timings: FAST });
