@@ -564,7 +564,7 @@ describe("contraproposta no privado ligada ao pedido", () => {
     // no privado o pedido encaminhado vem lido e a contraproposta responde a ele
     const msgs = (await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items;
     expect(msgs).toEqual([
-      expect.objectContaining({ id: fwdId, fwd: true, ad: expect.objectContaining({ program: "LATAM", miles: 100_000, cpmCents: 2500 }) }),
+      expect.objectContaining({ id: fwdId, fwd: true, ad: expect.objectContaining({ program: "LATAM", miles: 100_000, cpmCents: 2500 }), origin: { chatId: a, messageId: 1 } }),
       expect.objectContaining({ text: "24,50", replyTo: fwdId, ad: null }),
     ]);
     // ainda sem resposta: nada não visto
@@ -589,6 +589,21 @@ describe("contraproposta no privado ligada ao pedido", () => {
     expect((await o.call(seenRoute.POST, "POST", "/x", { upTo: 1 }, { id: dm.id })).status).toBe(404);
     expect((await o.call(offerDmRoute.POST, "POST", "/x", { messageId: 1, text: "20" }, { id: a })).status).toBe(404);
     expect((await o.call(unreadRoute.GET, "GET", "/x")).data.items).toEqual([]);
+  });
+
+  it("cada pedido encaminhado lembra a mensagem do grupo de onde veio (botão Ver no grupo)", async () => {
+    const a = await connected("11999998888", "-1001234");
+    MSGS["1234"]!.push(msg(5, 14, "Ana", "Compro 50k LATAM 1 CPF 24")); // outro pedido da Ana
+    try {
+      const first = (await c.call(offerDmRoute.POST, "POST", "/x", { messageId: 1, text: "24,50" }, { id: a })).data.item.dm;
+      const second = (await c.call(offerDmRoute.POST, "POST", "/x", { messageId: 5, text: "25" }, { id: a })).data.item.dm;
+      expect(second.id).toBe(first.id); // a mesma conversa
+      const items = (await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: first.id })).data.items as { fwd?: boolean; origin?: unknown }[];
+      expect(items.filter((m) => m.fwd).map((m) => m.origin)).toEqual([{ chatId: a, messageId: 1 }, { chatId: a, messageId: 5 }]);
+      expect(items.filter((m) => !m.fwd).every((m) => m.origin === undefined)).toBe(true); // contraproposta não tem
+    } finally {
+      MSGS["1234"]!.pop();
+    }
   });
 
   it("grupo que não deixa encaminhar: manda só a contraproposta e guarda o texto do pedido", async () => {

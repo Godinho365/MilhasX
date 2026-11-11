@@ -722,9 +722,25 @@ export async function dmMessages(userId: string, dmId: string, opts: { limit?: n
     msgs: await c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }),
     readMax: await c.readOutboxMaxId(peer).catch(() => 0), // até onde a pessoa já leu as suas mensagens
   })));
-  const items = msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] } : plain(m)));
+  // pedido encaminhado: de qual mensagem do grupo veio (os antigos, sem o registro, só se for o pedido da contraproposta)
+  const links = offerLinksOf(d.offerLinks);
+  const offer = d.offer as DmOffer | null;
+  const originOf = (m: TgMessage): DmOrigin | null => {
+    const l = links.find((x) => x.fwdId === m.id);
+    if (l) return { chatId: l.chatId, messageId: l.messageId };
+    return offer && m.text.trim() === offer.text.trim() ? { chatId: offer.chatId, messageId: offer.messageId } : null;
+  };
+  const items = msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[], origin: originOf(m) } : plain(m)));
   return { items, readMax };
 }
+
+/** De onde veio o pedido encaminhado para o privado: o grupo (no Chat Balcões) e a mensagem lá. */
+export type DmOrigin = { chatId: string; messageId: number };
+type OfferLink = DmOrigin & { fwdId: number };
+/** Quantos pedidos encaminhados a conversa lembra (os mais novos). */
+const MAX_OFFER_LINKS = 50;
+const offerLinksOf = (v: Prisma.JsonValue | null): OfferLink[] =>
+  (Array.isArray(v) ? v : []).filter((x): x is OfferLink => !!x && typeof x === "object" && typeof (x as OfferLink).fwdId === "number" && typeof (x as OfferLink).chatId === "string" && typeof (x as OfferLink).messageId === "number");
 
 /**
  * Contraproposta no privado de quem postou o pedido, pela conta do grupo: encaminha o pedido para a conversa e manda
@@ -749,7 +765,11 @@ export async function sendOfferDm(userId: string, chatId: string, messageId: num
   const offer: DmOffer = { chatId, messageId, text: (fwd?.text || adText).slice(0, 1500), sender: d.name, group: c.title, cpmCents: parseCounterOffer(text), at: sent.date };
   const updated = await prisma.telegramDm.update({
     where: { id: d.id },
-    data: { offer: offer as unknown as Prisma.InputJsonValue, offerAt: new Date(), closed: false, seenUpTo: sent.id },
+    data: {
+      offer: offer as unknown as Prisma.InputJsonValue, offerAt: new Date(), closed: false, seenUpTo: sent.id,
+      // o pedido encaminhado lembra de onde veio (botão "Ver no grupo" e as contrapropostas dos outros no privado)
+      ...(fwd ? { offerLinks: [...offerLinksOf(d.offerLinks).filter((l) => l.fwdId !== fwd!.id), { fwdId: fwd.id, chatId, messageId }].slice(-MAX_OFFER_LINKS) as unknown as Prisma.InputJsonValue } : {}),
+    },
     include: DM_INCLUDE,
   });
   return { dm: dmView(updated), forwarded: !!fwd, message: plain(sent) };

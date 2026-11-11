@@ -203,6 +203,7 @@ model TelegramDm {
   seenUpTo    Int? // mensagens vistas no app até esta (as dela depois disso contam como não vistas)
   offerAt     DateTime? // quando você mandou a contraproposta no privado
   offer       Json? // o pedido da contraproposta: { chatId, messageId, text, sender, group, cpmCents }
+  offerLinks  Json? // pedidos encaminhados para cá: [{ fwdId, chatId, messageId }] (para ir ao pedido no grupo)
   createdAt   DateTime     @default(now())
 
   @@unique([linkId, peerId])
