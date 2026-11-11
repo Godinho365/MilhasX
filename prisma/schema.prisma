@@ -140,6 +140,8 @@ model User {
   milesLeads          MilesLead[]
   contractSignatures  ContractSignature[]
   telegramLinks       TelegramLink[]
+  telegramMessages    TelegramMessage[]
+  telegramEvents      TelegramEvent[]
   telegramGroups      TelegramGroup[]
   telegramAlerts      TelegramAlert[]
   telegramDms         TelegramDm[]
@@ -149,19 +151,20 @@ model User {
 /// criptografada (CREDENTIALS_KEY). O login é em etapas: código enviado → (senha de duas etapas) → ativa. Um número
 /// por usuário. Cada conta tem os seus grupos de balcão (TelegramGroup).
 model TelegramLink {
-  id            String          @id @default(cuid())
+  id            String            @id @default(cuid())
   userId        String
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionEnc    String // sessão do Telegram, criptografada
-  status        String          @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
+  status        String            @default("CODE_SENT") // CODE_SENT | PASSWORD_NEEDED | ACTIVE
   phone         String // número usado no login (+55...)
   phoneCodeHash String? // da etapa do código (sai quando o login termina)
-  codeViaApp    Boolean         @default(true) // o código chegou no app do Telegram (senão, por SMS)
+  codeViaApp    Boolean           @default(true) // o código chegou no app do Telegram (senão, por SMS)
   accountName   String? // conta conectada (nome e @usuário)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
   groups        TelegramGroup[]
   dms           TelegramDm[]
+  messages      TelegramMessage[]
 
   @@unique([userId, phone])
   @@index([userId])
@@ -169,17 +172,20 @@ model TelegramLink {
 
 /// Grupo de balcão escolhido numa conta do Telegram: cada um é uma aba (um chat) no Chat Balcões.
 model TelegramGroup {
-  id          String       @id @default(cuid())
+  id          String            @id @default(cuid())
   userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   linkId      String
-  link        TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  link        TelegramLink      @relation(fields: [linkId], references: [id], onDelete: Cascade)
   groupId     String // id do grupo no Telegram
   title       String
   peer        Json? // como chegar no grupo sem listar os chats: { kind: "channel", id, hash } ou { kind: "chat", id }
   clearedUpTo Int? // chat limpo no app até esta mensagem (no Telegram nada muda)
   seenUpTo    Int? // mensagens vistas no app até esta (as dos outros depois disso contam como não vistas)
-  createdAt   DateTime     @default(now())
+  syncedUpTo  Int? // tempo real: mensagens do grupo gravadas até esta (o catch-up continua daqui)
+  syncedAt    DateTime? // último catch-up do grupo
+  createdAt   DateTime          @default(now())
+  messages    TelegramMessage[]
 
   @@unique([linkId, groupId])
   @@index([userId])
@@ -188,45 +194,101 @@ model TelegramGroup {
 /// Conversa no privado aberta pelo Chat Balcões com alguém de um grupo de balcão, por uma das contas do Telegram.
 /// Fecha aqui sem apagar nada no Telegram.
 model TelegramDm {
-  id        String       @id @default(cuid())
-  userId    String
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  linkId    String
-  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  peerId    String // id da pessoa no Telegram
-  peerHash  String // hash de acesso dela para esta conta (para ler e mandar mensagem)
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkId      String
+  link        TelegramLink      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  peerId      String // id da pessoa no Telegram
+  peerHash    String // hash de acesso dela para esta conta (para ler e mandar mensagem)
   name        String
   username    String?
   groupTitle  String? // grupo de onde a pessoa veio
   clearedUpTo Int? // conversa limpa no app até esta mensagem (no Telegram nada muda)
-  closed      Boolean      @default(false) // fechada no app (volta sozinha se a pessoa responder a sua contraproposta)
+  closed      Boolean           @default(false) // fechada no app (volta sozinha se a pessoa responder a sua contraproposta)
   seenUpTo    Int? // mensagens vistas no app até esta (as dela depois disso contam como não vistas)
   offerAt     DateTime? // quando você mandou a contraproposta no privado
   offer       Json? // o pedido da contraproposta: { chatId, messageId, text, sender, group, cpmCents }
   offerLinks  Json? // pedidos encaminhados para cá: [{ fwdId, chatId, messageId }] (para ir ao pedido no grupo)
-  createdAt   DateTime     @default(now())
+  syncedUpTo  Int? // tempo real: mensagens da conversa gravadas até esta (o catch-up continua daqui)
+  syncedAt    DateTime? // último catch-up da conversa
+  createdAt   DateTime          @default(now())
+  messages    TelegramMessage[]
 
   @@unique([linkId, peerId])
   @@index([userId])
 }
 
+/// Chat Balcões em tempo real: mensagem de um grupo do Chat Balcões ou de uma conversa no privado aberta no app,
+/// gravada pelo listener do Telegram (e pelo catch-up depois de uma queda). Uma linha por mensagem: a chave única
+/// (chat, número da mensagem) faz o mesmo evento chegar duas vezes sem duplicar. Exatamente um de groupId/dmId.
+/// Só texto e dados da mídia; o arquivo continua sendo baixado do Telegram quando abrem.
+model TelegramMessage {
+  id         BigInt         @id @default(autoincrement())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkId     String
+  link       TelegramLink   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  groupId    String? // TelegramGroup.id (mensagem de grupo)
+  group      TelegramGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  dmId       String? // TelegramDm.id (mensagem no privado)
+  dm         TelegramDm?    @relation(fields: [dmId], references: [id], onDelete: Cascade)
+  msgId      Int // número da mensagem no Telegram (por chat)
+  date       DateTime // quando foi mandada
+  editDate   DateTime? // última edição (evento de edição mais antigo que isto é ignorado)
+  senderId   String? // id de quem mandou no Telegram
+  senderName String
+  out        Boolean        @default(false) // mandada pela conta conectada
+  fromUser   Boolean        @default(true) // de uma pessoa (não do próprio grupo/canal)
+  text       String         @default("")
+  replyTo    Int? // responde a esta mensagem do mesmo chat
+  fwd        Boolean        @default(false) // encaminhada
+  media      String? // tipo do anexo para mostrar ("foto", "arquivo"...)
+  mediaKind  String? // photo | file
+  mediaName  String?
+  deletedAt  DateTime? // apagada no Telegram (a linha fica, a tela some com ela)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([groupId, msgId])
+  @@unique([dmId, msgId])
+  @@index([userId])
+  @@index([linkId])
+}
+
+/// Chat Balcões em tempo real: o que mudou, em ordem (o id é a sequência). Gravado junto com a mudança, antes de
+/// avisar os navegadores; quem reconecta pede "desde o id X" e não perde nada. Guardado por pouco tempo.
+model TelegramEvent {
+  id        BigInt   @id @default(autoincrement())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // message.new | message.edit | message.delete | unread | status
+  chatKind  String? // GROUP | DM
+  chatId    String? // TelegramGroup.id ou TelegramDm.id
+  msgId     Int?
+  createdAt DateTime @default(now())
+
+  @@index([userId, id])
+  @@index([createdAt])
+}
+
 /// Alerta do Chat Balcões: destaca e avisa das mensagens dos grupos. Pelo pedido de compra (programa, até N CPFs,
 /// faixa de milhas, milheiro mínimo, lucro e lucro por CPF mínimos) e/ou por palavras (todas precisam aparecer).
 model TelegramAlert {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  words       String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
-  program     String? // vazio = qualquer programa
-  maxCpfs     Int? // pedido de até N CPFs
-  minMiles    Int?
-  maxMiles    Int?
-  minCpmCents Int? // milheiro oferecido de pelo menos
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  words                String[] // todas precisam aparecer na mensagem (sem diferenciar maiúsculas e acentos)
+  program              String? // vazio = qualquer programa
+  maxCpfs              Int? // pedido de até N CPFs
+  minMiles             Int?
+  maxMiles             Int?
+  minCpmCents          Int? // milheiro oferecido de pelo menos
   minProfitCents       Int? // lucro (pelo milheiro do pedido, com a sua conta mais barata) de pelo menos
   minProfitPerCpfCents Int? // lucro por CPF de pelo menos
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
 
   @@index([userId])
 }
@@ -506,7 +568,7 @@ model Sale {
   paidAt                 DateTime? // cliente pagou (vazio = a receber)
   finAccountId           String? // conta do Financeiro em que o pagamento entrou (soma no saldo dela)
   finAccount             FinAccount?      @relation(fields: [finAccountId], references: [id], onDelete: SetNull)
-  tags                 String[]         @default([]) // etiquetas livres para filtrar
+  tags                   String[]         @default([]) // etiquetas livres para filtrar
   nfNumber               String? // nota fiscal de serviço emitida para a venda
   nfIssuedAt             DateTime?
   partnerId              String? // parceiro que trouxe a venda (comissão)

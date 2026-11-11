@@ -6,9 +6,12 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://milheiro:${POSTGRES_PASSWORD}@db:5432/milheiro?schema=public
+      REDIS_URL: redis://redis:6379
       NODE_ENV: production
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   caddy:
