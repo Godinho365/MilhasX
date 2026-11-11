@@ -53,6 +53,8 @@ class LinkRunner {
   ready: Promise<void>;
   private resolveReady!: () => void;
   private channels = new Map<string, ChannelSync>();
+  private initialDone = false; // a recuperação inicial desta conexão terminou (antes disso não confere grupos)
+  private syncing: Promise<void> | null = null;
 
   constructor(private gw: Gateway, readonly linkId: string, readonly userId: string, readonly sessionEnc: string) {
     this.ready = new Promise((r) => { this.resolveReady = r; });
@@ -92,7 +94,8 @@ class LinkRunner {
       this.every(t.pingEveryMs, () => void this.watchdog(gen));
       this.every(t.catchupEveryMs, () => void this.catchUp(gen));
       this.every(t.channelStatsEveryMs, () => this.logChannelStats());
-      void this.catchUp(gen).then(() => this.syncChannels(gen));
+      this.initialDone = false;
+      void this.catchUp(gen).then(() => { this.initialDone = true; return this.syncChannels(gen); });
     } catch (e) {
       if (gen === this.gen) await this.fail(e);
     }
@@ -174,13 +177,20 @@ class LinkRunner {
     this.status.lastCatchupAt = new Date().toISOString();
     log("info", "tg.catchup", { linkId: this.linkId, chats: groups.length + watched.size, created, updated, deleted });
     this.gw.reportStatus(this);
-    if (this.channels.size) void this.syncChannels(gen); // grupo novo no app desde a última vez
+    if (this.initialDone) void this.syncChannels(gen); // grupo novo no app desde a última vez
   }
 
   /* ---------- Diferença de supergrupo (o Telegram não empurra tudo de grupo grande) ---------- */
 
-  /** Começa a acompanhar cada supergrupo da conta que ainda não está sendo acompanhado (e larga os que saíram). */
-  async syncChannels(gen = this.gen) {
+  /** Começa a acompanhar cada supergrupo da conta que ainda não está sendo acompanhado (e larga os que saíram). Uma
+   *  conferência por vez, e só depois da recuperação inicial (senão relê à toa um grupo que ela já pôs em dia). */
+  async syncChannels(gen = this.gen): Promise<void> {
+    if (!this.initialDone) return;
+    if (this.syncing) return this.syncing;
+    this.syncing = this.doSyncChannels(gen).finally(() => { this.syncing = null; });
+    return this.syncing;
+  }
+  private async doSyncChannels(gen: number) {
     if (gen !== this.gen || !this.live?.channelDiff || !this.live.channelPts) return;
     const { groups } = await this.gw.router.chats(this.linkId);
     const ids = new Set(groups.map((g) => g.id));
@@ -189,7 +199,11 @@ class LinkRunner {
       if (chat.peer.kind !== "channel" || this.channels.has(chat.id)) continue;
       const ch: ChannelSync = { chat, pts: null, lastPushAt: 0, minMs: this.gw.timings.channelMinMs, stats: { calls: 0, viaDiff: 0, viaPush: 0, floods: 0, lastTimeout: null } };
       this.channels.set(chat.id, ch);
-      void this.channelTick(ch, gen);
+      // grupo escolhido agora no app (nunca sincronizado; grupo vazio também conta pela data): grava as últimas
+      // mensagens antes de acompanhar
+      const live = this.live;
+      const first = chat.syncedAt == null && live ? this.enqueue(() => catchUpChat(this.gw.bus, live, chat)).catch(() => {}) : Promise.resolve();
+      void first.then(() => this.channelTick(ch, gen));
     }
   }
 
@@ -323,7 +337,10 @@ export class Gateway {
     for (const [id, r] of this.runners) if (!ids.has(id)) { this.runners.delete(id); this.router.forget(id); await r.stop(); }
     for (const l of links) {
       const cur = this.runners.get(l.id);
-      if (cur && cur.sessionEnc === l.sessionEnc) continue;
+      if (cur && cur.sessionEnc === l.sessionEnc) {
+        if (cur.status.state === "connected") void cur.syncChannels().catch(() => {}); // grupo novo ou tirado no app
+        continue;
+      }
       if (cur) await cur.stop();
       this.launch(l);
     }

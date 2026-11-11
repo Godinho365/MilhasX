@@ -222,6 +222,19 @@ describe("supergrupo que o Telegram não empurra (grupo grande)", () => {
     expect(tgFake.diffCalls - before).toBeLessThanOrEqual(1);
   });
 
+  it("grupo escolhido depois, numa conta já conectada: entra na hora (histórico gravado e diferença rodando)", async () => {
+    gw = new Gateway({ factory: tgFake.factory, bus, timings: SYNC });
+    await gw.start();
+    await waitFor(() => tgFake.diffCalls > 0);
+    const NEW: TgPeer = { kind: "channel", id: "4321", hash: "h4" };
+    tgFake.add(NEW, lm(90, "histórico do grupo novo"), false);
+    const added = await prisma.telegramGroup.create({ data: { userId, linkId, groupId: "-1004321", title: "Novo", peer: NEW } });
+    await waitFor(async () => (await prisma.telegramGroup.findUniqueOrThrow({ where: { id: added.id } })).syncedAt != null, 3000);
+    expect(await prisma.telegramMessage.count({ where: { groupId: added.id, msgId: 90 } })).toBe(1);
+    tgFake.add(NEW, lm(91, "chegou depois, sem empurrar"), false);
+    await waitFor(async () => (await prisma.telegramMessage.count({ where: { groupId: added.id, msgId: 91 } })) === 1, 2000);
+  });
+
   it("o Telegram pede calma (FLOOD_WAIT): espera e segue mais devagar, sem derrubar a conta", async () => {
     gw = new Gateway({ factory: tgFake.factory, bus, timings: SYNC });
     await gw.start();

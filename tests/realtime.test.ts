@@ -170,7 +170,8 @@ describe("mensagens chegando sem recarregar", () => {
     tg.add(G2, lm(912, "durante 2"));
     await waitFor(async () => (await prisma.telegramMessage.count({ where: { msgId: { in: [911, 912] } } })) === 2);
     const r = await c.call(eventsRoute.GET, "GET", `/x?after=${last}`);
-    expect(r.data.items.map((e: { msgId: number }) => e.msgId)).toEqual([911, 912]);
+    // 911 e 912 são de contas diferentes (cada uma na sua fila): o que importa é não perder nem repetir
+    expect(r.data.items.map((e: { msgId: number }) => e.msgId).sort()).toEqual([911, 912]);
     expect(r.data.reset).toBe(false);
     // de novo do mesmo ponto: o mesmo resultado (a aba descarta o que já viu pelo id)
     expect((await c.call(eventsRoute.GET, "GET", `/x?after=${r.data.lastId}`)).data.items).toEqual([]);

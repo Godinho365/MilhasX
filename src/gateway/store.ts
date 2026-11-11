@@ -11,7 +11,7 @@ import type { LiveClient, LiveMessage } from "./live";
 
 export type ChatKind = "GROUP" | "DM";
 /** Um chat do app (grupo do Chat Balcões ou conversa no privado) de uma conta conectada. */
-export type ChatTarget = { kind: ChatKind; id: string; userId: string; linkId: string; peer: TgPeer; syncedUpTo: number | null };
+export type ChatTarget = { kind: ChatKind; id: string; userId: string; linkId: string; peer: TgPeer; syncedUpTo: number | null; syncedAt?: Date | null };
 
 /** Evento publicado para o navegador (o id vira texto: BigInt não vai no JSON). */
 export type PublishedEvent = { id: string; type: string; chatKind: ChatKind; chatId: string; msgId: number; date?: string; receivedAt?: number };
@@ -29,14 +29,14 @@ export class Router {
   async load(linkId: string) {
     const [link, groups, dms] = await Promise.all([
       prisma.telegramLink.findUnique({ where: { id: linkId }, select: { userId: true } }),
-      prisma.telegramGroup.findMany({ where: { linkId }, select: { id: true, userId: true, groupId: true, peer: true, syncedUpTo: true } }),
-      prisma.telegramDm.findMany({ where: { linkId }, select: { id: true, userId: true, peerId: true, peerHash: true, syncedUpTo: true } }),
+      prisma.telegramGroup.findMany({ where: { linkId }, select: { id: true, userId: true, groupId: true, peer: true, syncedUpTo: true, syncedAt: true } }),
+      prisma.telegramDm.findMany({ where: { linkId }, select: { id: true, userId: true, peerId: true, peerHash: true, syncedUpTo: true, syncedAt: true } }),
     ]);
     const entry = {
       at: Date.now(),
       userId: link?.userId ?? "",
-      groups: new Map(groups.filter((g) => g.peer).map((g) => [g.groupId, { kind: "GROUP" as const, id: g.id, userId: g.userId, linkId, peer: g.peer as TgPeer, syncedUpTo: g.syncedUpTo }])),
-      dms: new Map(dms.map((d) => [d.peerId, { kind: "DM" as const, id: d.id, userId: d.userId, linkId, peer: { kind: "user" as const, id: d.peerId, hash: d.peerHash }, syncedUpTo: d.syncedUpTo }])),
+      groups: new Map(groups.filter((g) => g.peer).map((g) => [g.groupId, { kind: "GROUP" as const, id: g.id, userId: g.userId, linkId, peer: g.peer as TgPeer, syncedUpTo: g.syncedUpTo, syncedAt: g.syncedAt }])),
+      dms: new Map(dms.map((d) => [d.peerId, { kind: "DM" as const, id: d.id, userId: d.userId, linkId, peer: { kind: "user" as const, id: d.peerId, hash: d.peerHash }, syncedUpTo: d.syncedUpTo, syncedAt: d.syncedAt }])),
     };
     this.byLink.set(linkId, entry);
     return entry;
@@ -210,6 +210,7 @@ export async function catchUpChat(bus: Bus, live: LiveClient, chat: ChatTarget) 
   if (chat.kind === "GROUP") await prisma.telegramGroup.updateMany({ where: { id: chat.id }, data });
   else await prisma.telegramDm.updateMany({ where: { id: chat.id }, data });
   chat.syncedUpTo = upTo;
+  chat.syncedAt = data.syncedAt;
   return { created, updated, deleted };
 }
 
