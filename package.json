@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",
-    "start": "next start -p 3100",
+    "start": "tsx server.ts",
     "lint": "tsc --noEmit",
     "db:up": "docker compose up -d db",
     "db:migrate": "prisma migrate dev",
@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "db:backup": "node scripts/backup.mjs",
     "db:restore": "node scripts/restore.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "start:next": "next start -p 3100"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -39,6 +40,7 @@
     "server-only": "^0.0.1",
     "telegram": "^2.26.22",
     "tesseract.js": "^6.0.1",
+    "ws": "8.18.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -48,6 +50,7 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/ws": "8.18.1",
     "autoprefixer": "^10.6.1",
     "postcss": "^8.5.31",
     "prisma": "^6.19.3",

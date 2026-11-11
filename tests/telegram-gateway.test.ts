@@ -6,9 +6,9 @@ import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { prisma, DomainError } from "@/server/db";
 import { encrypt } from "@/server/services/accounts";
-import { chatMessages, sendToGroup, telegramChatMedia, sendTelegramChatFile, editGroupMessage, deleteGroupMessage, type TgClient, type TgPeer } from "@/server/services/telegram";
+import { chatMessages, sendToGroup, telegramChatMedia, sendTelegramChatFile, editGroupMessage, deleteGroupMessage, type TgPeer } from "@/server/services/telegram";
 import { MemoryBus } from "@/gateway/bus";
-import { peerKey, type LiveClient, type LiveEvent, type LiveMessage } from "@/gateway/live";
+import { FakeTelegram, lm, iso, waitFor, rpcErr } from "./fake-telegram";
 import { Gateway } from "@/gateway/manager";
 import { gatewayServer } from "@/gateway/server";
 import { Router, catchUpChat, ingestDelete, ingestMessage, prune, type ChatTarget } from "@/gateway/store";
@@ -20,110 +20,6 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const GROUP: TgPeer = { kind: "channel", id: "1234", hash: "h" };
 const DM: TgPeer = { kind: "user", id: "77", hash: "h77" };
-const rpcErr = (errorMessage: string, seconds?: number) => Object.assign(new Error(errorMessage), { errorMessage, ...(seconds ? { seconds } : {}) });
-const iso = (min: number) => new Date(Date.UTC(2026, 10, 11, 12, min)).toISOString();
-const lm = (id: number, text: string, extra: Partial<LiveMessage> = {}): LiveMessage => ({ id, date: iso(id % 600), sender: "Bia", text, media: null, mediaKind: null, mediaName: null, out: false, fromUser: true, replyTo: null, editDate: null, senderId: "55", ...extra });
-
-async function waitFor(cond: () => boolean | Promise<boolean>, ms = 4000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await cond()) return;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  throw new Error("esperou demais");
-}
-
-/** Telegram simulado: o histórico de cada chat (pelo id com a marca de tipo) e os eventos mandados aos conectados. */
-class FakeTelegram {
-  chats = new Map<string, LiveMessage[]>();
-  listeners = new Set<(e: LiveEvent) => void>();
-  starts = 0;
-  failStart: string | null = null;
-  failPing = false;
-  failMessages: Error | null = null;
-  calls: string[] = [];
-  files: { name: string; size: number }[] = [];
-  private nextId = 5000;
-
-  list(peer: TgPeer) {
-    const k = peerKey(peer);
-    if (!this.chats.has(k)) this.chats.set(k, []);
-    return this.chats.get(k)!;
-  }
-  /** Mensagem chega no Telegram; emit = o evento chega na conexão (false = chegou com o gateway fora). */
-  add(peer: TgPeer, m: LiveMessage, emit = true) {
-    this.list(peer).push(m);
-    this.list(peer).sort((a, b) => a.id - b.id);
-    if (emit) for (const l of this.listeners) l({ kind: "new", peerId: peerKey(peer), message: { ...m }, receivedAt: Date.now() }); // como o GramJS: um objeto por evento
-  }
-  edit(peer: TgPeer, id: number, text: string, editDate: string, emit = true) {
-    const m = this.list(peer).find((x) => x.id === id)!;
-    Object.assign(m, { text, editDate });
-    if (emit) for (const l of this.listeners) l({ kind: "edit", peerId: peerKey(peer), message: { ...m }, receivedAt: Date.now() });
-  }
-  remove(peer: TgPeer, ids: number[], emit = true) {
-    this.chats.set(peerKey(peer), this.list(peer).filter((m) => !ids.includes(m.id)));
-    if (emit) for (const l of this.listeners) l({ kind: "delete", peerId: peer.kind === "channel" ? peerKey(peer) : null, ids, receivedAt: Date.now() });
-  }
-
-  factory = (session: string): LiveClient => {
-    let mine: ((e: LiveEvent) => void) | null = null;
-    const self = this;
-    const loginOnly = () => { throw new Error("login não passa pelo gateway"); };
-    const tg: TgClient = {
-      connect: async () => {}, close: async () => {}, saveSession: () => session, sendCode: loginOnly, signIn: loginOnly, checkPassword: loginOnly,
-      me: async () => "Conta",
-      groups: async () => [],
-      messages: async (peer, { limit, minId }) => {
-        if (self.failMessages) throw self.failMessages;
-        return self.list(peer).filter((m) => !minId || m.id > minId).slice(-limit);
-      },
-      send: async (peer, text, replyTo) => {
-        const m = lm(self.nextId++, text, { out: true, sender: "Você", replyTo: replyTo ?? null, senderId: null });
-        self.list(peer).push(m);
-        self.calls.push(`send ${peerKey(peer)} ${text}`);
-        return m;
-      },
-      edit: async (peer, id, text) => {
-        const m = self.list(peer).find((x) => x.id === id)!;
-        m.text = text;
-        return { ...m };
-      },
-      remove: async (peer, id) => { self.chats.set(peerKey(peer), self.list(peer).filter((m) => m.id !== id)); },
-      forward: async () => { throw rpcErr("CHAT_FORWARDS_RESTRICTED"); },
-      author: async () => null,
-      sendFile: async (peer, file, caption) => {
-        self.files.push({ name: file.name, size: file.bytes.length });
-        return self.tgSend(peer, caption ?? "", file.name);
-      },
-      downloadMedia: async (_peer, id) => ({ bytes: Buffer.from(`PDF-${id}-\u0000ÿ`), mime: "application/pdf", name: `bilhete-${id}.pdf` }),
-      readOutboxMaxId: async () => 0,
-      logOut: async () => { self.calls.push("logOut"); },
-    };
-    return {
-      tg,
-      start: async (on) => {
-        self.starts++;
-        if (self.failStart) throw rpcErr(self.failStart);
-        mine = on;
-        self.listeners.add(on);
-      },
-      ping: async () => { if (self.failPing) throw new Error("rede caiu"); },
-      history: async (peer, { limit, minId, reverse }) => {
-        const all = self.list(peer);
-        if (reverse) return all.filter((m) => m.id > (minId ?? 0)).slice(0, limit).map((m) => ({ ...m }));
-        return all.filter((m) => !minId || m.id > minId).slice(-limit).map((m) => ({ ...m }));
-      },
-      stop: async () => { if (mine) self.listeners.delete(mine); },
-    };
-  };
-  private tgSend(peer: TgPeer, text: string, mediaName: string) {
-    const m = lm(this.nextId++, text, { out: true, sender: "Você", media: "arquivo", mediaKind: "file", mediaName, senderId: null });
-    this.list(peer).push(m);
-    return m;
-  }
-}
-
 const FAST = { leaderEveryMs: 50, refreshEveryMs: 50, pingEveryMs: 60, pingTimeoutMs: 200, catchupEveryMs: 60_000, statusEveryMs: 1000, startTimeoutMs: 1000, backoffMs: [30, 60] };
 
 let userId: string, linkId: string, groupId: string, dmId: string;

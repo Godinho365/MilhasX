@@ -1,7 +1,7 @@
 // Gateway do Chat Balcões: a conexão permanente de uma conta do Telegram. Recebe os eventos (mensagem nova, editada,
 // apagada) e lê o histórico para a recuperação depois de uma queda. Nos testes, um Telegram simulado faz o papel.
 import { Api, utils } from "telegram";
-import { NewMessage, type NewMessageEvent } from "telegram/events";
+import { NewMessage, Raw, type NewMessageEvent } from "telegram/events";
 import { EditedMessage, type EditedMessageEvent } from "telegram/events/EditedMessage";
 import { DeletedMessage, type DeletedMessageEvent } from "telegram/events/DeletedMessage";
 import { inputPeer, newGramClient, toMessage, wrapGram, type TgClient, type TgMessage, type TgPeer } from "@/server/services/telegram";
@@ -14,7 +14,9 @@ export type LiveMessage = TgMessage & { editDate: string | null; senderId: strin
  *  (lá o número da mensagem é único na conta inteira). */
 export type LiveEvent =
   | { kind: "new" | "edit"; peerId: string; message: LiveMessage; receivedAt: number }
-  | { kind: "delete"; peerId: string | null; ids: number[]; receivedAt: number };
+  | { kind: "delete"; peerId: string | null; ids: number[]; receivedAt: number }
+  /** A pessoa leu as suas mensagens no privado até maxId (os checks verdes). */
+  | { kind: "read"; peerId: string; maxId: number; receivedAt: number };
 
 export interface LiveClient {
   /** O mesmo cliente para os pedidos do site (mandar, editar, baixar...). */
@@ -45,7 +47,7 @@ export function gramLive(session: string): LiveClient {
     const senderId = m.fromId instanceof Api.PeerUser ? m.fromId.userId.toString() : !m.fromId && m.peerId instanceof Api.PeerUser && !m.out ? m.peerId.userId.toString() : null;
     return { ...toMessage(m), editDate: m.editDate ? new Date(m.editDate * 1000).toISOString() : null, senderId };
   };
-  const handlers: [(e: never) => unknown, NewMessage | EditedMessage | DeletedMessage][] = [];
+  const handlers: [(e: never) => unknown, NewMessage | EditedMessage | DeletedMessage | Raw][] = [];
   return {
     tg,
     async start(onEvent) {
@@ -64,10 +66,14 @@ export function gramLive(session: string): LiveClient {
       const onDelete = (e: DeletedMessageEvent) => {
         onEvent({ kind: "delete", peerId: e.peer ? utils.getPeerId(e.peer) : null, ids: e.deletedIds, receivedAt: Date.now() });
       };
-      const list: [(e: never) => unknown, NewMessage | EditedMessage | DeletedMessage][] = [
+      const onRead = (u: Api.UpdateReadHistoryOutbox) => {
+        if (u.peer instanceof Api.PeerUser) onEvent({ kind: "read", peerId: utils.getPeerId(u.peer), maxId: u.maxId, receivedAt: Date.now() });
+      };
+      const list: [(e: never) => unknown, NewMessage | EditedMessage | DeletedMessage | Raw][] = [
         [onNew as (e: never) => unknown, new NewMessage({})],
         [onEdit as (e: never) => unknown, new EditedMessage({})],
         [onDelete as (e: never) => unknown, new DeletedMessage({})],
+        [onRead as (e: never) => unknown, new Raw({ types: [Api.UpdateReadHistoryOutbox] })],
       ];
       for (const [h, b] of list) {
         c.addEventHandler(h as never, b);

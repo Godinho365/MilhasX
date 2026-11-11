@@ -130,6 +130,11 @@ class LinkRunner {
     if (e.kind === "delete") return void (await ingestDelete(this.gw.bus, this.gw.router, this.linkId, e.peerId, e.ids, e.receivedAt));
     const chat = await this.gw.router.route(this.linkId, e.peerId);
     if (!chat) return; // chat que o app não acompanha
+    if (e.kind === "read") {
+      // checks de leitura: só avisa (a tela pergunta de novo ao abrir a conversa)
+      if (chat.kind === "DM") await this.gw.bus.publish(userChannel(chat.userId), { type: "dm.read", chatKind: "DM", chatId: chat.id, maxId: e.maxId, receivedAt: e.receivedAt }).catch(() => {});
+      return;
+    }
     await ingestMessage(this.gw.bus, chat, e.message, e.kind, e.receivedAt);
   }
 

@@ -10,6 +10,8 @@ services:
       REDIS_URL: redis://redis:6379
       # o site não conecta no Telegram: pede ao gateway (uma conexão por sessão)
       TG_GATEWAY_URL: http://tg-gateway:3200
+      # Chat Balcões em tempo real (WebSocket /ws). Para desligar: REALTIME_ENABLED=false no .env
+      REALTIME_ENABLED: ${REALTIME_ENABLED:-true}
       NODE_ENV: production
     depends_on:
       db:

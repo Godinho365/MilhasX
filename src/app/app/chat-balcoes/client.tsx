@@ -13,6 +13,7 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegram-alerts";
 import { BALCAO_PROGRAMS, emissionAnalysis, parseBalcaoAd, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
 import { DEAL_STAGE_LABELS, type DealStageKey } from "@/domain/miles-deals";
+import { reportLatency, useRealtimeConnection, useRealtimeEvents, type RtEvent, type RtState } from "@/lib/realtime";
 
 type Chat = { id: string; title: string; account: string; clearedUpTo?: number | null };
 /** O pedido a que você mandou a contraproposta no privado (a conversa fica ligada a ele). */
@@ -30,6 +31,8 @@ type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
 const CHAT_POLL_MS = 15_000;
 const FEED_POLL_MS = 30_000;
 const UNREAD_POLL_MS = 20_000;
+/** Com o tempo real conectado, as buscas periódicas viram só rede de segurança. */
+const SAFETY_POLL_MS = 60_000;
 const ALERTS_TAB = "alertas";
 const dmKey = (id: string) => `dm:${id}`;
 /** id da mensagem na página (para rolar até ela): o chat (pela url) e o número da mensagem. */
@@ -83,7 +86,10 @@ function usePolling(fn: () => void, ms: number, on = true) {
   }, [ms, on]);
 }
 
-export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts = [], openDmId = null }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[]; accounts?: EmissionAccount[]; openDmId?: string | null }) {
+export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts = [], openDmId = null, realtime = false }: { chats: Chat[]; initialAlerts: AlertRule[]; initialDms: Dm[]; accounts?: EmissionAccount[]; openDmId?: string | null; realtime?: boolean }) {
+  // tempo real: as mensagens chegam pelo WebSocket; sem ele (desligado ou caído), as buscas de 15/20/30 s seguem
+  const rt = useRealtimeConnection(realtime);
+  const live = rt.state === "live";
   // abre direto na conversa pedida (vinda do CRM Milhas) ou no primeiro grupo
   const [tab, setTab] = useState(openDmId ? `dm:${openDmId}` : chats[0]!.id);
   // mensagem a mostrar no chat (vinda da aba Alertas ou do privado): o chat rola até ela e a destaca; reply = já abre
@@ -127,7 +133,7 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
     seen.current = null;
     if (active) void loadFeed();
   }, [active, alerts, loadFeed]);
-  usePolling(loadFeed, FEED_POLL_MS, active);
+  usePolling(loadFeed, live ? SAFETY_POLL_MS : FEED_POLL_MS, active);
   // não vistos dos alertas: os que chegaram depois da última vez que a aba foi aberta (fica guardado no navegador)
   const newestAlert = feed?.[0]?.date ?? null;
   useEffect(() => {
@@ -162,7 +168,19 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
     }
   }, []);
   useEffect(() => { void loadUnread(); }, [loadUnread]);
-  usePolling(loadUnread, UNREAD_POLL_MS);
+  usePolling(loadUnread, live ? SAFETY_POLL_MS : UNREAD_POLL_MS);
+  // evento em tempo real: contadores e alertas na hora (vários eventos juntos viram uma busca só)
+  const soon = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const debounce = (key: string, ms: number, fn: () => void) => {
+    clearTimeout(soon.current[key]);
+    soon.current[key] = setTimeout(fn, ms);
+  };
+  useRealtimeEvents(realtime, (e) => {
+    if (e.type === "resync") { void loadUnread(); if (active) void loadFeed(); return; }
+    if (!e.type.startsWith("message.")) return;
+    if (e.type !== "message.edit") debounce("unread", 250, () => void loadUnread());
+    if (active && e.chatKind === "GROUP" && e.type !== "message.delete") debounce("feed", 400, () => void loadFeed());
+  });
   /** A aba (grupo ou privado) foi vista na tela até a mensagem upTo. */
   const seenAt = useRef<Record<string, number>>({});
   const markSeen = useCallback((key: string, url: string, upTo: number) => {
@@ -202,20 +220,42 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
         {dms.map((d) => tabBtn(dmKey(d.id), <><UserRound className="h-4 w-4" />{d.name}{tab !== dmKey(d.id) && <Badge n={unread[dmKey(d.id)] ?? 0} />}</>, `Privado pela conta ${d.via}${d.offer ? ` · contraproposta ao pedido do grupo ${d.offer.group}` : ""}`,
           <button type="button" onClick={() => closeDm(d)} className="-ml-1.5 mr-1 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={`Fechar a conversa com ${d.name}`} title="Fechar aqui (no Telegram a conversa continua)"><X className="h-3.5 w-3.5" /></button>))}
         {tabBtn(ALERTS_TAB, <><Bell className="h-4 w-4" />Alertas{tab !== ALERTS_TAB && <Badge n={unseenAlerts} tone="amber" />}</>, `${alerts.filter((a) => a.active).length} ativos`)}
-        <Link href="/app/settings?tab=telegram" className="ml-auto flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-zinc-100" title="Contas e grupos do Telegram"><Settings className="h-3.5 w-3.5" />Contas</Link>
+        <LiveBadge realtime={realtime} state={rt.state} links={rt.links} />
+        <Link href="/app/settings?tab=telegram" className="flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-zinc-100" title="Contas e grupos do Telegram"><Settings className="h-3.5 w-3.5" />Contas</Link>
       </nav>
       {/* os chats ficam montados: trocar de aba não perde o que já carregou */}
-      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} onOfferDm={offerDm} onSeen={(upTo) => markSeen(c.id, `/api/telegram/chats/${c.id}/seen`, upTo)} focus={focus?.chatId === c.id ? focus : null} accounts={accounts} /></div>)}
-      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} onSeen={(upTo) => markSeen(dmKey(d.id), `/api/telegram/dms/${d.id}/seen`, upTo)} onGoToGroup={goToGroup} accounts={accounts} /></div>)}
+      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} onOfferDm={offerDm} onSeen={(upTo) => markSeen(c.id, `/api/telegram/chats/${c.id}/seen`, upTo)} focus={focus?.chatId === c.id ? focus : null} accounts={accounts} realtime={realtime} live={live} /></div>)}
+      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} onSeen={(upTo) => markSeen(dmKey(d.id), `/api/telegram/dms/${d.id}/seen`, upTo)} onGoToGroup={goToGroup} accounts={accounts} realtime={realtime} live={live} /></div>)}
       {tab === ALERTS_TAB && <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={setTab} reload={loadFeed} accounts={accounts} onNegotiate={negotiate} />}
     </>
+  );
+}
+
+/** Como as mensagens estão chegando: em tempo real, reconectando, ou buscadas de 15 em 15 s (tempo real desligado). */
+function LiveBadge({ realtime, state, links }: { realtime: boolean; state: RtState; links: Record<string, string> }) {
+  const states = Object.values(links);
+  const revoked = states.filter((x) => x === "revoked").length;
+  const down = states.filter((x) => x === "backoff" || x === "starting").length;
+  const [tone, label, hint] = !realtime
+    ? ["bg-zinc-500", "A cada 15 s", "As mensagens são buscadas no Telegram de 15 em 15 segundos"]
+    : state !== "live"
+      ? ["bg-amber-400 animate-pulse", state === "connecting" ? "Conectando…" : "Reconectando…", "Sem a conexão em tempo real agora: as mensagens são buscadas de 15 em 15 segundos até ela voltar"]
+      : revoked
+        ? ["bg-red-500", "Telegram desconectado", `${revoked} ${revoked === 1 ? "conta saiu" : "contas saíram"} do Telegram: conecte de novo em Contas`]
+        : down
+          ? ["bg-amber-400 animate-pulse", "Telegram reconectando", `${down} ${down === 1 ? "conta do Telegram está" : "contas do Telegram estão"} reconectando; o que chegar nesse meio tempo é recuperado`]
+          : ["bg-emerald-400", "Tempo real", "Conectado: as mensagens dos grupos e do privado aparecem na hora"];
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs text-muted" title={hint} role="status" aria-live="polite">
+      <span className={`h-2 w-2 rounded-full ${tone}`} aria-hidden />{label}
+    </span>
   );
 }
 
 /** Mensagens de um grupo ou de uma conversa no privado: carrega as últimas e depois só as novas (de 15 em 15
  *  segundos, com a aba aberta), com o campo para mandar mensagem embaixo. No grupo, cada pedido mostra o lucro de
  *  atendê-lo pela sua conta mais barata que consegue emitir (sem conta com saldo, não mostra). */
-function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus, accounts = [] }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; onOfferDm?: (dm: Dm) => void; onSeen?: (upTo: number) => void; onGoToGroup?: (chatId: string, messageId: number) => void; focus?: { id: number; n: number; reply?: boolean } | null; accounts?: EmissionAccount[] }) {
+function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus, accounts = [], realtime = false, live = false }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; onOfferDm?: (dm: Dm) => void; onSeen?: (upTo: number) => void; onGoToGroup?: (chatId: string, messageId: number) => void; focus?: { id: number; n: number; reply?: boolean } | null; accounts?: EmissionAccount[]; realtime?: boolean; live?: boolean }) {
   const group = source.kind === "group";
   const url = group ? `/api/telegram/chats/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
@@ -278,7 +318,7 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
   }, [url, msgs]);
 
   useEffect(() => { if (visible && msgs === null) void load(); }, [visible, msgs, load]);
-  usePolling(() => { if (msgs !== null) void load(); }, CHAT_POLL_MS, visible);
+  usePolling(() => { if (msgs !== null) void load(); }, live ? SAFETY_POLL_MS : CHAT_POLL_MS, visible);
   // privado: lê os grupos de onde vieram os pedidos encaminhados (as últimas mensagens, depois só as novas), para as
   // contrapropostas dos outros
   const originChats = [...new Set((msgs ?? []).flatMap((m) => (m.origin ? [m.origin.chatId] : [])))].sort().join(",");
@@ -297,7 +337,58 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
     }
   }, [originChats]);
   useEffect(() => { if (visible && originChats) void loadGroups(); }, [visible, originChats, loadGroups]);
-  usePolling(() => { if (originChats) void loadGroups(); }, CHAT_POLL_MS, visible && !group);
+  usePolling(() => { if (originChats) void loadGroups(); }, live ? SAFETY_POLL_MS : CHAT_POLL_MS, visible && !group);
+
+  // tempo real: mensagem nova busca as novas (no banco, rápido); editada relê só ela; apagada sai da tela; leitura
+  // no privado acende os checks. Mensagens que chegam assim ficam destacadas por um instante.
+  const chatKind = group ? "GROUP" : "DM";
+  const chatId = group ? source.chat.id : source.dm.id;
+  const [fresh, setFresh] = useState<Set<number>>(new Set());
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const pendingLat = useRef<RtEvent[]>([]);
+  const newTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const groupsTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const loadGroupsRef = useRef(loadGroups);
+  loadGroupsRef.current = loadGroups;
+  useRealtimeEvents(realtime, (e) => {
+    if (e.type === "resync") { if (msgs !== null) setMsgs(null); setGroupMsgs({}); return; }
+    // privado: as contrapropostas dos outros vêm do grupo de origem dos pedidos
+    if (!group && e.chatKind === "GROUP" && e.chatId && originChats.split(",").includes(e.chatId)) {
+      if (e.type === "message.delete") setGroupMsgs((cur) => (cur[e.chatId!] ? { ...cur, [e.chatId!]: cur[e.chatId!]!.filter((m) => m.id !== e.msgId) } : cur));
+      else { clearTimeout(groupsTimer.current); groupsTimer.current = setTimeout(() => void loadGroupsRef.current(), 150); }
+      return;
+    }
+    if (e.chatKind !== chatKind || e.chatId !== chatId || msgs === null) return; // não carregado ainda: carrega ao abrir
+    if (e.type === "message.new") {
+      pendingLat.current.push(e);
+      clearTimeout(newTimer.current);
+      newTimer.current = setTimeout(() => void loadRef.current(), 40); // uma rajada vira uma busca só
+    } else if (e.type === "message.edit" && e.msgId) {
+      void api<{ items: Msg[] }>(`${url}?ids=${e.msgId}`).then((r) => {
+        if (!r.ok || !r.data.items[0]) return;
+        const item = r.data.items[0];
+        setMsgs((cur) => (cur ?? []).map((m) => (m.id === item.id ? { ...m, ...item } : m)));
+      });
+    } else if (e.type === "message.delete" && e.msgId) {
+      setMsgs((cur) => (cur ?? []).filter((m) => m.id !== e.msgId));
+    } else if (e.type === "dm.read" && e.maxId) {
+      setReadMax((r) => Math.max(r, e.maxId!));
+    }
+  });
+  // as mensagens que o tempo real avisou já estão na tela: mede a latência e destaca
+  useEffect(() => {
+    if (!pendingLat.current.length || !msgs) return;
+    const have = new Set(msgs.map((m) => m.id));
+    const shown = pendingLat.current.filter((e) => e.msgId != null && have.has(e.msgId));
+    if (!shown.length) return;
+    pendingLat.current = pendingLat.current.filter((e) => !shown.includes(e));
+    requestAnimationFrame(() => { for (const e of shown) reportLatency(e); });
+    const ids = shown.map((e) => e.msgId!).filter((id) => !msgs.find((m) => m.id === id)?.out);
+    if (!ids.length) return;
+    setFresh((f) => new Set([...f, ...ids]));
+    setTimeout(() => setFresh((f) => { const n = new Set(f); for (const id of ids) n.delete(id); return n; }), 2500);
+  }, [msgs]);
   // vindo da aba Alertas: rola até o pedido e já abre a contraproposta para ele
   const focused = useRef(0);
   const [flash, setFlash] = useState<number | null>(null); // a mensagem que veio de outra aba fica destacada por um tempo
@@ -458,7 +549,7 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
         {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
           : shown.length === 0 ? <p className="text-sm text-muted">{cleared != null && !msgs?.length ? "Chat limpo. As mensagens novas aparecem aqui." : onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
           : shown.map((m) => (
-            <Bubble key={m.id} domId={msgDomId(url, m.id)} m={m} mediaBase={url.replace(/\/messages$/, "")} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} flash={flash === m.id} offers={m.ad ? offersOf(m) : undefined}
+            <Bubble key={m.id} domId={msgDomId(url, m.id)} m={m} mediaBase={url.replace(/\/messages$/, "")} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} flash={flash === m.id} fresh={fresh.has(m.id)} offers={m.ad ? offersOf(m) : undefined}
               analysis={m.ad ? emissionAnalysis(m.ad, m.ad.cpmCents, accounts) : null}
               profitAt={m.ad ? (cents) => emissionAnalysis(m.ad!, cents, accounts) : undefined}
               onCrm={group && m.ad ? (cents) => registerCrm(m, cents) : undefined} registering={registering === m.id}
@@ -556,8 +647,8 @@ function OfferStrip({ offer, cpmCents, accounts, initialCrm, onGoToGroup }: { of
 /** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
  *  offers: as contrapropostas ao pedido; analysis: a análise do pedido pelas regras da negociação (conta, saldo e
  *  CPFs depois, sobra e lucro); profitAt: o lucro por outro milheiro (o da sua contraproposta); onCrm: registra. */
-function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening, onReply, replying, flash, onGroup, quoted, offers, analysis, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering, read }: {
-  m: Msg; domId?: string; chat?: string; mediaBase?: string; onOpen?: () => void; onNegotiate?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; flash?: boolean; onGroup?: () => void; quoted?: Msg | null; offers?: Msg[];
+function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening, onReply, replying, flash, fresh, onGroup, quoted, offers, analysis, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering, read }: {
+  m: Msg; domId?: string; chat?: string; mediaBase?: string; onOpen?: () => void; onNegotiate?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; flash?: boolean; fresh?: boolean; onGroup?: () => void; quoted?: Msg | null; offers?: Msg[];
   analysis?: Analysis; profitAt?: (cpmCents: number) => Analysis; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
   onCrm?: (cpmCents?: number) => void; registering?: boolean; read?: boolean; // privado: true = visualizada (verde), false = entregue (amarelo), undefined = não mostra
 }) {
@@ -571,7 +662,7 @@ function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening,
     }
   }
   return (
-    <div id={domId} className={`group scroll-mt-4 rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : flash ? "ring-2 ring-amber-400" : ""}`}>
+    <div id={domId} className={`group scroll-mt-4 rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : flash ? "ring-2 ring-amber-400" : fresh ? "ring-2 ring-emerald-400/70" : ""} transition-shadow duration-700`}>
       <div className="flex items-baseline gap-2 text-xs">
         <span className="truncate font-semibold text-zinc-200">{m.sender}</span>
         {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}

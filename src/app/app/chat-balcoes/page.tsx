@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/stat";
 import { Empty, Alert } from "@/components/ui";
 import { telegramStatus, listTelegramAlerts, listTelegramDms } from "@/server/services/telegram";
 import { emissionAccounts } from "@/server/services/capacity";
+import { realtimeEnabled } from "@/server/realtime/upgrade";
 import { ChatBalcoesClient } from "./client";
 
 // Chat Balcões: uma aba por grupo de balcão conectado (Configurações › Telegram), com as mensagens e o envio, as
@@ -29,7 +30,7 @@ export default async function ChatBalcoesPage({ searchParams }: { searchParams: 
           <Link href="/app/settings?tab=telegram" className="btn-primary">Conectar o Telegram</Link>
         </Empty>
       ) : (
-        <ChatBalcoesClient chats={chats} initialAlerts={alerts} initialDms={dms} accounts={accounts} openDmId={sp.abrir && dms.some((d) => d.id === sp.abrir) ? sp.abrir : null} />
+        <ChatBalcoesClient chats={chats} initialAlerts={alerts} initialDms={dms} accounts={accounts} openDmId={sp.abrir && dms.some((d) => d.id === sp.abrir) ? sp.abrir : null} realtime={realtimeEnabled()} />
       )}
     </>
   );
