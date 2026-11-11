@@ -254,6 +254,7 @@ model TelegramMessage {
   @@unique([dmId, msgId])
   @@index([userId])
   @@index([linkId])
+  @@index([date]) // limpeza das mensagens além do prazo de guarda
 }
 
 /// Chat Balcões em tempo real: o que mudou, em ordem (o id é a sequência). Gravado junto com a mudança, antes de

@@ -18,6 +18,7 @@ import { parseBalcaoAd, parseCounterOffer, emissionAnalysis, type EmissionAccoun
 import { balcaoForGroup, buyerDataFromMessages } from "@/domain/miles-deals";
 import { createDeal, markDealTermsSent, moveDeal } from "./miles-deals";
 import { emissionAccounts } from "./capacity";
+import { gatewayUrl, remoteClient } from "../telegram-rpc";
 
 /** Como chegar no chat direto (sem listar os chats da conta): supergrupo/canal e pessoa precisam do hash de acesso. */
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
@@ -62,12 +63,12 @@ export interface TgClient {
 }
 
 /** O chat no formato da API do Telegram. */
-function inputPeer(p: TgPeer) {
+export function inputPeer(p: TgPeer) {
   if (p.kind === "channel") return new Api.InputPeerChannel({ channelId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
   if (p.kind === "user") return new Api.InputPeerUser({ userId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
   return new Api.InputPeerChat({ chatId: returnBigInt(p.id) });
 }
-function toMessage(m: Api.Message): TgMessage {
+export function toMessage(m: Api.Message): TgMessage {
   const mm = mediaMeta(m.media);
   return {
     id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
@@ -111,7 +112,7 @@ function mediaMeta(m: Api.TypeMessageMedia | undefined): { kind: "photo" | "file
   return { kind: null, name: null };
 }
 
-function apiCredentials() {
+export function apiCredentials() {
   const apiId = Number(process.env.TELEGRAM_API_ID);
   const apiHash = process.env.TELEGRAM_API_HASH?.trim();
   return apiId && apiHash ? { apiId, apiHash } : null;
@@ -119,11 +120,22 @@ function apiCredentials() {
 /** O servidor tem as chaves do Telegram e a chave de criptografia das sessões. */
 export const telegramEnabled = () => !!apiCredentials() && credentialsEnabled();
 
-function gramClient(session: string): TgClient {
+/** Cliente GramJS da sessão (sem conectar). O gateway do tempo real cria o dele com mais tentativas de reconexão. */
+export function newGramClient(session: string, opts: { connectionRetries?: number } = {}) {
   const creds = apiCredentials();
   if (!creds) throw new DomainError(503, "Telegram desativado: defina TELEGRAM_API_ID e TELEGRAM_API_HASH no servidor");
-  const c = new TelegramClient(new StringSession(session), creds.apiId, creds.apiHash, { connectionRetries: 2 });
+  const c = new TelegramClient(new StringSession(session), creds.apiId, creds.apiHash, { connectionRetries: opts.connectionRetries ?? 2 });
   c.setLogLevel(LogLevel.ERROR);
+  return c;
+}
+
+function gramClient(session: string): TgClient {
+  return wrapGram(newGramClient(session));
+}
+
+/** O que o app usa do Telegram em cima de um cliente GramJS (o do pool do site ou o permanente do gateway). */
+export function wrapGram(c: TelegramClient): TgClient {
+  const creds = apiCredentials()!;
   return {
     connect: async () => { await c.connect(); },
     close: async () => { await c.destroy().catch(() => {}); },
@@ -259,11 +271,16 @@ function tgError(e: unknown): never {
   };
   const k = known[msg];
   if (k) throw new DomainError(k[0], k[1]);
-  if (["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "USER_DEACTIVATED", "AUTH_KEY_DUPLICATED"].includes(msg)) throw new SessionEnded();
+  if (SESSION_ENDED.includes(msg)) throw new SessionEnded();
+  // a mesma sessão usada por duas conexões ao mesmo tempo: o Telegram derruba esta conexão, mas a conta continua
+  // valendo (não apaga a conta do app; a próxima tentativa conecta de novo)
+  if (msg === "AUTH_KEY_DUPLICATED") throw new DomainError(503, "A conexão com o Telegram caiu (sessão usada em outro lugar ao mesmo tempo): tente de novo em instantes");
   if (!msg) throw e; // não veio do Telegram (rede, banco...): erro interno, registrado no log
   throw new DomainError(502, `O Telegram recusou (${msg}): tente de novo`);
 }
 class SessionEnded extends Error {}
+/** Erros do Telegram que querem dizer "esta sessão não vale mais" (encerrada no app do Telegram, conta apagada...). */
+export const SESSION_ENDED = ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "USER_DEACTIVATED"];
 
 /** Conecta, faz o que precisa e fecha a conexão (cada etapa é curta); demora demais = 504. */
 async function withClient<T>(session: string, fn: (c: TgClient) => Promise<T>): Promise<T> {
@@ -297,6 +314,9 @@ function dropPooled(id: string) {
   void p.c.close();
 }
 async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: TgClient) => Promise<T>): Promise<T> {
+  // tempo real ligado: quem conecta no Telegram é só o gateway (uma conexão por conta); o site pede a ele
+  const gw = gatewayUrl();
+  if (gw) return withGateway(gw, link.id, fn);
   let p = pool.get(link.id);
   if (p && p.key !== poolKey(link.sessionEnc)) {
     dropPooled(link.id);
@@ -318,6 +338,19 @@ async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: T
     return await Promise.race([fn(cur.c), timeout]);
   } catch (e) {
     dropPooled(link.id); // na próxima, conecta de novo
+    return tgError(e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** O Telegram pelo gateway: mesma interface, cada chamada vira um pedido HTTP na rede interna. */
+async function withGateway<T>(url: string, linkId: string, fn: (c: TgClient) => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DomainError(504, "O Telegram demorou para responder: tente de novo")), 45_000); });
+  try {
+    return await Promise.race([fn(remoteClient(url, linkId)), timeout]);
+  } catch (e) {
     return tgError(e);
   } finally {
     clearTimeout(timer);
@@ -959,7 +992,10 @@ export async function disconnectTelegram(userId: string, id: string) {
   const l = await own(userId, id);
   dropPooled(l.id);
   if (l.status === "ACTIVE" && telegramEnabled()) {
-    await withClient(decrypt(l.sessionEnc), (c) => c.logOut()).catch(() => {}); // já encerrada lá: só apaga aqui
+    // com o gateway, sai pela conexão dele (abrir outra com a mesma sessão derrubaria as duas)
+    const gw = gatewayUrl();
+    const out = gw ? withGateway(gw, l.id, (c) => c.logOut()) : withClient(decrypt(l.sessionEnc), (c) => c.logOut());
+    await out.catch(() => {}); // já encerrada lá: só apaga aqui
   }
   await prisma.telegramLink.deleteMany({ where: { id, userId } });
   return telegramStatus(userId);
