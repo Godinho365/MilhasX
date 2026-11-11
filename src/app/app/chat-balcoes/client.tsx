@@ -519,9 +519,10 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
   const typedCents = target?.ad ? parseCounterOffer(text) : null;
   const typedProfit = target?.ad && typedCents != null ? emissionAnalysis(target.ad, typedCents, accounts) : null;
   const title = group ? source.chat.title : `${source.dm.name}${source.dm.username ? ` (@${source.dm.username})` : ""}`;
+  const refresh = live ? "em tempo real" : "atualiza sozinho a cada 15 segundos";
   const subtitle = group
-    ? `pela conta ${source.chat.account} · atualiza sozinho a cada 15 segundos${msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos em ${msgs.length} mensagens` : ""}`
-    : `privado pela conta ${source.dm.via}${source.dm.group ? ` · do grupo ${source.dm.group}` : ""} · atualiza sozinho a cada 15 segundos`;
+    ? `pela conta ${source.chat.account} · ${refresh}${msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos em ${msgs.length} mensagens` : ""}`
+    : `privado pela conta ${source.dm.via}${source.dm.group ? ` · do grupo ${source.dm.group}` : ""} · ${refresh}`;
   return (
     <div className="card flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">

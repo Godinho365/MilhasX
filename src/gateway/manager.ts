@@ -52,7 +52,7 @@ class LinkRunner {
     if (this.status.state !== state || this.status.error !== error) {
       this.status = { ...this.status, state, error, since: new Date().toISOString() };
       log(state === "connected" ? "info" : "warn", "tg.link", { linkId: this.linkId, state, error });
-      this.gw.reportStatus(this);
+      this.gw.reportStatus(this, true);
     }
   }
   /** Coloca na fila da conta (um de cada vez); erro de um não trava os outros. */
@@ -287,9 +287,10 @@ export class Gateway {
     return result;
   }
 
-  reportStatus(r: LinkRunner) {
+  /** Status da conta no Redis (renovado de tempos em tempos); changed = mudou agora: avisa as abas. */
+  reportStatus(r: LinkRunner, changed = false) {
     void this.bus.setStatus(r.linkId, r.status, Math.ceil((this.timings.statusEveryMs * 4) / 1000)).catch(() => {});
-    void this.bus.publish(userChannel(r.userId), { type: "status", linkId: r.linkId, state: r.status.state, at: Date.now() }).catch(() => {});
+    if (changed) void this.bus.publish(userChannel(r.userId), { type: "status", linkId: r.linkId, state: r.status.state, at: Date.now() }).catch(() => {});
   }
 
   health() {
