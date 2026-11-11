@@ -194,6 +194,10 @@ describe("site pelo gateway (rede interna)", () => {
     gw = new Gateway({ factory: tgFake.factory, bus, timings: FAST });
     await gw.start();
     await waitFor(() => gw!.runner(linkId)?.status.state === "connected");
+    // estes testes são do caminho pelo gateway (pedido ao Telegram): o grupo fica como "ainda não sincronizado",
+    // senão a leitura sai do banco (coberta em realtime.test.ts)
+    await waitFor(async () => (await prisma.telegramGroup.findUniqueOrThrow({ where: { id: groupId } })).syncedAt != null);
+    await prisma.telegramGroup.update({ where: { id: groupId }, data: { syncedAt: null } });
     const server = gatewayServer(gw).listen(0, "127.0.0.1");
     await new Promise((r) => server.once("listening", r));
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
