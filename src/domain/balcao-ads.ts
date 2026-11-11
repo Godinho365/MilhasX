@@ -2,6 +2,8 @@
 // Tira o programa, a quantidade de milhas, os CPFs e o milheiro (CPM). Contraproposta (só um número, "24,5 conta
 // própria"), mensagem do bot do grupo e compra de crédito não são anúncio: sem programa e quantidade, não é.
 
+import { emissionFit, leftoverAfter, type AccountLoad } from "./capacity";
+
 /** Texto para comparar: minúsculo e sem acentos. */
 export const normalizeText = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -62,7 +64,7 @@ export const PROGRAM_CODE: Record<BalcaoProgram, string> = {
 
 /** Conta que pode emitir: saldo livre (sem o reservado em negociações abertas), CPFs livres (null = sem limite) e
  *  custo médio do milheiro. */
-export type EmissionAccount = { id: string; label: string; programCode: string; available: number; cpfFree: number | null; costCpmCents: number };
+export type EmissionAccount = { id: string; label: string; programCode: string; available: number; cpfFree: number | null; costCpmCents: number; load: AccountLoad };
 
 /** Lucro de atender o pedido por `cpmCents` com a conta mais barata que consegue emitir (programa, saldo e CPFs):
  *  o total, por CPF (sem a quantidade no pedido, 1) e a sobra (milhas que ficam na conta depois e quanto custaram,
@@ -84,6 +86,37 @@ export function emissionProfit(ad: { program: BalcaoProgram; miles: number; cpfs
     leftoverMiles,
     leftoverCostCents: Math.round((leftoverMiles * best.costCpmCents) / 1000),
     cpfLeft: best.cpfFree == null ? null : best.cpfFree - cpfs,
+  };
+}
+
+/** Análise do pedido para EXIBIR (grupo e privado): a conta mais próxima do limite de pontos — entre as que cobrem
+ *  o pedido (saldo e CPFs, pela regra `emissionFit` da negociação), a que fica com MENOS saldo depois, para usar
+ *  primeiro as contas quase no fim e guardar as cheias para pedidos grandes. Mostra o saldo e os CPFs que ficam
+ *  depois, a sobra que não paga outra emissão (leftoverAfter) e o lucro (só com preço e conta que cobre). Aparece
+ *  mesmo sem preço (só sem o lucro) e mesmo quando nenhuma conta cobre sozinha (mostra a que chega mais perto e o
+ *  que falta — aí o operador divide os passageiros entre contas). Diferente de `emissionProfit` (conta mais barata).
+ *  null só quando você não tem conta no programa do pedido. */
+export function emissionAnalysis(ad: { program: BalcaoProgram; miles: number; cpfs: number | null }, cpmCents: number | null, accounts: EmissionAccount[]) {
+  const code = PROGRAM_CODE[ad.program];
+  const cpfs = ad.cpfs ?? 1;
+  const rows = accounts.filter((a) => a.programCode === code);
+  if (!rows.length) return null;
+  const list = rows.map((r) => ({ ...r, fit: emissionFit(r.load, ad.miles, cpfs) }));
+  const covering = list.filter((x) => x.fit.enough && !x.fit.cpfShort);
+  // cobre: a conta mais próxima do limite (menor saldo depois); ninguém cobre: a que chega mais perto (maior saldo depois)
+  const best = covering.length
+    ? covering.reduce((x, y) => (y.fit.balanceAfter < x.fit.balanceAfter ? y : x))
+    : list.reduce((x, y) => (y.fit.balanceAfter > x.fit.balanceAfter ? y : x));
+  const covers = best.fit.enough && !best.fit.cpfShort;
+  const left = covers ? leftoverAfter(best.fit.balanceAfter, best.load.ptsPerCpf, best.costCpmCents) : null;
+  const profitCents = covers && cpmCents != null ? Math.round((ad.miles * (cpmCents - best.costCpmCents)) / 1000) : null;
+  return {
+    accountId: best.id, account: best.label, costCpmCents: best.costCpmCents, accounts: rows.length,
+    covers, enough: best.fit.enough, cpfShort: best.fit.cpfShort,
+    profitCents, perCpfCents: profitCents != null ? Math.round(profitCents / cpfs) : null,
+    balanceAfter: best.fit.balanceAfter, cpfAfter: best.fit.cpfAfter,
+    leftoverPoints: left?.points ?? 0, leftoverCostCents: left?.costCents ?? 0,
+    missingMiles: best.fit.enough ? 0 : -best.fit.balanceAfter,
   };
 }
 

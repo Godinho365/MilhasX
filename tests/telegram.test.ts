@@ -17,6 +17,9 @@ import * as dmOpenRoute from "@/app/api/telegram/chats/[id]/dms/route";
 import * as dmsRoute from "@/app/api/telegram/dms/route";
 import * as dmRoute from "@/app/api/telegram/dms/[id]/route";
 import * as dmMessagesRoute from "@/app/api/telegram/dms/[id]/messages/route";
+import * as dmFileRoute from "@/app/api/telegram/dms/[id]/file/route";
+import * as dmMediaRoute from "@/app/api/telegram/dms/[id]/media/[msgId]/route";
+import * as chatMediaRoute from "@/app/api/telegram/chats/[id]/media/[msgId]/route";
 import * as crmRoute from "@/app/api/telegram/chats/[id]/crm/route";
 import * as chatRoute from "@/app/api/telegram/chats/[id]/route";
 import * as dealDmRoute from "@/app/api/miles-deals/[id]/telegram-dm/route";
@@ -52,9 +55,11 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 
 const rpc = (errorMessage: string) => Object.assign(new Error(errorMessage), { errorMessage });
 /** Mensagens dos grupos simulados (pelo id do grupo), da mais antiga para a mais nova. */
-const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, out: false, fromUser: true, replyTo: null });
+const mediaKindOf = (media: string | null): "photo" | "file" | null => (media == null ? null : ["foto", "imagem"].includes(media) ? "photo" : ["enquete", "anexo"].includes(media) ? null : "file");
+const msg = (id: number, hour: number, sender: string, text: string, media: string | null = null): TgMessage => ({ id, date: `2026-11-08T${String(hour).padStart(2, "0")}:00:00.000Z`, sender, text, media, mediaKind: mediaKindOf(media), mediaName: null, out: false, fromUser: true, replyTo: null });
 /** O que foi mandado pelo app (no grupo ou no privado), pelo id do chat. */
 let SENT: Record<string, TgMessage[]> = {};
+let READ_OUTBOX: Record<string, number> = {}; // até onde a pessoa leu as suas mensagens, por peer
 const MSGS: Record<string, TgMessage[]> = {
   "1234": [msg(1, 10, "Ana", "Compro 100k LATAM a R$ 25"), msg(2, 11, "Bia", "Bom dia, pessoal"), msg(3, 12, "Caio", "", "foto"), msg(4, 13, "Duda", "Vendo Smiles 50k")],
   "5678": [msg(10, 12, "Eva", "compro latam 30K urgente"), msg(11, 14, "Fábio", "Promoção Azul")],
@@ -131,6 +136,19 @@ function fake(opts: { withPassword?: string[]; revoked?: boolean } = {}) {
         const m = (MSGS[group.id] ?? []).find((x) => x.id === messageId);
         return m ? { id: `u-${m.sender}`, hash: `h-${m.sender}`, name: m.sender, username: null, self: false, bot: messageId === 11 } : null;
       },
+      sendFile: async (peer, file, caption) => {
+        if (opts.revoked || !s.startsWith("ok:")) throw rpc("AUTH_KEY_UNREGISTERED");
+        calls.push(`sendFile ${peer.kind}:${peer.id} ${file.name}${caption ? ` [${caption}]` : ""}`);
+        const m: TgMessage = { ...msg(100 + calls.length, 15, "Você", caption ?? "", "arquivo"), out: true };
+        (SENT[peer.id] ??= []).push(m);
+        return m;
+      },
+      readOutboxMaxId: async (peer) => READ_OUTBOX[peer.id] ?? 0,
+      downloadMedia: async (peer, messageId) => {
+        const m = [...(MSGS[peer.id] ?? []), ...(SENT[peer.id] ?? [])].find((x) => x.id === messageId);
+        if (!m?.media) return null;
+        return { bytes: Buffer.from(`fake:${peer.id}:${messageId}`), mime: m.media === "foto" ? "image/jpeg" : "application/pdf", name: m.mediaName ?? (m.media === "foto" ? `foto-${messageId}.jpg` : `arquivo-${messageId}`) };
+      },
       logOut: async () => { calls.push(`logOut ${phone()}`); },
     };
   };
@@ -142,6 +160,7 @@ beforeEach(async () => {
   await resetDb();
   calls = [];
   SENT = {};
+  READ_OUTBOX = {};
   setTelegramClientFactory(fake());
   c = new Client();
   userId = (await c.call(register.POST, "POST", "/r", { name: "Ana", email: "ana@x.test", password: "senha-forte-1" })).data.user.id;
@@ -303,9 +322,15 @@ describe("Chat Balcões", () => {
     const all = (await c.call(messagesRoute.GET, "GET", "/api/telegram/accounts/x/messages?limit=60", undefined, { id: a })).data.items;
     expect(all.map((m: { id: number }) => m.id)).toEqual([1, 2, 3, 4]);
     expect(all[0]).toMatchObject({ sender: "Ana", text: "Compro 100k LATAM a R$ 25", alerts: ["latam + compro"] });
-    expect(all[2]).toMatchObject({ text: "", media: "foto", alerts: [] });
+    expect(all[2]).toMatchObject({ text: "", media: "foto", mediaKind: "photo", alerts: [] });
     const newer = (await c.call(messagesRoute.GET, "GET", "/api/telegram/accounts/x/messages?minId=2", undefined, { id: a })).data.items;
     expect(newer.map((m: { id: number }) => m.id)).toEqual([3, 4]);
+
+    // a foto do grupo: a rota de mídia devolve a imagem (abre na tela, disposição inline)
+    const foto = await chatMediaRoute.GET(new Request("http://localhost:3100/x", { headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: a, msgId: String(all[2].id) }) });
+    expect(foto.status).toBe(200);
+    expect(foto.headers.get("content-type")).toBe("image/jpeg");
+    expect(foto.headers.get("content-disposition")).toContain("inline");
 
     // conta que escolheu o grupo antes de existir o acesso direto: busca nos chats uma vez e guarda
     await prisma.telegramGroup.update({ where: { id: a }, data: { peer: Prisma.DbNull } });
@@ -407,6 +432,31 @@ describe("mandar mensagem e conversar no privado", () => {
     expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items).toEqual([expect.objectContaining({ text: "Oi! Tenho LATAM", out: true, ad: null, alerts: [] })]);
     expect((await c.call(dmsRoute.GET, "GET", "/x")).data.items).toHaveLength(1);
 
+    // 1 check (estilo WhatsApp): readMax = até onde a pessoa leu as suas mensagens
+    const dmGet = await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id });
+    expect(dmGet.data.readMax).toBe(0); // ainda não visualizou (amarelo)
+    READ_OUTBOX["u-Ana"] = dmGet.data.items[0].id; // a pessoa leu a sua mensagem
+    expect((await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.readMax).toBe(dmGet.data.items[0].id); // verde
+
+    // anexo: manda uma foto/print/PDF no privado (vai pelo sendFile)
+    const fileReq = new Request("http://localhost:3100/x", { method: "POST", headers: { cookie: c.cookie, origin: "http://localhost:3100", "x-file-name": encodeURIComponent("print.pdf") }, body: Buffer.from("%PDF-1.4\nfake") });
+    const fileRes = await dmFileRoute.POST(fileReq, { params: Promise.resolve({ id: dm.id }) });
+    expect(await fileRes.clone().json().then((j) => j.ok)).toBe(true);
+    expect(calls.some((x) => x.startsWith("sendFile user:u-Ana print.pdf"))).toBe(true);
+
+    // baixar/mostrar o anexo: a rota de mídia devolve os bytes com o tipo e a disposição certos
+    const withFile = (await c.call(dmMessagesRoute.GET, "GET", "/x", undefined, { id: dm.id })).data.items as { id: number; media: string | null; mediaKind?: string }[];
+    const fileMsg = withFile.find((m) => m.media === "arquivo");
+    expect(fileMsg?.mediaKind).toBe("file");
+    const media = await dmMediaRoute.GET(new Request("http://localhost:3100/x", { headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: dm.id, msgId: String(fileMsg!.id) }) });
+    expect(media.status).toBe(200);
+    expect(media.headers.get("content-type")).toBe("application/pdf");
+    expect(media.headers.get("content-disposition")).toContain("attachment");
+    expect(Buffer.from(await media.arrayBuffer()).length).toBeGreaterThan(0);
+    // mensagem sem anexo → 404
+    const noMedia = await dmMediaRoute.GET(new Request("http://localhost:3100/x", { headers: { cookie: c.cookie } }), { params: Promise.resolve({ id: dm.id, msgId: "999999" }) });
+    expect(noMedia.status).toBe(404);
+
     // outro usuário não vê nem manda
     const o = new Client();
     await o.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
@@ -479,7 +529,7 @@ describe("contas para emitir os pedidos (lucro)", () => {
 });
 
 describe("alerta por lucro", () => {
-  const accs = [{ id: "a", label: "Ana LATAM", programCode: "LATAM", available: 200_000, cpfFree: 5, costCpmCents: 2000 }];
+  const accs = [{ id: "a", label: "Ana LATAM", programCode: "LATAM", available: 200_000, cpfFree: 5, costCpmCents: 2000, load: { balance: 200_000, reserved: 0, cpfFree: 5, ptsPerCpf: 30_000 } }];
   it("pelo milheiro do pedido com a conta mais barata; sem preço ou sem conta, não dispara", () => {
     const rules = [
       { id: "1", name: "Lucro 400", words: [], active: true, minProfitCents: 40_000 },
@@ -606,7 +656,7 @@ describe("registrar o pedido no CRM Milhas", () => {
     expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 1, text: "Compro 100k LATAM a R$ 25", sender: "Ana" }, { id: a })).data.erro).toMatch(/já está no CRM Milhas \(#1\)/);
     // a mensagem do pedido mostra a negociação
     const msgs = (await c.call(messagesRoute.GET, "GET", "/x", undefined, { id: a })).data.items;
-    expect(msgs.find((m: { id: number }) => m.id === 1).crm).toEqual({ id: r.data.item.id, number: 1, stage: "NEW" });
+    expect(msgs.find((m: { id: number }) => m.id === 1).crm).toEqual({ id: r.data.item.id, number: 1, stage: "NEW", accountId: null });
     expect(msgs.find((m: { id: number }) => m.id === 2).crm).toBeNull();
     expect((await c.call(crmRoute.POST, "POST", "/x", { messageId: 2, text: "Bom dia, pessoal", sender: "Bia" }, { id: a })).data.erro).toMatch(/não é um pedido/);
 
@@ -698,6 +748,12 @@ describe("negociação vinda do Chat Balcões: dados do comprador e termo de emi
     const r = await c.call(dealMsgRoute.POST, "POST", "/x", { text: "Emissão concluída! Localizador ABC123" }, { id: deal.id });
     expect(r.status).toBe(200);
     expect(calls.filter((x) => x.startsWith("send "))).toEqual(["send user:u-Ana Emissão concluída! Localizador ABC123"]);
+    // com o bilhete anexado, o 1 clique manda também o PDF, logo depois do texto
+    await prisma.milesDealTicket.create({ data: { dealId: deal.id, userId, name: "bilhete.pdf", mime: "application/pdf", size: 3, data: Buffer.from("PDF") } });
+    calls = [];
+    await c.call(dealMsgRoute.POST, "POST", "/x", { text: "Segue de novo" }, { id: deal.id });
+    expect(calls).toContain("send user:u-Ana Segue de novo");
+    expect(calls.some((x) => x.startsWith("sendFile user:u-Ana bilhete.pdf"))).toBe(true);
     // feita à mão: não tem para quem mandar; vazia: barra
     const manual = (await c.call(dealsRoute.POST, "POST", "/x", { buyerType: "BALCAO", customerName: "Balcão Milhas VIP" })).data.item;
     expect((await c.call(dealMsgRoute.POST, "POST", "/x", { text: "oi" }, { id: manual.id })).status).toBe(400);

@@ -252,14 +252,14 @@ describe("reembolso de venda", () => {
     expect(refundDeadline({ occurredAt: new Date("2026-10-30T00:00:00Z"), createdAt: new Date("2026-11-02T14:00:00Z") }).toISOString()).toBe("2026-10-31T03:00:00.000Z");
   });
 
-  it("depois de 24 horas não dá mais para reembolsar", async () => {
+  it("depois de 24 horas ainda dá para reembolsar (o prazo é só informativo)", async () => {
     const id = (await newSale({ items: [flight()] })).data.item.id;
     await prisma.sale.update({ where: { id }, data: { occurredAt: new Date("2026-10-10T15:30:00Z") } });
-    expect((await view(id)).refundUntil).toBe("2026-10-11T15:30:00.000Z");
-    vi.setSystemTime(new Date("2026-10-11T15:31:00Z"));
-    const r = await refund(id, { feeCents: 10000, date: "2026-10-11" });
-    expect(r.status).toBe(409);
-    expect(r.data.erro).toContain("prazo de reembolso");
+    expect((await view(id)).refundUntil).toBe("2026-10-11T15:30:00.000Z"); // prazo informativo das 24 h
+    vi.setSystemTime(new Date("2026-10-15T12:00:00Z")); // vários dias depois
+    const r = await refund(id, { feeCents: 10000, date: "2026-10-15" });
+    expect(r.status).toBe(200);
+    expect((await view(id)).refund).not.toBeNull();
   });
 
   const refund = (id: string, body: Record<string, unknown>) => c.call(refundRoute.POST, "POST", `/api/sales/${id}/refund`, body, { id });
