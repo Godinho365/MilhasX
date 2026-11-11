@@ -62,8 +62,9 @@ export async function accountsCapacity(userId: string, opts: { exceptDealId?: st
 /** Contas que podem emitir pedidos do balcão (Chat Balcões): saldo livre (sem o reservado em negociações abertas),
  *  CPFs livres (null = conta sem limite) e custo médio do milheiro. Só contas com saldo. */
 export async function emissionAccounts(userId: string): Promise<EmissionAccount[]> {
-  const [usage, accounts, deals] = await Promise.all([
+  const [usage, avg, accounts, deals] = await Promise.all([
     beneficiaryUsage(userId),
+    emissionAverage(userId),
     prisma.account.findMany({ where: { userId, archived: false, balance: { gt: 0 } }, select: { id: true, balance: true, costCents: true, nickname: true, program: { select: { name: true, code: true } }, holder: { select: { name: true } } } }),
     prisma.milesDeal.findMany({ where: { userId, archivedAt: null, saleId: null, stage: { in: [...OPEN_STAGES] }, accountId: { not: null } }, select: { accountId: true, points: true } }),
   ]);
@@ -72,11 +73,15 @@ export async function emissionAccounts(userId: string): Promise<EmissionAccount[
   return accounts
     .map((a) => {
       const u = usage[a.id];
+      const reserved = reservedBy.get(a.id) ?? 0;
+      const cpfFree = u?.limit != null ? Math.max(0, u.limit - u.used) : null;
       return {
         id: a.id, label: a.nickname || `${a.program.name} ${shortName(a.holder.name)}`, programCode: a.program.code.toUpperCase(),
-        available: a.balance - (reservedBy.get(a.id) ?? 0),
-        cpfFree: u?.limit != null ? Math.max(0, u.limit - u.used) : null,
+        available: a.balance - reserved,
+        cpfFree,
         costCpmCents: Math.round((Math.max(0, a.costCents) * 1000) / a.balance),
+        // mesmo "load" que a sugestão de conta do CRM usa (domain/capacity): saldo, reservado, CPFs livres e média por CPF
+        load: { balance: a.balance, reserved, cpfFree: cpfFree ?? 9_999_999, ptsPerCpf: avg.ptsPerCpf },
       };
     })
     .filter((a) => a.available > 0);

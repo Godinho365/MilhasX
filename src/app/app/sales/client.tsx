@@ -209,9 +209,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
           {menu.s.refund && !menu.s.refund.taxReceivedAt && <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); receive(s, "tax"); }}><CircleCheck className="h-4 w-4 shrink-0" />Taxa estornada</button>}
           {menu.s.refund
             ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); undo(s); }}><Undo2 className="h-4 w-4" />Desfazer reembolso</button>
-            : refundOpen(menu.s)
-              ? <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-line" onClick={() => { setRefunding(menu.s); setMenu(null); }}><Undo2 className="h-4 w-4" />Reembolsar</button>
-              : <button role="menuitem" disabled className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted" title={menu.s.refundUntil ? `O prazo de 24 horas acabou em ${fmtDateTime(menu.s.refundUntil)}` : undefined}><Undo2 className="h-4 w-4 shrink-0" />Prazo de reembolso encerrado</button>}
+            : <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-line" onClick={() => { setRefunding(menu.s); setMenu(null); }} title={!refundOpen(menu.s) && menu.s.refundUntil ? `O prazo de 24 h acabou em ${fmtDateTime(menu.s.refundUntil)} — dá para reembolsar mesmo assim` : undefined}><Undo2 className="h-4 w-4 shrink-0" />Reembolsar{!refundOpen(menu.s) && menu.s.refundUntil ? <span className="text-xs text-muted"> (fora das 24 h)</span> : null}</button>}
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-line" onClick={() => { const s = menu.s; setMenu(null); remove(s); }}><Trash2 className="h-4 w-4" />Excluir</button>
         </div>
       )}
@@ -324,7 +322,9 @@ function RefundDialog({ sale: s, onClose }: { sale: SaleView; onClose: () => voi
       <form id="refund-form" onSubmit={save} className="space-y-4">
         {erro && <Alert>{erro}</Alert>}
         <p className="text-sm text-muted">{s.description} · {s.program}</p>
-        {s.refundUntil && <p className="text-sm">Prazo para reembolsar: até <b>{fmtDateTime(s.refundUntil)}</b> (24 horas depois da emissão).</p>}
+        {s.refundUntil && (new Date(s.refundUntil).getTime() > Date.now()
+          ? <p className="text-sm">Dentro das 24 h (cancelamento sem custo da LATAM): até <b>{fmtDateTime(s.refundUntil)}</b>.</p>
+          : <p className="text-sm text-amber-300">As 24 h de cancelamento sem custo (até {fmtDateTime(s.refundUntil)}) já passaram — dá para reembolsar mesmo assim; a companhia pode cobrar ou negar.</p>)}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Taxa de administração por CPF" required><input className="input" inputMode="decimal" placeholder="R$ 0,00" value={perCpf} onChange={(e) => setPerCpf(e.target.value)} aria-label="Taxa de administração por CPF" /></Field>
           <Field label="Data do reembolso" required><input className="input" type="date" min={s.date.slice(0, 10)} value={date} onChange={(e) => setDate(e.target.value)} aria-label="Data do reembolso" /></Field>

@@ -5,6 +5,7 @@
 // escreveu e mandou: nunca envia nada sozinho.
 // O servidor precisa de TELEGRAM_API_ID e TELEGRAM_API_HASH (my.telegram.org) e de CREDENTIALS_KEY.
 import { TelegramClient, Api } from "telegram";
+import { CustomFile } from "telegram/client/uploads";
 import { StringSession } from "telegram/sessions";
 import { computeCheck } from "telegram/Password";
 import { LogLevel } from "telegram/extensions/Logger";
@@ -13,7 +14,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { matchAlerts, parseAlertWords, hasAdCriteria, hasProfitCriteria, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
-import { parseBalcaoAd, parseCounterOffer, emissionProfit, type EmissionAccount } from "@/domain/balcao-ads";
+import { parseBalcaoAd, parseCounterOffer, emissionAnalysis, type EmissionAccount } from "@/domain/balcao-ads";
 import { balcaoForGroup, buyerDataFromMessages } from "@/domain/miles-deals";
 import { createDeal, markDealTermsSent, moveDeal } from "./miles-deals";
 import { emissionAccounts } from "./capacity";
@@ -24,7 +25,7 @@ export type TgGroup = { id: string; title: string; channel: boolean; peer?: TgPe
 /** Mensagem: quem mandou ("Você" se foi a conta), quando, o texto e, se tiver, o tipo de anexo (foto, arquivo...).
  *  out = mandada pela conta; fromUser = a mensagem é de uma pessoa (dá para chamar no privado); replyTo = é resposta
  *  a esta mensagem (contraproposta a um pedido, por exemplo); fwd = encaminhada (o pedido levado para o privado). */
-export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; out: boolean; fromUser: boolean; replyTo: number | null; fwd?: boolean };
+export type TgMessage = { id: number; date: string; sender: string; text: string; media: string | null; mediaKind?: "photo" | "file" | null; mediaName?: string | null; out: boolean; fromUser: boolean; replyTo: number | null; fwd?: boolean };
 /** Pessoa que mandou uma mensagem no grupo, com o acesso para conversar com ela no privado. */
 export type TgUser = { id: string; hash: string; name: string; username: string | null; self: boolean; bot: boolean };
 export type SignInResult = "OK" | "PASSWORD_NEEDED" | "SIGN_UP_REQUIRED";
@@ -51,6 +52,12 @@ export interface TgClient {
   forward(from: TgPeer, messageId: number, to: TgPeer): Promise<TgMessage>;
   /** Quem mandou a mensagem do grupo, com o acesso para o privado (null = não é de uma pessoa). */
   author(group: TgPeer, messageId: number): Promise<TgUser | null>;
+  /** Manda um arquivo (documento, ex.: o bilhete em PDF) no chat, com legenda opcional, e devolve a mensagem. */
+  sendFile(peer: TgPeer, file: { name: string; mime: string; bytes: Buffer }, caption?: string): Promise<TgMessage>;
+  /** Baixa a foto ou o arquivo de uma mensagem; null = essa mensagem não tem anexo para baixar. */
+  downloadMedia(peer: TgPeer, messageId: number): Promise<{ bytes: Buffer; mime: string; name: string } | null>;
+  /** Até que mensagem sua (de saída) a pessoa já leu no chat (read_outbox_max_id); 0 = sem info. */
+  readOutboxMaxId(peer: TgPeer): Promise<number>;
   logOut(): Promise<void>;
 }
 
@@ -61,9 +68,10 @@ function inputPeer(p: TgPeer) {
   return new Api.InputPeerChat({ chatId: returnBigInt(p.id) });
 }
 function toMessage(m: Api.Message): TgMessage {
+  const mm = mediaMeta(m.media);
   return {
     id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
-    media: mediaLabel(m.media), out: !!m.out, fromUser: m.fromId instanceof Api.PeerUser || (!m.fromId && m.peerId instanceof Api.PeerUser),
+    media: mediaLabel(m.media), mediaKind: mm.kind, mediaName: mm.name, out: !!m.out, fromUser: m.fromId instanceof Api.PeerUser || (!m.fromId && m.peerId instanceof Api.PeerUser),
     replyTo: m.replyTo instanceof Api.MessageReplyHeader ? m.replyTo.replyToMsgId ?? null : null,
     fwd: !!m.fwdFrom,
   };
@@ -85,6 +93,22 @@ function mediaLabel(m: Api.TypeMessageMedia | undefined) {
   }
   if (m instanceof Api.MessageMediaPoll) return "enquete";
   return "anexo";
+}
+/** Teto de memória ao abrir/baixar a mídia recebida: acima disso não baixa (evita DoS com um arquivo gigante do grupo). */
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
+/** O que dá para fazer com a mídia na tela: "photo" mostra a imagem, "file" baixa o arquivo, null = nada para baixar
+ *  (prévia de link ou enquete). Imagem mandada como arquivo (print) conta como "photo" só se couber no teto — assim
+ *  um "image/*" gigante não vira uma <img> que baixa sozinha ao abrir o chat; vira botão de baixar (que também barra). */
+function mediaMeta(m: Api.TypeMessageMedia | undefined): { kind: "photo" | "file" | null; name: string | null } {
+  if (m instanceof Api.MessageMediaPhoto) return { kind: "photo", name: null };
+  if (m instanceof Api.MessageMediaDocument && m.document instanceof Api.Document) {
+    const mime = m.document.mimeType || "";
+    const attr = m.document.attributes.find((a) => a instanceof Api.DocumentAttributeFilename);
+    const name = attr instanceof Api.DocumentAttributeFilename ? attr.fileName : null;
+    const fits = Number(m.document.size) <= MAX_MEDIA_BYTES;
+    return { kind: mime.startsWith("image/") && fits ? "photo" : "file", name };
+  }
+  return { kind: null, name: null };
 }
 
 function apiCredentials() {
@@ -155,6 +179,37 @@ function gramClient(session: string): TgClient {
       const [u] = await c.invoke(new Api.users.GetUsers({ id: [new Api.InputUserFromMessage({ peer: inputPeer(group), msgId: messageId, userId: m.fromId.userId })] }));
       if (!(u instanceof Api.User)) return null;
       return { id: u.id.toString(), hash: (u.accessHash ?? 0).toString(), name: senderName(u), username: u.username ?? null, self: !!u.self, bot: !!u.bot };
+    },
+    sendFile: async (peer, file, caption) => {
+      const upload = new CustomFile(file.name, file.bytes.length, "", file.bytes);
+      // foto/print vai como foto (abre com prévia no Telegram); PDF e o resto vai como arquivo com o nome
+      const asPhoto = ["image/jpeg", "image/png", "image/webp"].includes(file.mime);
+      const m = await c.sendFile(inputPeer(peer), {
+        file: upload, caption, forceDocument: !asPhoto,
+        ...(asPhoto ? {} : { attributes: [new Api.DocumentAttributeFilename({ fileName: file.name })] }),
+      });
+      return toMessage(m);
+    },
+    downloadMedia: async (peer, messageId) => {
+      const [m] = await c.getMessages(inputPeer(peer), { ids: [messageId] });
+      if (!(m instanceof Api.Message)) return null;
+      const meta = mediaMeta(m.media);
+      if (!meta.kind) return null;
+      const doc = m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document ? m.media.document : null;
+      const photo = m.media instanceof Api.MessageMediaPhoto;
+      // trava de memória: não baixa arquivo acima do teto (foto do Telegram já é pequena, por isso só checa documento)
+      if (doc && Number(doc.size) > MAX_MEDIA_BYTES) throw new DomainError(413, "Arquivo grande demais para abrir aqui (mais de 20 MB) — baixe pelo app do Telegram");
+      const data = await c.downloadMedia(m);
+      if (!data) return null;
+      const bytes = typeof data === "string" ? Buffer.from(data, "binary") : Buffer.from(data);
+      const mime = doc?.mimeType || (photo ? "image/jpeg" : "application/octet-stream");
+      const name = meta.name ?? (photo ? `foto-${messageId}.jpg` : `arquivo-${messageId}`);
+      return { bytes, mime, name };
+    },
+    readOutboxMaxId: async (peer) => {
+      const r = await c.invoke(new Api.messages.GetPeerDialogs({ peers: [new Api.InputDialogPeer({ peer: inputPeer(peer) })] }));
+      const d = r.dialogs.find((x) => x instanceof Api.Dialog);
+      return d instanceof Api.Dialog ? d.readOutboxMaxId : 0;
     },
     logOut: async () => { await c.invoke(new Api.auth.LogOut()); },
   };
@@ -462,8 +517,8 @@ export async function chatMessages(userId: string, chatId: string, opts: { limit
     return { ...m, ad, alerts: m.text ? matchAlerts(m.text, rules, ad, accounts) : [] };
   });
   const refs = read.filter((m) => m.ad).map((m) => adRef(c.linkId, c.groupId, m.id));
-  const deals = refs.length ? await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true } }) : [];
-  const byRef = new Map(deals.map((d) => [d.sourceRef, { id: d.id, number: d.number, stage: d.stage }]));
+  const deals = refs.length ? await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true, accountId: true } }) : [];
+  const byRef = new Map(deals.map((d) => [d.sourceRef, { id: d.id, number: d.number, stage: d.stage, accountId: d.accountId }]));
   return read.map((m) => ({ ...m, crm: m.ad ? byRef.get(adRef(c.linkId, c.groupId, m.id)) ?? null : null }));
 }
 
@@ -482,7 +537,7 @@ export async function registerAdInCrm(userId: string, chatId: string, input: { m
   const existing = await prisma.milesDeal.findFirst({ where: { userId, sourceRef }, select: { number: true } });
   if (existing) throw new DomainError(409, `Este pedido já está no CRM Milhas (#${existing.number})`);
   const cpmCents = input.cpmCents ?? ad.cpmCents;
-  const profit = emissionProfit(ad, cpmCents, await emissionAccounts(userId));
+  const profit = emissionAnalysis(ad, cpmCents, await emissionAccounts(userId)); // mesma conta que a tela sugere (regra da negociação)
   const group = c.title.trim() || "Balcão";
   const used = await prisma.milesDeal.findMany({ where: { userId, buyerType: "BALCAO" }, select: { customerName: true }, distinct: ["customerName"] });
   const balcao = balcaoForGroup(group, used.map((u) => u.customerName));
@@ -492,7 +547,7 @@ export async function registerAdInCrm(userId: string, chatId: string, input: { m
     input.cpmCents != null ? `Minha contraproposta: ${brl(input.cpmCents)} o milheiro` : null,
   ].filter(Boolean).join("\n");
   const deal = await createDeal(userId, {
-    buyerType: "BALCAO", customerName: balcao, accountId: profit?.accountId ?? null, points: ad.miles, saleCpmCents: cpmCents ?? null,
+    buyerType: "BALCAO", customerName: balcao, accountId: profit?.covers ? profit.accountId : null, points: ad.miles, saleCpmCents: cpmCents ?? null,
     passengers: ad.cpfs ?? 1, notes, sourceRef, sourceContact: input.sender,
   });
   return input.cpmCents != null ? moveDeal(userId, deal.id, "NEGOTIATION") : deal;
@@ -515,6 +570,20 @@ export async function sendToGroup(userId: string, chatId: string, raw: string, r
   const peer = await chatPeer(c);
   const m = await guardSession(c.link, () => withPooled(c.link, (cl) => cl.send(peer, text, replyTo)));
   return { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] };
+}
+
+/** Manda um arquivo (foto, print ou PDF) no grupo. */
+export async function sendTelegramChatFile(userId: string, chatId: string, file: { name: string; mime: string; bytes: Buffer }, caption?: string) {
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  return plain(await guardSession(c.link, () => withPooled(c.link, (cl) => cl.sendFile(peer, file, caption))));
+}
+
+/** Baixa a foto ou o arquivo de uma mensagem do grupo (para mostrar ou baixar no Chat Balcões). */
+export async function telegramChatMedia(userId: string, chatId: string, messageId: number) {
+  const c = await ownChat(userId, chatId);
+  const peer = await chatPeer(c);
+  return guardSession(c.link, () => withPooled(c.link, (cl) => cl.downloadMedia(peer, messageId)));
 }
 
 /** Edita a sua mensagem no grupo (a contraproposta, por exemplo). */
@@ -561,11 +630,11 @@ export async function listTelegramDms(userId: string) {
   const groups = await prisma.telegramGroup.findMany({ where: { userId, id: { in: chatIds } }, select: { id: true, linkId: true, groupId: true } });
   const refOf = (o: DmOffer) => { const g = groups.find((x) => x.id === o.chatId); return g ? adRef(g.linkId, g.groupId, o.messageId) : null; };
   const refs = views.flatMap((v) => { const r = v.offer && refOf(v.offer); return r ? [r] : []; });
-  const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true } });
+  const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: { id: true, number: true, stage: true, sourceRef: true, accountId: true } });
   return views.map((v) => {
     const r = v.offer && refOf(v.offer);
     const d = r ? deals.find((x) => x.sourceRef === r) : undefined;
-    return { ...v, crm: d ? { id: d.id, number: d.number, stage: d.stage } : null };
+    return { ...v, crm: d ? { id: d.id, number: d.number, stage: d.stage, accountId: d.accountId } : null };
   });
 }
 
@@ -617,10 +686,16 @@ export async function dealBuyerData(userId: string, dealId: string) {
   return { dmId: dm.id, contact: dm.name, since: since.toISOString(), messages: theirs.length, ...buyerDataFromMessages(theirs.map((m) => m.text)) };
 }
 
-/** Manda um texto no privado para quem está negociando (pedido do Chat Balcões), pela conta do grupo. */
-export async function sendDealDm(userId: string, dealId: string, raw: string) {
+/** Manda um texto no privado para quem está negociando (pedido do Chat Balcões), pela conta do grupo.
+ *  attachTicket: manda também o bilhete (PDF) anexado à negociação, logo depois do texto. */
+export async function sendDealDm(userId: string, dealId: string, raw: string, opts: { attachTicket?: boolean } = {}) {
   const dm = await openDmFromDeal(userId, dealId);
-  return sendTelegramDm(userId, dm.id, raw);
+  const sent = await sendTelegramDm(userId, dm.id, raw);
+  if (opts.attachTicket) {
+    const ticket = await prisma.milesDealTicket.findUnique({ where: { dealId }, select: { name: true, mime: true, data: true } });
+    if (ticket) await sendTelegramDmFile(userId, dm.id, { name: ticket.name, mime: ticket.mime, bytes: Buffer.from(ticket.data) }, "📄 Segue o bilhete da sua emissão.");
+  }
+  return sent;
 }
 
 /** Manda o termo de emissão (o texto que o usuário conferiu) no privado para quem está negociando e anota quando. */
@@ -643,8 +718,12 @@ export async function dmMessages(userId: string, dmId: string, opts: { limit?: n
   const d = await ownDm(userId, dmId);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
   const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined;
-  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId })));
-  return msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] } : plain(m)));
+  const { msgs, readMax } = await guardSession(d.link, () => withPooled(d.link, async (c) => ({
+    msgs: await c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }),
+    readMax: await c.readOutboxMaxId(peer).catch(() => 0), // até onde a pessoa já leu as suas mensagens
+  })));
+  const items = msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] } : plain(m)));
+  return { items, readMax };
 }
 
 /**
@@ -757,6 +836,18 @@ export async function sendTelegramDm(userId: string, dmId: string, raw: string, 
   const text = messageText(raw);
   const d = await ownDm(userId, dmId);
   return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.send({ kind: "user", id: d.peerId, hash: d.peerHash }, text, replyTo))));
+}
+
+/** Manda um arquivo no privado (ex.: o bilhete da emissão em PDF), com legenda opcional. */
+export async function sendTelegramDmFile(userId: string, dmId: string, file: { name: string; mime: string; bytes: Buffer }, caption?: string) {
+  const d = await ownDm(userId, dmId);
+  return plain(await guardSession(d.link, () => withPooled(d.link, (c) => c.sendFile({ kind: "user", id: d.peerId, hash: d.peerHash }, file, caption))));
+}
+
+/** Baixa a foto ou o arquivo de uma mensagem da conversa no privado. */
+export async function telegramDmMedia(userId: string, dmId: string, messageId: number) {
+  const d = await ownDm(userId, dmId);
+  return guardSession(d.link, () => withPooled(d.link, (c) => c.downloadMedia({ kind: "user", id: d.peerId, hash: d.peerHash }, messageId)));
 }
 
 /** Edita ou exclui (text null) uma mensagem sua na conversa no privado. */

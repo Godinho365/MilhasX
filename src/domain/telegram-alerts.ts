@@ -1,8 +1,8 @@
 // Alertas do Chat Balcões. Dois jeitos, que podem ir juntos no mesmo alerta:
 // - pelo pedido de compra: programa, até quantos CPFs, faixa de milhas, milheiro (CPM) mínimo e lucro mínimo (total
-//   e por CPF, pelo milheiro do pedido com a sua conta mais barata que consegue emitir);
+//   e por CPF, pelo milheiro do pedido com a MESMA conta que a tela mostra — a sugestão pelas regras da negociação);
 // - por palavras: a mensagem tem todas elas (maiúsculas e acentos não importam). Para "uma ou outra", dois alertas.
-import { emissionProfit, normalizeText, parseBalcaoAd, type BalcaoAd, type BalcaoProgram, type EmissionAccount } from "./balcao-ads";
+import { emissionAnalysis, normalizeText, parseBalcaoAd, type BalcaoAd, type BalcaoProgram, type EmissionAccount } from "./balcao-ads";
 
 export { normalizeText };
 
@@ -66,8 +66,10 @@ function adFits(a: AlertRule, ad: BalcaoAd | null, accounts: EmissionAccount[]) 
   if (a.maxMiles != null && ad.miles > a.maxMiles) return false;
   if (a.minCpmCents != null && (ad.cpmCents == null || ad.cpmCents < a.minCpmCents)) return false;
   if (hasProfitCriteria(a)) {
-    const p = emissionProfit(ad, ad.cpmCents, accounts);
-    if (!p) return false;
+    // mesma conta/lucro que a tela mostra (emissionAnalysis). Sem conta que cubra o pedido inteiro ou sem preço,
+    // não dá para garantir o lucro: não passa.
+    const p = emissionAnalysis(ad, ad.cpmCents, accounts);
+    if (!p || !p.covers || p.profitCents == null || p.perCpfCents == null) return false;
     if (a.minProfitCents != null && p.profitCents < a.minProfitCents) return false;
     if (a.minProfitPerCpfCents != null && p.perCpfCents < a.minProfitPerCpfCents) return false;
   }

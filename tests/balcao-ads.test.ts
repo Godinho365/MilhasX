@@ -1,6 +1,6 @@
 // Leitor dos anúncios dos grupos de balcão, com os jeitos de escrever que aparecem nos grupos.
 import { describe, it, expect } from "vitest";
-import { parseBalcaoAd, parseCounterOffer, emissionProfit, type EmissionAccount } from "@/domain/balcao-ads";
+import { parseBalcaoAd, parseCounterOffer, emissionProfit, emissionAnalysis, type EmissionAccount } from "@/domain/balcao-ads";
 import { matchAlerts, describeAlert, type AlertRule } from "@/domain/telegram-alerts";
 
 const ad = (text: string) => parseBalcaoAd(text);
@@ -68,7 +68,10 @@ describe("alertas pelo pedido de compra", () => {
 });
 
 describe("lucro com as suas contas", () => {
-  const acc = (o: Partial<EmissionAccount>): EmissionAccount => ({ id: "a", label: "LATAM Ana", programCode: "LATAM", available: 100_000, cpfFree: 5, costCpmCents: 2000, ...o });
+  const acc = (o: Partial<EmissionAccount>): EmissionAccount => {
+    const b = { id: "a", label: "LATAM Ana", programCode: "LATAM", available: 100_000, cpfFree: 5 as number | null, costCpmCents: 2000, ...o };
+    return { ...b, load: o.load ?? { balance: b.available, reserved: 0, cpfFree: b.cpfFree ?? 9_999_999, ptsPerCpf: 30_000 } };
+  };
   it("conta mais barata que consegue emitir; por CPF, sobra de milhas e de CPFs", () => {
     const accounts = [acc({}), acc({ id: "b", label: "LATAM Bia", costCpmCents: 1800, available: 60_000, cpfFree: null }), acc({ id: "c", programCode: "SMILES", costCpmCents: 1000 })];
     expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, accounts)).toEqual({
@@ -80,5 +83,56 @@ describe("lucro com as suas contas", () => {
     expect(emissionProfit({ program: "LATAM", miles: 70_000, cpfs: 6 }, 2500, accounts)).toBeNull();
     expect(emissionProfit({ program: "LATAM", miles: 50_000, cpfs: 1 }, null, accounts)).toBeNull();
     expect(emissionProfit({ program: "Azul", miles: 1_000, cpfs: 1 }, 2500, accounts)).toBeNull();
+  });
+});
+
+describe("análise do pedido: conta mais próxima do limite (emissionAnalysis)", () => {
+  // conta pelo load (saldo, reservado, CPFs livres, milhas por CPF), como a sugestão de conta do CRM
+  const la = (balance: number, cpfFree: number, costCpmCents = 2000, id = "a", label = "LATAM Ana", programCode = "LATAM", ptsPerCpf = 30_000, reserved = 0): EmissionAccount =>
+    ({ id, label, programCode, costCpmCents, available: balance - reserved, cpfFree, load: { balance, reserved, cpfFree, ptsPerCpf } });
+
+  it("conta que cobre e com preço: lucro, por CPF e o que fica depois", () => {
+    expect(emissionAnalysis({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, [la(100_000, 5)])).toEqual({
+      accountId: "a", account: "LATAM Ana", costCpmCents: 2000, accounts: 1, covers: true, enough: true, cpfShort: false,
+      profitCents: 25_000, perCpfCents: 12_500, balanceAfter: 50_000, cpfAfter: 3, leftoverPoints: 0, leftoverCostCents: 0, missingMiles: 0,
+    });
+  });
+
+  it("deixa milhas presas: mostra a sobra que não paga outra emissão (leftoverAfter)", () => {
+    expect(emissionAnalysis({ program: "LATAM", miles: 50_000, cpfs: 1 }, 2500, [la(60_000, 5, 1800)]))
+      .toMatchObject({ covers: true, balanceAfter: 10_000, cpfAfter: 4, leftoverPoints: 10_000, leftoverCostCents: 18_000, profitCents: 35_000 });
+  });
+
+  it("escolhe a conta que cobre, não a primeira/mais barata", () => {
+    const ana = la(100_000, 1, 2000, "a", "Ana");            // não cobre 150k
+    const bia = la(200_000, 1, 2100, "b", "Bia");            // cobre 150k
+    expect(emissionAnalysis({ program: "LATAM", miles: 150_000, cpfs: 1 }, 2500, [ana, bia]))
+      .toMatchObject({ account: "Bia", covers: true, balanceAfter: 50_000, cpfAfter: 0 });
+  });
+
+  it("entre as que cobrem, usa a mais próxima do limite (sobra menos), não a maior nem a mais barata", () => {
+    const cheia = la(200_000, 20, 2000, "a", "Allan");   // sobra muito depois
+    const quase = la(30_000, 10, 2100, "b", "Raphael");  // mais perto do limite (mesmo mais cara)
+    expect(emissionAnalysis({ program: "LATAM", miles: 19_000, cpfs: 1 }, 2600, [cheia, quase]))
+      .toMatchObject({ account: "Raphael", covers: true, balanceAfter: 11_000 });
+  });
+
+  it("nenhuma conta cobre sozinha: diz o que falta (dividir entre contas)", () => {
+    expect(emissionAnalysis({ program: "LATAM", miles: 120_000, cpfs: 1 }, 2500, [la(30_000, 5, 1800)]))
+      .toMatchObject({ covers: false, enough: false, missingMiles: 90_000, account: "LATAM Ana", profitCents: null });
+  });
+
+  it("sem preço mas cobre: mostra conta/saldo depois, sem o lucro", () => {
+    expect(emissionAnalysis({ program: "LATAM", miles: 50_000, cpfs: 1 }, null, [la(60_000, 5, 1800)]))
+      .toMatchObject({ covers: true, profitCents: null, perCpfCents: null, balanceAfter: 10_000, leftoverPoints: 10_000 });
+  });
+
+  it("CPFs esgotados: não cobre (cpfShort)", () => {
+    expect(emissionAnalysis({ program: "LATAM", miles: 50_000, cpfs: 2 }, 2500, [la(100_000, 1)]))
+      .toMatchObject({ covers: false, cpfShort: true });
+  });
+
+  it("sem conta no programa do pedido: null", () => {
+    expect(emissionAnalysis({ program: "Azul", miles: 10_000, cpfs: 1 }, 2500, [la(100_000, 5)])).toBeNull();
   });
 });

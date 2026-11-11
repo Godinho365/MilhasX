@@ -6,7 +6,9 @@ import { createSale, defaultFinAccountId, type SaleCost } from "./sales";
 import { brDay } from "@/domain/brasilia";
 import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
-import { unicoProcessLink, type FaceCheckStatus } from "@/domain/face-check";
+import { unicoProcessLink, suggestFaceCheck, type FaceCheckStatus } from "@/domain/face-check";
+import { parseLatamTicket, mergeTicketPassengers } from "@/domain/latam-ticket";
+import { extractPdfText } from "./pdf";
 
 // CRM Milhas: Kanban das negociações de venda de milhas. Ao chegar em "Emitido" a negociação vira uma
 // venda em Vendas, a receber (baixa dos pontos da conta escolhida); em "Pago" a venda fica paga. Depois
@@ -428,11 +430,41 @@ export async function setFaceCheck(userId: string, id: string, input: { link?: s
 
 export const TICKET_MAX = 10 * 1024 * 1024;
 
+const fmtPtsBR = (n: number) => n.toLocaleString("pt-BR");
+const brlBR = (c: number) => (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/[  ]/g, " ");
+
+/** Bilhete da LATAM (PDF): preenche os campos vazios da negociação (localizador, pontos, taxa, passageiros nome/CPF)
+ *  e avisa quando milhas ou taxa do bilhete divergem do que já estava. Devolve o aviso (ou null se não for LATAM). */
+async function applyLatamTicket(d: { id: string; locator: string | null; points: number | null; taxesCents: number | null; passengersData: unknown; passengersAt: Date | null }, buf: Buffer): Promise<string | null> {
+  const parsed = parseLatamTicket(await extractPdfText(buf));
+  if (!parsed) return null;
+  const data: Prisma.MilesDealUpdateInput = {};
+  const fills: string[] = [];
+  const warns: string[] = [];
+  if (!d.locator && parsed.locator) { data.locator = parsed.locator; fills.push(`localizador ${parsed.locator}`); }
+  if (d.points == null && parsed.milesPoints) { data.points = parsed.milesPoints; fills.push(`${fmtPtsBR(parsed.milesPoints)} milhas`); }
+  else if (d.points != null && parsed.milesPoints != null && d.points !== parsed.milesPoints) warns.push(`milhas — bilhete ${fmtPtsBR(parsed.milesPoints)} × negociação ${fmtPtsBR(d.points)}`);
+  if (d.taxesCents == null && parsed.taxesCents != null) { data.taxesCents = parsed.taxesCents; fills.push(`taxa ${brlBR(parsed.taxesCents)}`); }
+  else if (d.taxesCents != null && parsed.taxesCents != null && d.taxesCents !== parsed.taxesCents) warns.push(`taxa — bilhete ${brlBR(parsed.taxesCents)} × negociação ${brlBR(d.taxesCents)}`);
+  const merged = mergeTicketPassengers(d.passengersData, parsed.passengers);
+  if (merged.changed) {
+    data.passengersData = merged.list as unknown as Prisma.InputJsonValue;
+    if (!d.passengersAt) data.passengersAt = new Date();
+    fills.push(`${merged.filled} ${merged.filled === 1 ? "passageiro" : "passageiros"}`);
+  }
+  if (Object.keys(data).length) await prisma.milesDeal.update({ where: { id: d.id }, data });
+  const parts = [`📄 Bilhete ${parsed.orderNumber} lido.`];
+  if (fills.length) parts.push(`Preenchi: ${fills.join(", ")}.`);
+  if (warns.length) parts.push(`⚠️ Confira: ${warns.join("; ")}.`);
+  else if (!fills.length) parts.push("Nada a preencher (já estava tudo).");
+  return parts.join(" ");
+}
+
 /** Anexa (ou troca) o bilhete. Com ele a negociação passa a "Emitida" (e vira venda a receber) se ainda estava
  *  antes disso; se faltar algo para lançar a venda (conta, pontos, saldo), o bilhete fica salvo e o aviso diz o
- *  que falta. */
+ *  que falta. Bilhete da LATAM em PDF preenche os campos vazios e valida milhas/taxa. */
 export async function addDealTicket(userId: string, id: string, name: string, buf: Buffer) {
-  const d = await own(userId, id);
+  let d = await own(userId, id);
   if (d.faceCheckStatus !== "DONE" && d.faceCheckStatus !== "NOT_NEEDED") {
     throw new DomainError(409, "Antes do bilhete, faça a verificação: conclua a validação facial do titular ou marque que não foi pedida");
   }
@@ -443,16 +475,20 @@ export async function addDealTicket(userId: string, id: string, name: string, bu
   const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "bilhete";
   const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
   await prisma.milesDealTicket.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
+  // bilhete da LATAM em PDF: preenche os campos vazios e valida milhas/taxa; relê para refletir o que foi preenchido
+  const ticketAviso = mime === "application/pdf" ? await applyLatamTicket(d, buf) : null;
+  if (ticketAviso) d = await own(userId, id);
+  const join = (...a: (string | null)[]) => a.filter(Boolean).join(" · ") || null;
   if (d.saleId) {
     await copyFilesToSale(userId, d.id, d.saleId); // bilhete trocado: vai também para os anexos da venda
-    return { item: await getDeal(userId, id), aviso: null };
+    return { item: await getDeal(userId, id), aviso: ticketAviso };
   }
-  if (!["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage)) return { item: await getDeal(userId, id), aviso: null };
+  if (!["NEW", "NEGOTIATION", "AWAITING"].includes(d.stage)) return { item: await getDeal(userId, id), aviso: ticketAviso };
   try {
-    return { item: await moveDeal(userId, d.id, "ISSUED"), aviso: null };
+    return { item: await moveDeal(userId, d.id, "ISSUED"), aviso: ticketAviso };
   } catch (e) {
     if (!(e instanceof DomainError)) throw e;
-    return { item: await getDeal(userId, id), aviso: `Bilhete salvo, mas a negociação não foi para Emitido: ${e.message}` };
+    return { item: await getDeal(userId, id), aviso: join(ticketAviso, `Bilhete salvo, mas a negociação não foi para Emitido: ${e.message}`) };
   }
 }
 
@@ -527,12 +563,26 @@ export async function markDealTermsSent(userId: string, id: string, at = new Dat
   return getDeal(userId, id);
 }
 
+/** Após salvar passageiros, pré-marca a verificação facial quando ainda não há decisão:
+ *  compara o CPF do titular da conta com os CPFs dos passageiros. Nunca sobrescreve link colado nem status já definido. */
+async function autoFaceCheckFromPassengers(dealId: string) {
+  const d = await prisma.milesDeal.findUnique({
+    where: { id: dealId },
+    select: { faceCheckStatus: true, faceCheckUrl: true, passengersData: true, account: { select: { holder: { select: { documents: true } } } } },
+  });
+  if (!d || d.faceCheckStatus || d.faceCheckUrl) return;
+  const suggestion = suggestFaceCheck(d.account?.holder?.documents, d.passengersData);
+  if (!suggestion) return;
+  await prisma.milesDeal.update({ where: { id: dealId }, data: { faceCheckStatus: suggestion, faceCheckAt: suggestion === "NOT_NEEDED" ? new Date() : null } });
+}
+
 /** O próprio usuário informa os passageiros (o comprador mandou pelo WhatsApp/Telegram, sem usar a página). */
 export async function setDealPassengers(userId: string, id: string, passengers: Passenger[]) {
   const d = await own(userId, id);
   const data = passengers.map(cleanPassenger);
   const saved = await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: data.length ? new Date() : null } });
   await syncSaleCpfs(userId, saved);
+  await autoFaceCheckFromPassengers(d.id);
   return getDeal(userId, id);
 }
 
@@ -548,6 +598,7 @@ export async function submitDealPassengers(slug: string, token: string, passenge
   await prisma.loginAttempt.create({ data: { email: key, ip: ipHash, success: true } });
   const data = passengers.map(cleanPassenger);
   await prisma.milesDeal.update({ where: { id: d.id }, data: { passengersData: data, passengersAt: new Date() } });
+  await autoFaceCheckFromPassengers(d.id);
   await prisma.notification.create({ data: { userId: d.userId, title: "Passageiros recebidos", body: `${d.customerName} enviou ${data.length === 1 ? "o passageiro" : `${data.length} passageiros`} da negociação #${d.number} (CRM Milhas).` } });
   return { ok: true };
 }

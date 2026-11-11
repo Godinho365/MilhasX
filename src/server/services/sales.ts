@@ -451,17 +451,14 @@ export async function deleteSale(userId: string, id: string) {
  * venda" a receber); a taxa de embarque e os repasses também. Cada estorno é marcado depois (receiveRefund).
  * Os CPFs usados continuam usados. No faturamento fica só a taxa de administração cobrada do cliente.
  */
-export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }, now = new Date()) {
+export async function refundSale(userId: string, id: string, input: { feeCents: number; date: Date }) {
   if (!Number.isInteger(input.feeCents) || input.feeCents < 0) throw new DomainError(400, "Taxa de administração inválida");
   return withLedger(userId, async (tx) => {
     const s = await tx.sale.findFirst({ where: { id, userId } });
     if (!s) throw new DomainError(404, "Venda não encontrada");
     if (s.refundedAt) throw new DomainError(409, "Essa venda já foi reembolsada");
-    const deadline = refundDeadline(s);
-    if (now > deadline) {
-      const when = deadline.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
-      throw new DomainError(409, `O prazo de reembolso (24 horas depois da emissão) acabou em ${when}`);
-    }
+    // o prazo de 24 h (cancelamento sem custo da LATAM) é só informativo (refundDeadline/refundUntil); dá para
+    // registrar o reembolso de qualquer venda, inclusive as com mais de 24 h (a companhia pode cobrar ou negar)
     // compara só o dia: dá para reembolsar no mesmo dia (a venda do CRM Milhas guarda também o horário)
     const day = (d: Date) => d.toISOString().slice(0, 10);
     if (day(input.date) < day(s.occurredAt)) throw new DomainError(400, "O reembolso não pode ser antes da venda");

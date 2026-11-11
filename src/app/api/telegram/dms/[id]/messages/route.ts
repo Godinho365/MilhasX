@@ -6,7 +6,8 @@ import { dmMessages, sendTelegramDm } from "@/server/services/telegram";
 export const GET = route(async (req, { params }) => {
   const u = await requireUser(req);
   const q = new URL(req.url).searchParams;
-  return json({ ok: true, items: await dmMessages(u.id, (await params).id!, { minId: Number(q.get("minId")) || undefined, limit: Number(q.get("limit")) || undefined }) });
+  const { items, readMax } = await dmMessages(u.id, (await params).id!, { minId: Number(q.get("minId")) || undefined, limit: Number(q.get("limit")) || undefined });
+  return json({ ok: true, items, readMax });
 });
 
 export const POST = route(async (req, { params }) => {

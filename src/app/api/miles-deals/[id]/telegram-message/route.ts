@@ -6,6 +6,6 @@ import { sendDealDm } from "@/server/services/telegram";
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);
   const b = await parseBody(req, telegramMessageSchema);
-  await sendDealDm(u.id, (await params).id!, b.text);
+  await sendDealDm(u.id, (await params).id!, b.text, { attachTicket: true });
   return json({ ok: true });
 });
