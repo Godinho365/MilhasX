@@ -94,15 +94,19 @@ function mediaLabel(m: Api.TypeMessageMedia | undefined) {
   if (m instanceof Api.MessageMediaPoll) return "enquete";
   return "anexo";
 }
+/** Teto de memória ao abrir/baixar a mídia recebida: acima disso não baixa (evita DoS com um arquivo gigante do grupo). */
+const MAX_MEDIA_BYTES = 20 * 1024 * 1024;
 /** O que dá para fazer com a mídia na tela: "photo" mostra a imagem, "file" baixa o arquivo, null = nada para baixar
- *  (prévia de link ou enquete). Imagem mandada como arquivo (print, por exemplo) também conta como "photo". */
+ *  (prévia de link ou enquete). Imagem mandada como arquivo (print) conta como "photo" só se couber no teto — assim
+ *  um "image/*" gigante não vira uma <img> que baixa sozinha ao abrir o chat; vira botão de baixar (que também barra). */
 function mediaMeta(m: Api.TypeMessageMedia | undefined): { kind: "photo" | "file" | null; name: string | null } {
   if (m instanceof Api.MessageMediaPhoto) return { kind: "photo", name: null };
   if (m instanceof Api.MessageMediaDocument && m.document instanceof Api.Document) {
     const mime = m.document.mimeType || "";
     const attr = m.document.attributes.find((a) => a instanceof Api.DocumentAttributeFilename);
     const name = attr instanceof Api.DocumentAttributeFilename ? attr.fileName : null;
-    return { kind: mime.startsWith("image/") ? "photo" : "file", name };
+    const fits = Number(m.document.size) <= MAX_MEDIA_BYTES;
+    return { kind: mime.startsWith("image/") && fits ? "photo" : "file", name };
   }
   return { kind: null, name: null };
 }
@@ -191,11 +195,13 @@ function gramClient(session: string): TgClient {
       if (!(m instanceof Api.Message)) return null;
       const meta = mediaMeta(m.media);
       if (!meta.kind) return null;
+      const doc = m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document ? m.media.document : null;
+      const photo = m.media instanceof Api.MessageMediaPhoto;
+      // trava de memória: não baixa arquivo acima do teto (foto do Telegram já é pequena, por isso só checa documento)
+      if (doc && Number(doc.size) > MAX_MEDIA_BYTES) throw new DomainError(413, "Arquivo grande demais para abrir aqui (mais de 20 MB) — baixe pelo app do Telegram");
       const data = await c.downloadMedia(m);
       if (!data) return null;
       const bytes = typeof data === "string" ? Buffer.from(data, "binary") : Buffer.from(data);
-      const doc = m.media instanceof Api.MessageMediaDocument && m.media.document instanceof Api.Document ? m.media.document : null;
-      const photo = m.media instanceof Api.MessageMediaPhoto;
       const mime = doc?.mimeType || (photo ? "image/jpeg" : "application/octet-stream");
       const name = meta.name ?? (photo ? `foto-${messageId}.jpg` : `arquivo-${messageId}`);
       return { bytes, mime, name };
