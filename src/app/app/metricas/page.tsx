@@ -66,7 +66,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const user = await requirePageUser();
   const sp = await searchParams;
   const tab: MetricsTab = (METRICS_TABS as readonly string[]).includes(sp.aba ?? "") ? (sp.aba as MetricsTab) : "vendas";
-  const [holderId, hidden] = await Promise.all([selectedHolderId(user.id), metricsHidden(user.id)]);
+  const [holderId, hidden] = await Promise.all([selectedHolderId(user.id), metricsHidden(user.actor.id)]);
   const show = (k: string) => !hidden.includes(k);
   const scope = { month: sp.mes, holderId };
 

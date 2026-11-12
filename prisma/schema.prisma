@@ -81,6 +81,13 @@ model User {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  /// Login de membro da equipe: entra com o próprio e-mail e senha e trabalha nos dados deste dono da conta, só nas
+  /// áreas que a função dele permite (TeamMember.loginUserId). Vazio = conta própria (dono).
+  workspaceOwnerId String?
+  workspaceOwner   User?       @relation("Workspace", fields: [workspaceOwnerId], references: [id], onDelete: Cascade)
+  workspaceMembers User[]      @relation("Workspace")
+  teamLogin        TeamMember? @relation("TeamLogin")
+
   sessions         Session[]
   resetTokens      PasswordResetToken[]
   holders          Holder[]
@@ -126,7 +133,7 @@ model User {
   finTransactions     FinTransaction[]
   cardBillPayments    CardBillPayment[]
   cardBills           CardBill[]
-  teamMembers         TeamMember[]
+  teamMembers         TeamMember[]        @relation("TeamOwner")
   taskBoards          TaskBoard[]
   partners            Partner[]
   tasks               Task[]
@@ -145,6 +152,8 @@ model User {
   telegramGroups      TelegramGroup[]
   telegramAlerts      TelegramAlert[]
   telegramDms         TelegramDm[]
+
+  @@index([workspaceOwnerId])
 }
 
 /// Conta do Telegram do usuário (pode ter várias), para o Chat Balcões. A sessão dá acesso à conta: fica
@@ -1416,7 +1425,7 @@ model CardBill {
 model TeamMember {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation("TeamOwner", fields: [userId], references: [id], onDelete: Cascade)
   name      String
   role      String? // cargo
   email     String?
@@ -1426,6 +1435,17 @@ model TeamMember {
   issuer    Boolean  @default(false) // emite passagens
   createdAt DateTime @default(now())
   goals     Goal[]
+
+  // Acesso ao app com login próprio (vazio = só cadastro, sem entrar)
+  accessRole      String? // ADMIN | EMISSOR | ATENDIMENTO | FINANCEIRO | CONTADOR | CUSTOM
+  permissions     String[]  @default([]) // "area:view" / "area:edit" (domain/permissions.ts)
+  loginUserId     String?   @unique // o login do membro (User com workspaceOwnerId = o dono)
+  loginUser       User?     @relation("TeamLogin", fields: [loginUserId], references: [id], onDelete: SetNull)
+  inviteTokenHash String?   @unique // sha256 do link de convite (o link em si só vai para o membro)
+  inviteExpiresAt DateTime?
+  invitedAt       DateTime?
+  joinedAt        DateTime? // aceitou o convite
+  lastSeenAt      DateTime? // última atividade (no máximo a cada 5 min)
 
   @@index([userId])
 }

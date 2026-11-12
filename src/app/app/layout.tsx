@@ -10,26 +10,31 @@ import { prisma } from "@/server/db";
 import { Shell } from "@/components/shell";
 import type { DashboardView } from "@/lib/dashboard-views";
 import { PLANS, VALUES_MODES, effectivePlan } from "@/domain/plans";
+import { can, ROLE_LABEL } from "@/domain/permissions";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requirePageUser();
+  const me = user.actor; // quem entrou: o dono ou um membro da equipe
+  // milhas (contas e saldos no menu, "Novo lançamento"): só para quem a função permite
+  const miles = can(me.permissions, "milhas");
   // Gera os lançamentos recorrentes vencidos (idempotente)
   await processDueRecurrences(user.id);
   // No 1º acesso do mês: aviso de que o limite de bônus de transferência renovou
-  await notifyMonthlyBonus(user.id);
+  if (me.isOwner) await notifyMonthlyBonus(user.id);
+  const none = <T,>(v: T) => Promise.resolve(v);
   const [holders, accounts, unread, holderId, news, settings, pref, cards, guides, clubs, cap, bonusCaps] = await Promise.all([
-    listHolders(user.id),
-    listAccounts(user.id),
+    miles ? listHolders(user.id) : none([] as Awaited<ReturnType<typeof listHolders>>),
+    miles ? listAccounts(user.id) : none([] as Awaited<ReturnType<typeof listAccounts>>),
     unreadCount(user.id),
     selectedHolderValue(user.id),
-    unreadNews(user.id),
+    unreadNews(me.id),
     getSettings(),
-    prisma.userPreference.findUnique({ where: { userId: user.id }, select: { dashboardView: true, soundEffects: true, valuesMode: true, hideVideoTutorials: true } }),
-    prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.userPreference.findUnique({ where: { userId: me.id }, select: { dashboardView: true, soundEffects: true, valuesMode: true, hideVideoTutorials: true } }),
+    miles || can(me.permissions, "financeiro") ? prisma.creditCard.findMany({ where: { userId: user.id }, select: { id: true, name: true }, orderBy: { name: "asc" } }) : none([]),
     prisma.guide.findMany({ where: { published: true }, select: { slug: true, title: true, tags: true, kind: true }, orderBy: { order: "asc" } }),
-    clubActiveAccounts(user.id),
-    accountsCapacity(user.id),
-    bonusUsage(user.id),
+    miles ? clubActiveAccounts(user.id) : none(new Set<string>() as Awaited<ReturnType<typeof clubActiveAccounts>>),
+    miles ? accountsCapacity(user.id) : none({ avg: { ptsPerCpf: 0 }, rows: [] } as unknown as Awaited<ReturnType<typeof accountsCapacity>>),
+    miles ? bonusUsage(user.id) : none([] as Awaited<ReturnType<typeof bonusUsage>>),
   ]);
   const capBy = new Map(cap.rows.map((r) => [r.id, r]));
   const bonusLeft = new Map(bonusCaps.map((b) => [b.accountId, b.left]));
@@ -40,7 +45,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <Shell
       appName={appName()}
-      user={{ name: user.name, email: user.email, role: user.role, avatarVersion: user.avatarUpdatedAt?.getTime().toString() ?? null }}
+      user={{ name: me.name, email: me.email, role: user.role, avatarVersion: me.avatarUpdatedAt?.getTime().toString() ?? null }}
+      access={{ isOwner: me.isOwner, permissions: me.permissions, roleLabel: me.role ? ROLE_LABEL[me.role] : null, workspaceName: me.isOwner ? null : user.name }}
       holders={holders.filter((h) => h.active || h.id === holderId).map((h) => ({ id: h.id, name: h.name, isSelf: h.isSelf }))}
       programs={[...programs.values()]}
       accounts={accounts.filter((a) => !a.archived).map((a) => ({ pinned: a.pinned, id: a.id, holder: a.holder.name, program: a.program.name, color: a.program.color, balance: a.balance, costCents: a.costCents, programId: a.programId, holderId: a.holderId, logo: a.program.logoUpdatedAt?.getTime().toString() ?? null, bonusPct: a.transferBonusPct, bonusLeft: bonusLeft.get(a.id) ?? null, clubActive: clubs.has(a.id), space: capBy.get(a.id)?.space ?? null, cpfFree: capBy.get(a.id)?.load.cpfFree ?? null, ptsPerCpf: cap.avg.ptsPerCpf }))}

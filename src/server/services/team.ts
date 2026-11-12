@@ -4,6 +4,8 @@ import { listSales } from "./sales";
 import { detectAttachment, MAX_BYTES, MAX_FILES } from "./holder-files";
 import { nextDue, columnStatus, BASIC_COLUMNS, type Recurrence, type BoardColumn } from "@/domain/team";
 import { brDay } from "@/domain/brasilia";
+import { dropMemberLogin } from "./team-access";
+import { ROLE_LABEL, rolePermissions, type RoleKey } from "@/domain/permissions";
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const utc = (s: string) => new Date(`${s.slice(0, 10)}T00:00:00Z`);
@@ -27,7 +29,18 @@ export async function listMembers(userId: string) {
     prisma.task.findMany({ where: { userId, status: { not: "DONE" } }, select: { memberIds: true } }),
   ]);
   const count = (id: string) => open.filter((t) => t.memberIds.includes(id)).length;
-  return rows.map((m) => ({ id: m.id, name: m.name, role: m.role, email: m.email, phone: m.phone, color: m.color, active: m.active, issuer: m.issuer, openTasks: count(m.id), createdAt: m.createdAt.toISOString() }));
+  const now = new Date();
+  return rows.map((m) => ({
+    id: m.id, name: m.name, role: m.role, email: m.email, phone: m.phone, color: m.color, active: m.active, issuer: m.issuer, openTasks: count(m.id), createdAt: m.createdAt.toISOString(),
+    // acesso ao app: NONE (só cadastro), INVITED (convite pendente), EXPIRED (convite vencido) ou ACTIVE (entra com login)
+    access: {
+      status: (m.loginUserId ? "ACTIVE" : m.inviteTokenHash ? (m.inviteExpiresAt && m.inviteExpiresAt > now ? "INVITED" : "EXPIRED") : "NONE") as "NONE" | "INVITED" | "EXPIRED" | "ACTIVE",
+      role: (m.accessRole as RoleKey | null) ?? null,
+      roleLabel: m.accessRole ? ROLE_LABEL[m.accessRole as RoleKey] ?? null : null,
+      permissions: m.accessRole ? rolePermissions(m.accessRole as RoleKey, m.permissions) : [],
+      invitedAt: m.invitedAt?.toISOString() ?? null, joinedAt: m.joinedAt?.toISOString() ?? null, lastSeenAt: m.lastSeenAt?.toISOString() ?? null,
+    },
+  }));
 }
 
 export async function saveMember(userId: string, id: string | null, input: MemberInput) {
@@ -36,6 +49,11 @@ export async function saveMember(userId: string, id: string | null, input: Membe
     ...(input.color ? { color: input.color } : {}), ...(input.active !== undefined ? { active: input.active } : {}), ...(input.issuer !== undefined ? { issuer: input.issuer } : {}),
   };
   if (!id) return (await prisma.teamMember.create({ data: { userId, ...data } })).id;
+  // desativado: perde o acesso ao app na hora (o login sai; para voltar, convide de novo)
+  if (input.active === false) {
+    await dropMemberLogin(userId, id);
+    Object.assign(data, { accessRole: null, permissions: [], inviteTokenHash: null, inviteExpiresAt: null, joinedAt: null, lastSeenAt: null });
+  }
   const { count } = await prisma.teamMember.updateMany({ where: { id, userId }, data });
   if (!count) throw new DomainError(404, "Membro não encontrado");
   return id;
@@ -43,6 +61,7 @@ export async function saveMember(userId: string, id: string | null, input: Membe
 
 /** Tira o membro e tira ele das tarefas em que estava. */
 export async function deleteMember(userId: string, id: string) {
+  await dropMemberLogin(userId, id); // o login do membro sai junto
   const { count } = await prisma.teamMember.deleteMany({ where: { id, userId } });
   if (!count) throw new DomainError(404, "Membro não encontrado");
   const tasks = await prisma.task.findMany({ where: { userId, memberIds: { has: id } }, select: { id: true, memberIds: true } });

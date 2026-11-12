@@ -20,7 +20,7 @@ export default async function ProgramPage({ params, searchParams }: { params: Pr
   const [program, accounts, pref] = await Promise.all([
     prisma.program.findUnique({ where: { id: programId } }),
     prisma.account.findMany({ where: { userId: user.id, programId, archived: false }, select: { id: true } }),
-    prisma.userPreference.findUnique({ where: { userId: user.id }, select: { showValues: true } }),
+    prisma.userPreference.findUnique({ where: { userId: user.actor.id }, select: { showValues: true } }),
   ]);
   if (!program || !accounts.length) notFound();
   const showValues = pref?.showValues !== false;

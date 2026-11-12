@@ -2,6 +2,8 @@
 // vindo do próprio site (Origin): outro site não consegue abrir a conexão em nome de quem está logado.
 import type { IncomingMessage } from "node:http";
 import { getUserByToken, SESSION_COOKIE } from "../auth";
+import { resolveWorkspace } from "../workspace";
+import { can } from "@/domain/permissions";
 import { gatewayUrl } from "../telegram-rpc";
 
 /** Tempo real ligado: a chave e o gateway (sem o gateway não há eventos). */
@@ -31,8 +33,12 @@ function originOk(req: IncomingMessage) {
 export async function authorizeUpgrade(req: IncomingMessage): Promise<{ userId: string } | { status: 401 | 403 | 404 }> {
   if (!realtimeEnabled()) return { status: 404 };
   if (!originOk(req)) return { status: 403 };
-  const user = await getUserByToken(cookieValue(req.headers.cookie, SESSION_COOKIE));
-  return user ? { userId: user.id } : { status: 401 };
+  const person = await getUserByToken(cookieValue(req.headers.cookie, SESSION_COOKIE));
+  const ws = person ? await resolveWorkspace(person) : null;
+  if (!ws) return { status: 401 };
+  // membro da equipe: recebe os eventos da agência (do dono), se a função dele dá acesso ao Chat Balcões
+  if (!ws.actor.isOwner && !can(ws.actor.permissions, "chat")) return { status: 403 };
+  return { userId: ws.id };
 }
 
 /** O tratamento do pedido de WebSocket (/ws) no servidor HTTP: autentica e entrega a conexão ao hub; o resto vai para

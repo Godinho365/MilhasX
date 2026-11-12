@@ -21,7 +21,7 @@ type Money = (c: number | null) => string;
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
   const user = await requirePageUser();
-  const pref = await prisma.userPreference.findUnique({ where: { userId: user.id } });
+  const pref = await prisma.userPreference.findUnique({ where: { userId: user.actor.id } }); // preferências de quem entrou
   const asked = (await searchParams).view;
   const view = VIEWS.find((v) => v.key === asked)?.key ?? VIEWS.find((v) => v.key === pref?.dashboardView)?.key ?? "gestao";
   const hide = pref?.showValues === false;

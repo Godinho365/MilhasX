@@ -192,19 +192,20 @@ export async function saveCredential(userId: string, accountId: string, input: {
 const REVEAL_WINDOW = 15 * 60 * 1000;
 
 /** Mostra login e senha só após confirmar a senha do usuário; tentativas erradas são limitadas e tudo é auditado. */
-export async function revealCredential(userId: string, accountId: string, password: string, ip: string) {
+export async function revealCredential(userId: string, accountId: string, password: string, ip: string, actorId = userId) {
   await ownAccount(userId, accountId);
-  const tag = `reveal:${userId}`;
+  // a senha conferida é a de quem pede (o dono ou o membro da equipe), e o limite de tentativas é por pessoa
+  const tag = `reveal:${actorId}`;
   const fails = await prisma.loginAttempt.count({ where: { email: tag, success: false, createdAt: { gte: new Date(Date.now() - REVEAL_WINDOW) } } });
   if (fails >= 5) throw new DomainError(429, "Muitas tentativas. Aguarde alguns minutos.");
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: actorId }, select: { passwordHash: true } });
   if (!(await verifyPassword(password, user.passwordHash))) {
     await prisma.loginAttempt.create({ data: { email: tag, ip, success: false } });
     throw new DomainError(401, "Senha incorreta");
   }
   const c = await prisma.accountCredential.findUnique({ where: { accountId } });
   if (!c) throw new DomainError(404, "Nenhuma credencial salva");
-  await audit(prisma, userId, "credential.reveal", "Account", accountId);
+  await audit(prisma, actorId, "credential.reveal", "Account", accountId, actorId !== userId ? { workspace: userId } : undefined);
   return { login: decrypt(c.loginEnc), secret: decrypt(c.secretEnc), notes: c.notesEnc ? decrypt(c.notesEnc) : null };
 }
 

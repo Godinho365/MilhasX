@@ -24,7 +24,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
     if (e instanceof DomainError && e.status === 404) notFound();
     throw e;
   }
-  const pref = await prisma.userPreference.findUnique({ where: { userId: user.id }, select: { showValues: true } });
+  const pref = await prisma.userPreference.findUnique({ where: { userId: user.actor.id }, select: { showValues: true } });
   const { account: a, stats } = d;
   const [[bonus], m] = await Promise.all([bonusUsage(user.id, new Date(), a.id), accountsPeriod(user.id, [a.id], range)]);
   const showValues = pref?.showValues !== false;
