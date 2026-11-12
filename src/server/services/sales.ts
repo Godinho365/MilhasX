@@ -1,4 +1,4 @@
-// Vendas de emissão: venda com itens (passagem, bagagem, assento, hospedagem, carro, outro),
+// Vendas de emissão: venda com itens (passagem, bagagem, assento, hospedagem, carro, transfer, cruzeiro, seguro, outro),
 // origem dos pontos (minha conta ou fornecedor), custos repassados, clientes e anexos.
 import { randomUUID } from "node:crypto";
 import { ANONYMOUS } from "@/domain/beneficiaries";
@@ -10,16 +10,8 @@ import { assertFeature } from "./plan-limits";
 import { withLedger, ownAccount } from "./ledger";
 import { detectAttachment } from "./holder-files";
 
-export const SALE_ITEM_KINDS = ["FLIGHT", "BAGGAGE", "SEAT", "HOTEL", "CAR", "OTHER"] as const;
-export type SaleItemKind = (typeof SALE_ITEM_KINDS)[number];
-export const SALE_ITEM_LABELS: Record<SaleItemKind, string> = {
-  FLIGHT: "Passagem aérea",
-  BAGGAGE: "Bagagem",
-  SEAT: "Assento",
-  HOTEL: "Hospedagem",
-  CAR: "Aluguel de carro",
-  OTHER: "Outro",
-};
+import { SALE_ITEM_LABELS, type SaleItemKind } from "@/domain/sale-items";
+export { SALE_ITEM_KINDS, SALE_ITEM_LABELS, type SaleItemKind } from "@/domain/sale-items";
 export const SALE_COST_TYPES = ["TAXA_EMBARQUE", "IOF", "BAGAGEM", "ASSENTO", "COMPLETAR_PONTOS", "OUTROS"] as const;
 export const SALE_COST_LABELS: Record<(typeof SALE_COST_TYPES)[number], string> = {
   TAXA_EMBARQUE: "Taxa de embarque",
@@ -46,6 +38,9 @@ export type SaleItemInput = {
   destination?: string | null;
   departureDate?: Date | null;
   returnDate?: Date | null;
+  departureTime?: string | null;
+  returnTime?: string | null;
+  provider?: string | null;
   description?: string | null;
   observation?: string | null;
 };
@@ -122,6 +117,7 @@ function validate(input: SaleInput) {
     if (it.salePriceCents < 0) throw new DomainError(400, `Valor da venda inválido${where}`);
     if (it.kind === "FLIGHT" && (!it.passengers || it.passengers < 1)) throw new DomainError(400, `Informe a quantidade de passageiros${where}`);
     if (it.departureDate && it.returnDate && it.returnDate < it.departureDate) throw new DomainError(400, `A volta precisa ser depois da ida${where}`);
+    for (const t of [it.departureTime, it.returnTime]) if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new DomainError(400, `Horário inválido${where}`);
   });
 }
 
@@ -154,8 +150,27 @@ async function resolveOrigin(tx: Tx, userId: string, input: SaleInput) {
   };
 }
 
+/** Marcações do acompanhamento (check-in feito, reserva confirmada) que passam para o item regravado na edição. */
+type Marks = { doneOutAt: Date | null; doneRetAt: Date | null };
+const dayKey = (d: Date | null | undefined) => d?.toISOString().slice(0, 10) ?? "";
+/**
+ * Na edição os itens são apagados e gravados de novo: a marcação de cada trecho continua se o item da mesma
+ * posição é do mesmo tipo e o trecho não mudou (mesma rota e mesmo dia). Mudou a data ou o destino, o
+ * check-in precisa ser feito de novo.
+ */
+export function carryMarks(old: ({ kind: string; origin: string | null; destination: string | null; departureDate: Date | null; returnDate: Date | null } & Marks)[], items: SaleItemInput[]): Marks[] {
+  return items.map((it, n) => {
+    const o = old[n];
+    if (!o || o.kind !== it.kind || (o.origin ?? null) !== (it.origin || null) || (o.destination ?? null) !== (it.destination || null)) return { doneOutAt: null, doneRetAt: null };
+    return {
+      doneOutAt: dayKey(o.departureDate) === dayKey(it.departureDate) ? o.doneOutAt : null,
+      doneRetAt: dayKey(o.returnDate) === dayKey(it.returnDate) && it.returnDate ? o.doneRetAt : null,
+    };
+  });
+}
+
 /** Itens da venda: cada item emitido com pontos próprios sai da conta como um lançamento "Venda". */
-async function writeItems(tx: Tx, userId: string, sale: { id: string; groupId: string | null }, input: SaleInput, accountId: string | null, supplierCpm: number | null, createdAt?: Date) {
+async function writeItems(tx: Tx, userId: string, sale: { id: string; groupId: string | null }, input: SaleInput, accountId: string | null, supplierCpm: number | null, createdAt?: Date, marks?: Marks[]) {
   for (const [n, it] of input.items.entries()) {
     let entryId: string | null = null;
     if (input.origin === "OWN" && it.issuedWith === "POINTS") {
@@ -192,8 +207,13 @@ async function writeItems(tx: Tx, userId: string, sale: { id: string; groupId: s
         destination: it.destination || null,
         departureDate: it.departureDate ?? null,
         returnDate: it.returnDate ?? null,
+        departureTime: it.departureDate ? it.departureTime || null : null,
+        returnTime: it.returnDate ? it.returnTime || null : null,
+        provider: it.provider?.trim() || null,
         description: it.description?.trim() || null,
         observation: it.observation?.trim() || null,
+        doneOutAt: marks?.[n]?.doneOutAt ?? null,
+        doneRetAt: marks?.[n]?.doneRetAt ?? null,
         entryId,
       },
     });
@@ -265,6 +285,10 @@ async function updateSaleRows(userId: string, id: string, input: SaleInput) {
       await tx.supplierAccount.updateMany({ where: { id: old.supplierAccountId, userId }, data: { balance: { increment: old.points } } });
     }
     await tx.accountBeneficiary.deleteMany({ where: { saleId: old.id, userId } });
+    const oldItems = await tx.saleItem.findMany({
+      where: { saleId: old.id }, orderBy: { position: "asc" },
+      select: { kind: true, origin: true, destination: true, departureDate: true, returnDate: true, doneOutAt: true, doneRetAt: true },
+    });
     await tx.saleItem.deleteMany({ where: { saleId: old.id } });
     const o = await resolveOrigin(tx, userId, input);
     const sale = await tx.sale.update({
@@ -280,7 +304,7 @@ async function updateSaleRows(userId: string, id: string, input: SaleInput) {
         occurredAt: input.occurredAt,
       },
     });
-    await writeItems(tx, userId, sale, input, o.accountId, o.supplierCpm, first?.createdAt);
+    await writeItems(tx, userId, sale, input, o.accountId, o.supplierCpm, first?.createdAt, carryMarks(oldItems, input.items));
     return sale;
   });
 }
@@ -381,6 +405,11 @@ function present(s: SaleRow) {
       destination: i.destination,
       departureDate: i.departureDate?.toISOString() ?? null,
       returnDate: i.returnDate?.toISOString() ?? null,
+      departureTime: i.departureTime,
+      returnTime: i.returnTime,
+      provider: i.provider,
+      doneOutAt: i.doneOutAt?.toISOString() ?? null,
+      doneRetAt: i.doneRetAt?.toISOString() ?? null,
       description: i.description,
       observation: i.observation,
       ...itemFinancials(i, s.origin),
@@ -414,7 +443,7 @@ export async function listSales(userId: string, f: SaleFilter = {}) {
       : undefined,
     AND: f.q
       ? [{ OR: [
-          { items: { some: { OR: [{ description: { contains: f.q, mode: "insensitive" } }, { reservation: { contains: f.q, mode: "insensitive" } }, { origin: { contains: f.q, mode: "insensitive" } }, { destination: { contains: f.q, mode: "insensitive" } }] } } },
+          { items: { some: { OR: [{ description: { contains: f.q, mode: "insensitive" } }, { reservation: { contains: f.q, mode: "insensitive" } }, { origin: { contains: f.q, mode: "insensitive" } }, { destination: { contains: f.q, mode: "insensitive" } }, { provider: { contains: f.q, mode: "insensitive" } }] } } },
           { items: { some: { customers: { some: { name: { contains: f.q, mode: "insensitive" } } } } } },
         ] }]
       : undefined,

@@ -7,6 +7,7 @@ import { api, today } from "@/lib/api";
 import { useNav, refreshSafe } from "@/lib/nav";
 import { fmtBRL, fmtDate, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { airportLabel } from "@/domain/airports";
+import { itemFields } from "@/domain/sale-items";
 import { ProgramDot } from "@/components/stat";
 import { Modal, Field, Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
@@ -382,9 +383,12 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
               {line("Resultado do item", <span className={it.resultCents >= 0 ? "text-ok" : "text-bad"}>{fmtBRL(it.resultCents)}</span>)}
               {it.customers.length > 0 && line(it.clientType === "AGENCY" ? "Agência" : "Clientes", it.customers.join(", "))}
               {it.passengers != null && line("Passageiros", it.passengers)}
-              {(it.origin || it.destination) && line("Trecho", `${it.origin ? airportLabel(it.origin) : "?"} → ${it.destination ? airportLabel(it.destination) : "?"}`)}
-              {it.departureDate && line(it.kind === "HOTEL" ? "Entrada" : it.kind === "CAR" ? "Retirada" : "Ida", fmtDate(it.departureDate))}
-              {it.returnDate && line(it.kind === "HOTEL" ? "Saída" : it.kind === "CAR" ? "Devolução" : "Volta", fmtDate(it.returnDate))}
+              {itemFields(it.kind).route
+                ? (it.origin || it.destination) && line("Trecho", `${it.origin ? airportLabel(it.origin) : "?"} → ${it.destination ? airportLabel(it.destination) : "?"}`)
+                : it.destination && line(itemFields(it.kind).place, airportLabel(it.destination))}
+              {it.provider && line(itemFields(it.kind).provider, it.provider)}
+              {it.departureDate && line(itemFields(it.kind).start, `${fmtDate(it.departureDate)}${it.departureTime ? `, ${it.departureTime}` : ""}${it.doneOutAt ? ` · ${itemFields(it.kind).done.toLowerCase()}` : ""}`)}
+              {it.returnDate && line(itemFields(it.kind).end, `${fmtDate(it.returnDate)}${it.returnTime ? `, ${it.returnTime}` : ""}${it.doneRetAt ? ` · ${itemFields(it.kind).done.toLowerCase()}` : ""}`)}
               {it.description && line("Descrição", it.description)}
             </div>
             {it.observation && <p className="mt-2 whitespace-pre-wrap text-sm text-muted">{it.observation}</p>}

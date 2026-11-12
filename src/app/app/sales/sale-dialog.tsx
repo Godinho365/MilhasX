@@ -1,7 +1,8 @@
 "use client";
 // "Nova venda" como na referência: origem dos pontos, programa e data; itens (passagem, bagagem,
-// assento, hospedagem, carro, outro) com emissão, valor, custos repassados, cliente e reserva,
-// viagem e detalhes; anexos e total. Os anexos sobem depois que a venda é criada.
+// assento, hospedagem, carro, transfer, cruzeiro, seguro, outro) com emissão, valor, custos repassados,
+// cliente e reserva, viagem (trecho ou lugar, datas, horários e companhia/fornecedor) e detalhes; anexos e
+// total. Os anexos sobem depois que a venda é criada.
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { useEffect, useRef, useState } from "react";
@@ -9,6 +10,7 @@ import { Plus, Receipt, Users, Plane, FileText, Paperclip, Upload, X, Eraser, Ch
 import { api, newKey, today } from "@/lib/api";
 import { fmtBRL, fmtPts, parseBRLToCents } from "@/lib/format";
 import { AIRPORTS } from "@/domain/airports";
+import { SALE_ITEM_KINDS, SALE_ITEM_LABELS, itemFields, type SaleItemKind } from "@/domain/sale-items";
 import { Modal, Field, Alert } from "@/components/ui";
 import { Collapsible, PointsInput, parsePts } from "@/components/form-parts";
 import { toast, confirmDialog } from "@/components/feedback";
@@ -20,11 +22,10 @@ export type SaleSupplier = { id: string; label: string; balance: number; priceCp
 export type SaleCustomer = { id: string; name: string; kind: "FINAL" | "AGENCY" };
 export type SaleCard = { id: string; name: string };
 
-const KINDS = [["FLIGHT", "Passagem aérea"], ["BAGGAGE", "Bagagem"], ["SEAT", "Assento"], ["HOTEL", "Hospedagem"], ["CAR", "Aluguel de carro"], ["OTHER", "Outro"]] as const;
-type Kind = (typeof KINDS)[number][0];
+const KINDS = SALE_ITEM_KINDS.map((k) => [k, SALE_ITEM_LABELS[k]] as const);
+type Kind = SaleItemKind;
 const COSTS = [["TAXA_EMBARQUE", "Taxa de embarque"], ["IOF", "IOF"], ["BAGAGEM", "Bagagem"], ["ASSENTO", "Assento"], ["COMPLETAR_PONTOS", "Completar pontos"], ["OUTROS", "Outros"]] as const;
 const kindLabel = (k: string) => KINDS.find(([v]) => v === k)?.[1] ?? k;
-const TRAVEL: Kind[] = ["FLIGHT", "BAGGAGE", "SEAT"];
 const MAX_FILES = 10;
 const MAX_TOTAL = 10 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/heic,application/pdf";
@@ -47,6 +48,9 @@ type Item = {
   destination: string;
   departure: string;
   ret: string;
+  depTime: string;
+  retTime: string;
+  provider: string;
   description: string;
   observation: string;
   open: { costs: boolean; client: boolean; travel: boolean; other: boolean };
@@ -54,8 +58,9 @@ type Item = {
 const emptyCost = (): CostRow => ({ type: "TAXA_EMBARQUE", amount: "", cardId: "" });
 const newItem = (kind: Kind = "FLIGHT"): Item => ({
   kind, issuedWith: "POINTS", points: "", price: "", byCpm: true, cpm: "", cashCost: "", costs: [emptyCost()], clientType: "FINAL", customerIds: [],
-  passengers: kind === "FLIGHT" ? "1" : "", reservation: "", origin: "", destination: "", departure: "", ret: "", description: "", observation: "",
-  open: { costs: false, client: true, travel: kind === "FLIGHT", other: false },
+  passengers: kind === "FLIGHT" ? "1" : "", reservation: "", origin: "", destination: "", departure: "", ret: "", depTime: "", retTime: "", provider: "",
+  description: "", observation: "",
+  open: { costs: false, client: true, travel: kind !== "BAGGAGE" && kind !== "SEAT" && kind !== "OTHER", other: false },
 });
 const money = (v: string) => (v.trim() ? parseBRLToCents(v) : 0);
 const brl = (c: number) => (c / 100).toFixed(2).replace(".", ",");
@@ -80,9 +85,12 @@ function fromView(it: SaleView["items"][number]): Item {
     destination: it.destination ?? "",
     departure: it.departureDate?.slice(0, 10) ?? "",
     ret: it.returnDate?.slice(0, 10) ?? "",
+    depTime: it.departureTime ?? "",
+    retTime: it.returnTime ?? "",
+    provider: it.provider ?? "",
     description: it.description ?? "",
     observation: it.observation ?? "",
-    open: { costs: it.costs.length > 0, client: true, travel: it.kind === "FLIGHT", other: !!(it.description || it.observation) },
+    open: { costs: it.costs.length > 0, client: true, travel: !!it.departureDate || (it.kind !== "BAGGAGE" && it.kind !== "SEAT" && it.kind !== "OTHER"), other: !!(it.description || it.observation) },
   };
 }
 /** Valor dos pontos do item: digitado ou calculado pelo valor do milheiro. */
@@ -92,11 +100,11 @@ function itemPrice(it: Item) {
 }
 const itemCosts = (it: Item) => it.costs.reduce((t, c) => t + (money(c.amount) ?? 0), 0);
 
-function AirportField({ label, value, onChange }: { label: string; value: string; onChange: (code: string) => void }) {
+function AirportField({ label, value, onChange, placeholder = "Selecione o aeroporto" }: { label: string; value: string; onChange: (code: string) => void; placeholder?: string }) {
   const [text, setText] = useState(value);
   return (
     <Field label={label}>
-      <input className="input" list="sale-airports" placeholder="Selecione o aeroporto" value={text} aria-label={label}
+      <input className="input" list="sale-airports" placeholder={placeholder} value={text} aria-label={label}
         onChange={(e) => { setText(e.target.value); const code = e.target.value.trim().slice(0, 3).toUpperCase(); onChange(AIRPORTS.some((a) => a.code === code) ? code : ""); }} />
     </Field>
   );
@@ -203,7 +211,8 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose, edi
         if (v === null) return setErro(`Valor de custo inválido${where}`);
         costs.push({ type: c.type, amountCents: v, cardId: c.cardId || null });
       }
-      if (TRAVEL.includes(it.kind) && it.kind === "FLIGHT" && !(Number(it.passengers) >= 1)) return setErro(`Informe a quantidade de passageiros${where}`);
+      if (it.kind === "FLIGHT" && !(Number(it.passengers) >= 1)) return setErro(`Informe a quantidade de passageiros${where}`);
+      const f = itemFields(it.kind);
       payload.push({
         kind: it.kind,
         issuedWith: it.issuedWith,
@@ -215,10 +224,13 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose, edi
         customerIds: it.customerIds,
         passengers: it.passengers ? Number(it.passengers) : null,
         reservation: it.reservation || null,
-        origin: it.origin || null,
+        origin: f.route ? it.origin || null : null,
         destination: it.destination || null,
         departureDate: it.departure || null,
         returnDate: it.ret || null,
+        departureTime: f.times && it.departure ? it.depTime || null : null,
+        returnTime: f.times && it.ret ? it.retTime || null : null,
+        provider: it.provider.trim() || null,
         description: it.description || null,
         observation: it.observation || null,
       });
@@ -361,16 +373,37 @@ export function SaleDialog({ accounts, suppliers, customers, cards, onClose, edi
               </div>
             </Collapsible>
 
-            {it.kind !== "OTHER" && (
-              <Collapsible icon={<Plane className="h-4 w-4" />} title={it.kind === "HOTEL" ? "Hospedagem" : it.kind === "CAR" ? "Locação" : "Viagem"} subtitle={it.kind === "HOTEL" ? "Entrada e saída" : it.kind === "CAR" ? "Retirada e devolução" : "Trecho e datas"} open={it.open.travel} onToggle={() => setItem(i, { open: { ...it.open, travel: !it.open.travel } })}>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {TRAVEL.includes(it.kind) && <AirportField label="Origem" value={it.origin} onChange={(v) => setItem(i, { origin: v })} />}
-                  {TRAVEL.includes(it.kind) && <AirportField label="Destino" value={it.destination} onChange={(v) => setItem(i, { destination: v })} />}
-                  <Field label={it.kind === "HOTEL" ? "Entrada" : it.kind === "CAR" ? "Retirada" : "Ida"}><input className="input" type="date" value={it.departure} onChange={(e) => setItem(i, { departure: e.target.value })} /></Field>
-                  <Field label={it.kind === "HOTEL" ? "Saída" : it.kind === "CAR" ? "Devolução" : "Volta"}><input className="input" type="date" value={it.ret} onChange={(e) => setItem(i, { ret: e.target.value })} /></Field>
-                </div>
-              </Collapsible>
-            )}
+            {(() => {
+              const f = itemFields(it.kind);
+              const n = items.length > 1 ? ` do item ${i + 1}` : "";
+              return (
+                <Collapsible icon={<Plane className="h-4 w-4" />} title={f.section} subtitle={f.sectionHint} open={it.open.travel} onToggle={() => setItem(i, { open: { ...it.open, travel: !it.open.travel } })}>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {f.route ? (
+                      <>
+                        <AirportField label="Origem" value={it.origin} onChange={(v) => setItem(i, { origin: v })} />
+                        <AirportField label="Destino" value={it.destination} onChange={(v) => setItem(i, { destination: v })} />
+                      </>
+                    ) : (
+                      <AirportField label={f.place} value={it.destination} onChange={(v) => setItem(i, { destination: v })} placeholder="Cidade (aeroporto mais próximo)" />
+                    )}
+                    <Field label={f.provider}><input className="input" maxLength={80} placeholder={f.providerHint} value={it.provider} onChange={(e) => setItem(i, { provider: e.target.value })} aria-label={`${f.provider}${n}`} /></Field>
+                    <Field label={f.start}>
+                      <div className="flex gap-2">
+                        <input className="input min-w-0 flex-1" type="date" value={it.departure} onChange={(e) => setItem(i, { departure: e.target.value })} aria-label={`${f.start}${n}`} />
+                        {f.times && <input className="input w-[6.5rem]" type="time" value={it.depTime} onChange={(e) => setItem(i, { depTime: e.target.value })} aria-label={`Horário de ${f.start.toLowerCase()}${n}`} disabled={!it.departure} />}
+                      </div>
+                    </Field>
+                    <Field label={f.end}>
+                      <div className="flex gap-2">
+                        <input className="input min-w-0 flex-1" type="date" value={it.ret} min={it.departure || undefined} onChange={(e) => setItem(i, { ret: e.target.value })} aria-label={`${f.end}${n}`} />
+                        {f.times && <input className="input w-[6.5rem]" type="time" value={it.retTime} onChange={(e) => setItem(i, { retTime: e.target.value })} aria-label={`Horário de ${f.end.toLowerCase()}${n}`} disabled={!it.ret} />}
+                      </div>
+                    </Field>
+                  </div>
+                </Collapsible>
+              );
+            })()}
 
             <Collapsible icon={<FileText className="h-4 w-4" />} title="Outros detalhes" subtitle="Descrição e observações" open={it.open.other} onToggle={() => setItem(i, { open: { ...it.open, other: !it.open.other } })}>
               <div className="space-y-3">

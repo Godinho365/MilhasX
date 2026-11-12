@@ -638,7 +638,7 @@ model SaleItem {
   id               String     @id @default(cuid())
   saleId           String
   sale             Sale       @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  kind             String // FLIGHT | BAGGAGE | SEAT | HOTEL | CAR | OTHER
+  kind             String // FLIGHT | BAGGAGE | SEAT | HOTEL | CAR | TRANSFER | CRUISE | INSURANCE | OTHER
   issuedWith       String     @default("POINTS") // POINTS | CASH
   points           Int        @default(0)
   salePriceCents   Int // valor cobrado pelos pontos (ou pela emissão em dinheiro)
@@ -655,11 +655,17 @@ model SaleItem {
   returnDate       DateTime?
   description      String?
   observation      String?
+  provider         String? // companhia aérea, hotel, locadora, navio, seguradora ou fornecedor
+  departureTime    String? // HH:MM (Brasília)
+  returnTime       String? // HH:MM
+  doneOutAt        DateTime? // acompanhamento: check-in da ida feito / reserva confirmada / apólice enviada
+  doneRetAt        DateTime? // acompanhamento: check-in da volta feito
   entryId          String?    @unique
   entry            Entry?     @relation(fields: [entryId], references: [id], onDelete: SetNull)
   position         Int        @default(0)
 
   @@index([saleId])
+  @@index([departureDate])
 }
 
 // Anexo da venda (comprovantes, contratos, cartões de embarque): até 10 arquivos, 10 MB no total

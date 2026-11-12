@@ -13,7 +13,7 @@ export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }
   { key: "painel", label: "Painel e relatórios", hint: "Painel inicial, métricas e relatórios", edit: false },
   { key: "milhas", label: "Milhas", hint: "Programas, contas, lançamentos, titulares, transferências, clubes e ViajeFácil", edit: true },
   { key: "senhas", label: "Senhas das contas", hint: "Ver = revelar o login e a senha guardados das contas de milhas (com a senha de quem pede); editar = salvar e apagar", edit: true },
-  { key: "vendas", label: "Vendas", hint: "Vendas, emissões e reembolsos", edit: true },
+  { key: "vendas", label: "Vendas", hint: "Vendas, emissões, reembolsos e os acompanhamentos (voos, hospedagens, mapa de viagens); editar = marcar check-in e confirmações", edit: true },
   { key: "financeiro", label: "Financeiro", hint: "Contas a pagar e receber, fluxo de caixa, cartões e faturas, notas fiscais", edit: true },
   { key: "crm", label: "CRM Passagens", hint: "Pedidos, funil, cotações e leads", edit: true },
   { key: "crmMilhas", label: "CRM Milhas", hint: "Negociações de venda de milhas", edit: true },
@@ -102,7 +102,7 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/accounts", "milhas"], ["/api/entries", "milhas"], ["/api/holders", "milhas"], ["/api/programs", "milhas"],
   ["/api/transfers", "milhas"], ["/api/recurrences", "milhas"], ["/api/alerts", "milhas"], ["/api/viaje-facil", "milhas"],
   ["/api/supplier-accounts", "milhas"], ["/api/suppliers", "contatos"],
-  ["/api/sales", "vendas"],
+  ["/api/sales", "vendas"], ["/api/tracking", "vendas"], // acompanhamentos = itens das vendas
   ["/api/finance", "financeiro"], ["/api/invoices", "financeiro"], ["/api/cards", "financeiro"],
   ["/api/orders", "crm"], ["/api/pipelines", "crm"], ["/api/pipeline-stages", "crm"], ["/api/quotes", "crm"], ["/api/leads", "crm"],
   ["/api/miles-deals", "crmMilhas"],
@@ -122,7 +122,7 @@ const PAGE_RULES: [prefix: string, area: AreaKey | "any" | "owner"][] = [
   ["/app/notifications", "any"], ["/app/news", "any"], ["/app/guides", "any"], ["/app/calculadoras", "any"], ["/app/tradutor", "any"], ["/app/sem-acesso", "any"],
   ["/app/metricas", "painel"], ["/app/reports", "painel"],
   ["/app/programs", "milhas"], ["/app/entries", "milhas"], ["/app/milhas", "milhas"], ["/app/management", "contatos"], // management = Fornecedores
-  ["/app/sales", "vendas"],
+  ["/app/sales", "vendas"], ["/app/acompanhamentos", "vendas"],
   ["/app/financeiro", "financeiro"], ["/app/credit-cards", "financeiro"],
   ["/app/crm-milhas", "crmMilhas"], ["/app/crm", "crm"],
   ["/app/chat-balcoes", "chat"],
