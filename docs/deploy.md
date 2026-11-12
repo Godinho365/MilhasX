@@ -26,7 +26,7 @@ proxy HTTPS.
 ## Checklist de produção
 
 - [ ] `APP_URL` com o domínio real (usado no link de redefinição de senha e na checagem de origem)
-- [ ] Provedor de e-mail em `src/server/mailer.ts` (sem ele, os e-mails ficam em `.outbox/` no servidor)
+- [ ] SMTP no `.env` (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`; sem ele, os e-mails ficam em `.outbox/` no servidor). Teste: `npm run mail:test -- seu@email.com`
 - [ ] Não rodar `npm run db:seed` em produção (ele cria a conta demo)
 - [ ] Backups agendados (ver `backup-restauracao.md`)
 - [ ] Se estiver atrás de proxy, garantir que `x-forwarded-for` venha do proxy (usado no limite de tentativas por IP)
