@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
 import { prisma } from "@/server/db";
 import { encrypt } from "@/server/services/accounts";
-import { chatMessages, dmMessages, dmUnread, groupUnread, telegramEventsSince, type TgPeer } from "@/server/services/telegram";
+import { chatMessages, chatPreviews, dmMessages, dmUnread, groupUnread, telegramEventsSince, type TgPeer } from "@/server/services/telegram";
 import { RealtimeHub } from "@/server/realtime/hub";
 import { authorizeUpgrade, wsUpgradeHandler } from "@/server/realtime/upgrade";
 import { MemoryBus } from "@/gateway/bus";
@@ -199,6 +199,12 @@ describe("leituras pelo banco (sem consultar o Telegram)", () => {
     expect((await groupUnread(userId)).find((x) => x.id === g1)).toEqual({ id: g1, unread: 1 });
     await prisma.telegramDm.update({ where: { id: dm }, data: { seenUpTo: 900 } });
     expect((await dmUnread(userId)).find((x) => x.id === dm)).toMatchObject({ unread: 1, last: expect.objectContaining({ id: 922, text: "oi" }) });
+    // lista de conversas: a última mensagem de cada uma (pedido lido; a sua aparece como "Você")
+    const p = await chatPreviews(userId);
+    expect(p.groups[g1]).toMatchObject({ sender: "Você", out: true, text: "Faço 23" });
+    expect(p.dms[dm]).toMatchObject({ sender: "Bia", text: "oi", ad: null });
+    tg.add(G1, lm(925, "Compro 60k LATAM 2 CPF 25"));
+    await waitFor(async () => (await chatPreviews(userId)).groups[g1]?.ad?.miles === 60_000);
   });
 });
 

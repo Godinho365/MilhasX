@@ -1,11 +1,13 @@
 "use client";
-// Chat Balcões: abas com as mensagens de cada grupo de balcão, as conversas no privado abertas a partir dos grupos e a
-// aba Alertas. A tela pergunta por mensagens novas de tempos em tempos (só com a aba do navegador visível); mensagem
-// que dispara um alerta fica destacada e avisa. Dá para mandar mensagem no grupo e no privado: o app só manda o que
-// o usuário escreveu e mandou.
+// Chat Balcões, no formato de um mensageiro: à esquerda a lista de conversas (grupos de balcão, conversas no privado e
+// os Alertas), com busca, filtro de não lidas e a última mensagem de cada uma; no centro a conversa aberta (recebidas à
+// esquerda, enviadas à direita, contrapropostas embaixo do pedido); à direita os detalhes do pedido em foco. Em tela
+// menor o painel de detalhes abre por cima e, no celular, a lista e a conversa se alternam. As mensagens chegam em
+// tempo real (ou de tempos em tempos, sem ele); mensagem que dispara um alerta fica destacada e avisa. O app só manda
+// o que o usuário escreveu e mandou.
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, UserRound, X, Reply, CornerDownRight, Pencil, Check, Eraser, KanbanSquare, Handshake, Paperclip, Download, Users } from "lucide-react";
+import { Bell, BellRing, Copy, Plus, Settings, Trash2, RefreshCw, Send, MessageCircle, X, Reply, CornerDownRight, Pencil, Check, Eraser, KanbanSquare, Handshake, Paperclip, Download, Users, Search, ArrowLeft, Info, ListFilter, ExternalLink, PlaneTakeoff, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtDateTime, fmtPts, parseBRLToCents } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
@@ -14,6 +16,7 @@ import { describeAlert, parseAlertWords, type AlertRule } from "@/domain/telegra
 import { BALCAO_PROGRAMS, emissionAnalysis, parseBalcaoAd, parseCounterOffer, type BalcaoAd, type EmissionAccount } from "@/domain/balcao-ads";
 import { DEAL_STAGE_LABELS, type DealStageKey } from "@/domain/miles-deals";
 import { reportLatency, useRealtimeConnection, useRealtimeEvents, type RtEvent, type RtState } from "@/lib/realtime";
+import { openEntryForm } from "@/components/entry-forms";
 
 type Chat = { id: string; title: string; account: string; clearedUpTo?: number | null };
 /** O pedido a que você mandou a contraproposta no privado (a conversa fica ligada a ele). */
@@ -25,6 +28,8 @@ type CrmRef = { id: string; number: number; stage: string; accountId: string | n
  *  grupo, mostrada embaixo do pedido no privado. */
 type Msg = { id: number; date: string; sender: string; text: string; media: string | null; mediaKind?: "photo" | "file" | null; mediaName?: string | null; out: boolean; fromUser: boolean; replyTo: number | null; fwd?: boolean; ad: BalcaoAd | null; alerts: string[]; crm?: CrmRef | null; origin?: { chatId: string; messageId: number } | null; group?: boolean };
 type FeedMsg = Msg & { chatId: string; chat: string };
+/** Última mensagem de uma conversa (para a lista). */
+type Preview = { text: string; date: string; sender: string; out: boolean; media: string | null; ad: BalcaoAd | null };
 /** O que a aba mostra: o grupo do balcão de uma conta ou uma conversa no privado. */
 type Source = { kind: "group"; chat: Chat } | { kind: "dm"; dm: Dm };
 
@@ -73,6 +78,38 @@ function when(iso: string) {
   const d = new Date(iso);
   return day(d) === day(new Date()) ? d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }) : fmtDateTime(d);
 }
+/** Dia para o separador da conversa: Hoje, Ontem ou a data (Brasília). */
+function dayLabel(iso: string) {
+  const day = (d: Date) => d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  const d = day(new Date(iso));
+  if (d === day(new Date())) return "Hoje";
+  if (d === day(new Date(Date.now() - 86_400_000))) return "Ontem";
+  return d;
+}
+/** Hora curta para a lista de conversas: hora se for hoje, "Ontem" ou a data. */
+function listTime(iso: string) {
+  const l = dayLabel(iso);
+  return l === "Hoje" ? new Date(iso).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }) : l === "Ontem" ? l : l.slice(0, 5);
+}
+/** O pedido numa linha: "LATAM · 36.000 milhas · 2 CPFs · R$ 26,50/milheiro". */
+function adLine(ad: BalcaoAd, cpmCents = ad.cpmCents) {
+  const cpfs = ad.cpfs ?? 1;
+  return `${ad.program} · ${fmtPts(ad.miles)} milhas · ${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"} · ${cpmCents != null ? `${fmtBRL(cpmCents)}/milheiro` : "sem preço"}`;
+}
+
+const AVATAR_TONES = ["bg-blue-500/20 text-blue-300", "bg-emerald-500/20 text-emerald-300", "bg-violet-500/20 text-violet-300", "bg-amber-500/20 text-amber-300", "bg-sky-500/20 text-sky-300", "bg-fuchsia-500/20 text-fuchsia-300"];
+/** Avatar: grupo (ícone), alertas (sino) ou pessoa (iniciais, cor fixa pelo nome). */
+function Avatar({ kind, name, size = "md" }: { kind: "group" | "dm" | "alerts"; name: string; size?: "sm" | "md" | "lg" }) {
+  const dim = size === "sm" ? "h-8 w-8 text-xs" : size === "lg" ? "h-11 w-11 text-sm" : "h-10 w-10 text-sm";
+  const icon = size === "sm" ? "h-4 w-4" : "h-5 w-5";
+  if (kind === "group") return <span className={`flex ${dim} shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-light`} aria-hidden><Users className={icon} /></span>;
+  if (kind === "alerts") return <span className={`flex ${dim} shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-300`} aria-hidden><Bell className={icon} /></span>;
+  const clean = name.replace(/[^\p{L}\p{N} ]/gu, " ").trim();
+  const initials = clean.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+  const tone = AVATAR_TONES[[...name].reduce((t, c) => t + c.charCodeAt(0), 0) % AVATAR_TONES.length];
+  return <span className={`flex ${dim} shrink-0 items-center justify-center rounded-full font-semibold ${tone}`} aria-hidden>{initials}</span>;
+}
+
 /** Repete a cada `ms` enquanto a aba do navegador estiver visível (e logo ao voltar para ela). */
 function usePolling(fn: () => void, ms: number, on = true) {
   const ref = useRef(fn);
@@ -149,9 +186,11 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
   // não vistas em cada aba (grupo e privado, pela chave da aba); quem responde a sua contraproposta ganha a aba de
   // volta sozinho
   const [unread, setUnread] = useState<Record<string, number>>({});
+  const [previews, setPreviews] = useState<{ groups: Record<string, Preview>; dms: Record<string, Preview> }>({ groups: {}, dms: {} });
   const tabRef = useRef(tab);
   tabRef.current = tab;
   const loadUnread = useCallback(async () => {
+    void api<{ groups: Record<string, Preview>; dms: Record<string, Preview> }>("/api/telegram/previews").then((p) => { if (p.ok) setPreviews({ groups: p.data.groups, dms: p.data.dms }); });
     const r = await api<{ items: Unread[]; groups: { id: string; unread: number }[] }>("/api/telegram/dms/unread");
     if (!r.ok) return;
     const open = r.data.items.filter((u) => u.unread > 0);
@@ -207,27 +246,115 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
     if (tab === dmKey(dm.id)) setTab(chats[0]!.id);
   }
 
-  const tabBtn = (key: string, label: React.ReactNode, hint: string, extra?: React.ReactNode) => (
-    <div key={key} className={`-mb-px flex items-center border-b-2 ${tab === key ? "border-accent-light text-white" : "border-transparent text-muted hover:text-zinc-100"}`}>
-      <button type="button" onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined} title={hint} className="flex items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium">{label}</button>
-      {extra}
-    </div>
-  );
+  // lista de conversas: busca, filtro de não lidas e a ordem pela mensagem mais recente
+  const [query, setQuery] = useState("");
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  // celular: a lista ou a conversa (a partir de md as duas aparecem lado a lado)
+  const [mobileChat, setMobileChat] = useState(!!openDmId);
+  // painel de detalhes: aberto ao lado em tela larga; em tela menor abre por cima e começa fechado
+  const [panel, setPanel] = useState(false);
+  useEffect(() => { if (window.matchMedia("(min-width: 1536px)").matches) setPanel(true); }, []);
+  function open(key: string) {
+    setTab(key);
+    setMobileChat(true);
+  }
+  type Entry = { key: string; kind: "group" | "dm"; name: string; sub: string; preview?: Preview; unread: number; dm?: Dm };
+  const entries: Entry[] = [
+    ...chats.map((c) => ({ key: c.id, kind: "group" as const, name: c.title, sub: `Grupo · ${c.account}`, preview: previews.groups[c.id], unread: tab === c.id ? 0 : unread[c.id] ?? 0 })),
+    ...dms.map((d) => ({ key: dmKey(d.id), kind: "dm" as const, name: d.name, sub: d.group ? `Privado · do grupo ${d.group}` : "Privado", preview: previews.dms[d.id], unread: tab === dmKey(d.id) ? 0 : unread[dmKey(d.id)] ?? 0, dm: d })),
+  ].sort((a, b) => (b.preview?.date ?? "").localeCompare(a.preview?.date ?? ""));
+  const q = query.trim().toLowerCase();
+  const unreadCount = entries.filter((e) => e.unread > 0).length + (unseenAlerts > 0 ? 1 : 0);
+  const shownEntries = entries.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!onlyUnread || e.unread > 0));
+  const showAlerts = (!q || "alertas".includes(q)) && (!onlyUnread || unseenAlerts > 0);
+  const previewText = (p?: Preview) => {
+    if (!p) return "Sem mensagens recentes";
+    const body = p.ad ? `${p.ad.kind === "COMPRA" ? "Compra" : "Venda"} ${adLine(p.ad)}` : p.text || (p.media ? `[${p.media}]` : "mensagem");
+    return `${p.out ? "Você" : p.sender}: ${body}`;
+  };
+
   return (
-    <>
-      <nav className="mb-4 flex gap-1 overflow-x-auto border-b border-line" aria-label="Chats dos balcões">
-        {chats.map((c) => tabBtn(c.id, <>{c.title}{tab !== c.id && <Badge n={unread[c.id] ?? 0} />}</>, `pela conta ${c.account}`))}
-        {dms.map((d) => tabBtn(dmKey(d.id), <><UserRound className="h-4 w-4" />{d.name}{tab !== dmKey(d.id) && <Badge n={unread[dmKey(d.id)] ?? 0} />}</>, `Privado pela conta ${d.via}${d.offer ? ` · contraproposta ao pedido do grupo ${d.offer.group}` : ""}`,
-          <button type="button" onClick={() => closeDm(d)} className="-ml-1.5 mr-1 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={`Fechar a conversa com ${d.name}`} title="Fechar aqui (no Telegram a conversa continua)"><X className="h-3.5 w-3.5" /></button>))}
-        {tabBtn(ALERTS_TAB, <><Bell className="h-4 w-4" />Alertas{tab !== ALERTS_TAB && <Badge n={unseenAlerts} tone="amber" />}</>, `${alerts.filter((a) => a.active).length} ativos`)}
-        <LiveBadge realtime={realtime} state={rt.state} links={rt.links} />
-        <Link href="/app/settings?tab=telegram" className="flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-zinc-100" title="Contas e grupos do Telegram"><Settings className="h-3.5 w-3.5" />Contas</Link>
-      </nav>
-      {/* os chats ficam montados: trocar de aba não perde o que já carregou */}
-      {chats.map((c) => <div key={c.id} hidden={tab !== c.id}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} onOfferDm={offerDm} onSeen={(upTo) => markSeen(c.id, `/api/telegram/chats/${c.id}/seen`, upTo)} focus={focus?.chatId === c.id ? focus : null} accounts={accounts} realtime={realtime} live={live} /></div>)}
-      {dms.map((d) => <div key={d.id} hidden={tab !== dmKey(d.id)}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} onSeen={(upTo) => markSeen(dmKey(d.id), `/api/telegram/dms/${d.id}/seen`, upTo)} onGoToGroup={goToGroup} accounts={accounts} realtime={realtime} live={live} /></div>)}
-      {tab === ALERTS_TAB && <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={setTab} reload={loadFeed} accounts={accounts} onNegotiate={negotiate} />}
-    </>
+    <div className="card flex h-[calc(100dvh-8.5rem)] min-h-[520px] overflow-hidden">
+      {/* lista de conversas */}
+      <aside className={`${mobileChat ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-[300px] lg:w-[320px]`} aria-label="Conversas">
+        <div className="space-y-3 border-b border-line p-3 sm:p-4">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-lg font-semibold">Chat Balcões</h1>
+              <LiveBadge realtime={realtime} state={rt.state} links={rt.links} />
+            </div>
+            <Link href="/app/settings?tab=telegram" className="btn-subtle h-9 w-9 shrink-0 px-0" aria-label="Contas e grupos do Telegram" title="Contas e grupos do Telegram"><Settings className="h-4 w-4" /></Link>
+          </div>
+          <label className="relative block">
+            <span className="sr-only">Buscar conversas</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar conversas" className="input rounded-full pl-9" />
+          </label>
+          <div className="flex gap-1.5" role="group" aria-label="Filtrar conversas">
+            <button type="button" aria-pressed={!onlyUnread} onClick={() => setOnlyUnread(false)} className={`rounded-full px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light ${!onlyUnread ? "bg-accent-soft text-accent-light" : "text-muted hover:bg-panel2 hover:text-zinc-100"}`}>Todas</button>
+            <button type="button" aria-pressed={onlyUnread} onClick={() => setOnlyUnread(true)} className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light ${onlyUnread ? "bg-accent-soft text-accent-light" : "text-muted hover:bg-panel2 hover:text-zinc-100"}`}>
+              Não lidas{unreadCount > 0 && <Badge n={unreadCount} />}
+            </button>
+          </div>
+        </div>
+        <ul className="flex-1 overflow-y-auto p-1.5" aria-label="Lista de conversas">
+          {showAlerts && (
+            <li>
+              <button type="button" onClick={() => open(ALERTS_TAB)} aria-current={tab === ALERTS_TAB ? "true" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light ${tab === ALERTS_TAB ? "bg-accent-soft" : "hover:bg-panel2"}`}>
+                <Avatar kind="alerts" name="Alertas" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2"><span className={`truncate ${unseenAlerts ? "font-semibold text-zinc-50" : "font-medium"}`}>Alertas</span></span>
+                  <span className="block truncate text-sm text-muted">{alerts.filter((a) => a.active).length} {alerts.filter((a) => a.active).length === 1 ? "alerta ativo" : "alertas ativos"}{feed?.[0] ? ` · último: ${feed[0].chat}` : ""}</span>
+                </span>
+                <Badge n={tab === ALERTS_TAB ? 0 : unseenAlerts} tone="amber" />
+              </button>
+            </li>
+          )}
+          {shownEntries.map((e) => (
+            <li key={e.key} className="group/item relative">
+              <button type="button" onClick={() => open(e.key)} aria-current={tab === e.key ? "true" : undefined} title={e.sub} className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light ${tab === e.key ? "bg-accent-soft" : "hover:bg-panel2"} ${e.dm ? "pr-9" : ""}`}>
+                <Avatar kind={e.kind} name={e.name} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className={`min-w-0 flex-1 truncate ${e.unread ? "font-semibold text-zinc-50" : "font-medium"}`}>{e.name}</span>
+                    {e.preview && <span className={`shrink-0 text-xs ${e.unread ? "font-semibold text-accent-light" : "text-muted"}`}>{listTime(e.preview.date)}</span>}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className={`min-w-0 flex-1 truncate text-sm ${e.unread ? "text-zinc-200" : "text-muted"}`}>{previewText(e.preview)}</span>
+                    <Badge n={e.unread} />
+                  </span>
+                </span>
+              </button>
+              {e.dm && (
+                <button type="button" onClick={() => closeDm(e.dm!)} className="absolute right-2 top-2 rounded-full p-1 text-muted opacity-0 hover:bg-panel hover:text-zinc-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light group-hover/item:opacity-100 [@media(hover:none)]:opacity-100" aria-label={`Fechar a conversa com ${e.name}`} title="Fechar aqui (no Telegram a conversa continua)"><X className="h-3.5 w-3.5" /></button>
+              )}
+            </li>
+          ))}
+          {!shownEntries.length && !showAlerts && <li className="px-3 py-6 text-center text-sm text-muted">{onlyUnread ? "Nenhuma conversa com mensagens não lidas." : "Nenhuma conversa encontrada."}</li>}
+        </ul>
+      </aside>
+
+      {/* conversa aberta (todas ficam montadas: trocar de conversa não perde o que já carregou) */}
+      <section className={`${mobileChat ? "flex" : "hidden md:flex"} min-w-0 flex-1`} aria-label="Conversa">
+        {chats.map((c) => <div key={c.id} className={tab === c.id ? "flex min-w-0 flex-1" : "hidden"}><ChatView source={{ kind: "group", chat: c }} visible={tab === c.id} onDm={(id) => openDm(c.id, id)} onOfferDm={offerDm} onSeen={(upTo) => markSeen(c.id, `/api/telegram/chats/${c.id}/seen`, upTo)} focus={focus?.chatId === c.id ? focus : null} accounts={accounts} realtime={realtime} live={live} onBack={() => setMobileChat(false)} panel={panel} setPanel={setPanel} /></div>)}
+        {dms.map((d) => <div key={d.id} className={tab === dmKey(d.id) ? "flex min-w-0 flex-1" : "hidden"}><ChatView source={{ kind: "dm", dm: d }} visible={tab === dmKey(d.id)} onSeen={(upTo) => markSeen(dmKey(d.id), `/api/telegram/dms/${d.id}/seen`, upTo)} onGoToGroup={goToGroup} accounts={accounts} realtime={realtime} live={live} onBack={() => setMobileChat(false)} panel={panel} setPanel={setPanel} /></div>)}
+        {tab === ALERTS_TAB && (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex items-center gap-3 border-b border-line px-3 py-2.5 sm:px-4">
+              <button type="button" onClick={() => setMobileChat(false)} className="btn-subtle h-9 w-9 shrink-0 px-0 md:hidden" aria-label="Voltar para as conversas"><ArrowLeft className="h-5 w-5" /></button>
+              <Avatar kind="alerts" name="Alertas" />
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate font-semibold">Alertas</h2>
+                <p className="truncate text-xs text-muted">As mensagens de todos os grupos que combinam com os seus alertas</p>
+              </div>
+            </header>
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4">
+              <AlertsTab alerts={alerts} setAlerts={setAlerts} feed={feed} errors={feedErrors} chats={chats} openChat={open} reload={loadFeed} accounts={accounts} onNegotiate={(chatId, id) => { negotiate(chatId, id); setMobileChat(true); }} />
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -246,7 +373,7 @@ function LiveBadge({ realtime, state, links }: { realtime: boolean; state: RtSta
           ? ["bg-amber-400 animate-pulse", "Telegram reconectando", `${down} ${down === 1 ? "conta do Telegram está" : "contas do Telegram estão"} reconectando; o que chegar nesse meio tempo é recuperado`]
           : ["bg-emerald-400", "Tempo real", "Conectado: as mensagens dos grupos e do privado aparecem na hora"];
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-xs text-muted" title={hint} role="status" aria-live="polite">
+    <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted" title={hint} role="status" aria-live="polite">
       <span className={`h-2 w-2 rounded-full ${tone}`} aria-hidden />{label}
     </span>
   );
@@ -255,7 +382,7 @@ function LiveBadge({ realtime, state, links }: { realtime: boolean; state: RtSta
 /** Mensagens de um grupo ou de uma conversa no privado: carrega as últimas e depois só as novas (de 15 em 15
  *  segundos, com a aba aberta), com o campo para mandar mensagem embaixo. No grupo, cada pedido mostra o lucro de
  *  atendê-lo pela sua conta mais barata que consegue emitir (sem conta com saldo, não mostra). */
-function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus, accounts = [], realtime = false, live = false }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; onOfferDm?: (dm: Dm) => void; onSeen?: (upTo: number) => void; onGoToGroup?: (chatId: string, messageId: number) => void; focus?: { id: number; n: number; reply?: boolean } | null; accounts?: EmissionAccount[]; realtime?: boolean; live?: boolean }) {
+function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus, accounts = [], realtime = false, live = false, onBack, panel = false, setPanel }: { source: Source; visible: boolean; onDm?: (messageId: number) => Promise<void>; onOfferDm?: (dm: Dm) => void; onSeen?: (upTo: number) => void; onGoToGroup?: (chatId: string, messageId: number) => void; focus?: { id: number; n: number; reply?: boolean } | null; accounts?: EmissionAccount[]; realtime?: boolean; live?: boolean; onBack?: () => void; panel?: boolean; setPanel?: (open: boolean) => void }) {
   const group = source.kind === "group";
   const url = group ? `/api/telegram/chats/${source.chat.id}/messages` : `/api/telegram/dms/${source.dm.id}/messages`;
   const [msgs, setMsgs] = useState<Msg[] | null>(null);
@@ -519,141 +646,294 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
   const typedCents = target?.ad ? parseCounterOffer(text) : null;
   const typedProfit = target?.ad && typedCents != null ? emissionAnalysis(target.ad, typedCents, accounts) : null;
   const title = group ? source.chat.title : `${source.dm.name}${source.dm.username ? ` (@${source.dm.username})` : ""}`;
-  const refresh = live ? "em tempo real" : "atualiza sozinho a cada 15 segundos";
-  const subtitle = group
-    ? `pela conta ${source.chat.account} · ${refresh}${msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos em ${msgs.length} mensagens` : ""}`
-    : `privado pela conta ${source.dm.via}${source.dm.group ? ` · do grupo ${source.dm.group}` : ""} · ${refresh}`;
+  const refresh = live ? "em tempo real" : "atualiza a cada 15 s";
+  const status = group
+    ? `Grupo · ${source.chat.account} · ${refresh}${msgs ? ` · ${msgs.filter((m) => m.ad).length} pedidos` : ""}`
+    : `Privado · ${source.dm.via}${source.dm.group ? ` · do grupo ${source.dm.group}` : ""} · ${refresh}`;
+
+  // pedido em foco (resumo no topo e detalhes no painel): o clicado; no grupo, o que está sendo respondido; no
+  // privado, o pedido a que a conversa está ligada
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selected = (selectedId != null ? byId.get(selectedId) : undefined) ?? (target?.ad ? target : undefined);
+  function select(m: Msg) {
+    setSelectedId(m.id);
+    setPanel?.(true);
+  }
+  // privado: o pedido ligado à conversa e o CRM dele
+  const dmOffer = source.kind === "dm" ? source.dm.offer ?? null : null;
+  const dmAd = dmOffer?.text ? parseBalcaoAd(dmOffer.text) : null;
+  const [dmCrm, setDmCrm] = useState(source.kind === "dm" ? source.dm.crm ?? null : null);
+  const [registeringOffer, setRegisteringOffer] = useState(false);
+  async function registerOffer() {
+    if (!dmOffer) return;
+    setRegisteringOffer(true);
+    const cpm = liveOffer ?? dmOffer.cpmCents;
+    const r = await api<{ item: CrmRef }>(`/api/telegram/chats/${dmOffer.chatId}/crm`, "POST", { messageId: dmOffer.messageId, text: dmOffer.text, sender: dmOffer.sender, cpmCents: cpm ?? null });
+    setRegisteringOffer(false);
+    if (!r.ok) return toast(r.erro, "error");
+    setDmCrm({ id: r.data.item.id, number: r.data.item.number, stage: r.data.item.stage, accountId: r.data.item.accountId });
+    toast(`Negociação #${r.data.item.number} registrada no CRM Milhas`);
+  }
+  // o que o resumo e o painel mostram
+  const focusOrder: OrderView | null = selected?.ad
+    ? {
+        ad: selected.ad, askedCents: selected.ad.cpmCents, offerCents: myOfferFor(selected), sender: selected.out && selected.fwd ? source.kind === "dm" ? source.dm.name : selected.sender : selected.sender,
+        group: group ? source.chat.title : dmOffer?.group ?? null, at: selected.date, crm: selected.crm ?? (selected.fwd && dmCrm ? dmCrm : null),
+        onRegister: group ? (cents) => registerCrm(selected, cents) : selected.fwd && dmOffer ? () => registerOffer() : undefined, registering: registering === selected.id || (selected.fwd && registeringOffer),
+        onGoToGroup: !group && selected.origin && onGoToGroup ? () => onGoToGroup(selected.origin!.chatId, selected.origin!.messageId) : undefined,
+        onReply: !selected.out ? () => reply(selected) : undefined, onClear: () => setSelectedId(null),
+      }
+    : dmOffer && dmAd
+      ? {
+          ad: dmAd, askedCents: dmAd.cpmCents, offerCents: liveOffer ?? dmOffer.cpmCents, sender: dmOffer.sender, group: dmOffer.group, at: dmOffer.at, crm: dmCrm,
+          onRegister: () => registerOffer(), registering: registeringOffer, onGoToGroup: onGoToGroup ? () => onGoToGroup(dmOffer.chatId, dmOffer.messageId) : undefined,
+        }
+      : null;
+  /** A sua contraproposta mais nova ao pedido (resposta a ele, no grupo ou no privado). */
+  function myOfferFor(ad: Msg) {
+    const mine = (offersOf(ad) ?? []).filter((o) => o.out).map((o) => parseCounterOffer(o.text)).filter((c): c is number => c != null);
+    return mine.at(-1) ?? (ad.fwd ? liveOffer ?? dmOffer?.cpmCents ?? null : null);
+  }
+
+  // separador de dia entre as mensagens (Hoje, Ontem, data)
+  let lastDay = "";
   return (
-    <div className="card flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold">{title}</p>
-          <p className="truncate text-xs text-muted">{subtitle}</p>
-        </div>
-        {group && (
-          <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted" title="Esconde as contrapropostas e a conversa">
-            <input type="checkbox" checked={onlyAds} onChange={(e) => setOnlyAds(e.target.checked)} />Só pedidos
-          </label>
-        )}
-        <button type="button" className="btn-subtle h-8 gap-1 px-2 text-xs" onClick={clearChat} disabled={!msgs?.length} aria-label="Limpar o chat aqui" title="Limpa só aqui no app; no Telegram as mensagens continuam"><Eraser className="h-4 w-4" />Limpar</button>
-        <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => void load()} disabled={loading} aria-label="Atualizar agora" title="Atualizar agora"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
-      </div>
-      {cleared != null && (
-        <div className="flex items-center gap-2 border-b border-line bg-panel2 px-4 py-1.5 text-xs text-muted">
-          <Eraser className="h-3.5 w-3.5" />Chat limpo aqui: aparecem só as mensagens novas.
-          <button type="button" onClick={showAgain} className="font-medium text-accent-light hover:underline">Mostrar de novo</button>
-        </div>
-      )}
-      {source.kind === "dm" && source.dm.offer && <OfferStrip offer={source.dm.offer} cpmCents={liveOffer ?? source.dm.offer.cpmCents} accounts={accounts} initialCrm={source.dm.crm} onGoToGroup={onGoToGroup} />}
-      {erro && <div className="p-3"><Alert>{erro}</Alert></div>}
-      <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="h-[58vh] space-y-2 overflow-y-auto p-4">
-        {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
-          : shown.length === 0 ? <p className="text-sm text-muted">{cleared != null && !msgs?.length ? "Chat limpo. As mensagens novas aparecem aqui." : onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
-          : shown.map((m) => (
-            <Bubble key={m.id} domId={msgDomId(url, m.id)} m={m} mediaBase={url.replace(/\/messages$/, "")} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} flash={flash === m.id} fresh={fresh.has(m.id)} offers={m.ad ? offersOf(m) : undefined}
-              analysis={m.ad ? emissionAnalysis(m.ad, m.ad.cpmCents, accounts) : null}
-              profitAt={m.ad ? (cents) => emissionAnalysis(m.ad!, cents, accounts) : undefined}
-              onCrm={group && m.ad ? (cents) => registerCrm(m, cents) : undefined} registering={registering === m.id}
-              onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id}
-              onGroup={!group && m.origin && onGoToGroup ? () => onGoToGroup(m.origin!.chatId, m.origin!.messageId) : undefined}
-              onEdit={m.out && m.text && !m.fwd ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
-              onEditOffer={edit} onDeleteOffer={remove} editingId={editing?.id}
-              read={!group && m.out ? m.id <= readMax : undefined} />
-          ))}
-      </div>
-      <form onSubmit={send} className="border-t border-line p-3">
-        {(replying || editing) && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border-l-2 border-accent-light bg-panel2 px-3 py-1.5 text-xs">
-            {editing ? <Pencil className="h-3.5 w-3.5 shrink-0 text-accent-light" /> : <Reply className="h-3.5 w-3.5 shrink-0 text-accent-light" />}
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-accent-light">
-                {editing ? (target?.ad ? `Editando a sua contraproposta para ${target.sender}` : "Editando a sua mensagem") : replying!.ad ? `Contraproposta para ${replying!.sender}` : `Respondendo a ${replying!.sender}`}
-              </p>
-              <p className="truncate text-muted">{target ? quote(target) : quote((editing ?? replying)!)}</p>
-              {/* lucro com o valor digitado (some quando nenhuma conta sua consegue emitir) */}
-              {typedProfit && <div className="mt-0.5 flex items-center gap-1.5"><span className="text-muted">Com {fmtBRL(typedCents!)}:</span><AnalysisLine a={typedProfit} compact /></div>}
-            </div>
-            <button type="button" onClick={cancel} className="shrink-0 rounded p-0.5 text-muted hover:text-zinc-100" aria-label={editing ? "Cancelar a edição" : replying!.ad ? "Cancelar a contraproposta" : "Cancelar a resposta"} title="Cancelar (Esc)"><X className="h-4 w-4" /></button>
+    <div className="flex min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b border-line px-2 py-2.5 sm:gap-3 sm:px-4">
+          {onBack && <button type="button" onClick={onBack} className="btn-subtle h-9 w-9 shrink-0 px-0 md:hidden" aria-label="Voltar para as conversas"><ArrowLeft className="h-5 w-5" /></button>}
+          <Avatar kind={group ? "group" : "dm"} name={title} size="lg" />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-semibold">{title}</h2>
+            <p className="flex items-center gap-1.5 truncate text-xs text-muted">{live && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" aria-hidden />}<span className="truncate">{status}</span></p>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {group && (
+              <button type="button" aria-pressed={onlyAds} onClick={() => setOnlyAds(!onlyAds)} className={`btn h-9 gap-1.5 px-2.5 text-sm ${onlyAds ? "bg-accent-soft text-accent-light" : "text-muted hover:bg-panel2 hover:text-zinc-100"}`} title="Mostrar só os pedidos (esconde a conversa; as contrapropostas ficam embaixo de cada pedido)">
+                <ListFilter className="h-4 w-4" /><span className="hidden lg:inline">Só pedidos</span>
+              </button>
+            )}
+            <button type="button" className="btn-subtle h-9 w-9 px-0" onClick={() => void load()} disabled={loading} aria-label="Atualizar agora" title="Atualizar agora"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
+            <button type="button" className="btn-subtle h-9 w-9 px-0" onClick={clearChat} disabled={!msgs?.length} aria-label="Limpar o chat aqui" title="Limpa só aqui no app; no Telegram as mensagens continuam"><Eraser className="h-4 w-4" /></button>
+            <button type="button" aria-pressed={panel} onClick={() => setPanel?.(!panel)} className={`btn h-9 w-9 px-0 ${panel ? "bg-accent-soft text-accent-light" : "text-muted hover:bg-panel2 hover:text-zinc-100"}`} aria-label={panel ? "Esconder os detalhes do pedido" : "Mostrar os detalhes do pedido"} title="Detalhes do pedido"><Info className="h-4 w-4" /></button>
+          </div>
+        </header>
+        {cleared != null && (
+          <div className="flex items-center gap-2 border-b border-line bg-panel2 px-4 py-1.5 text-sm text-muted">
+            <Eraser className="h-4 w-4 shrink-0" /><span className="min-w-0 flex-1">Chat limpo aqui: aparecem só as mensagens novas.</span>
+            <button type="button" onClick={showAgain} className="shrink-0 font-medium text-accent-light hover:underline">Mostrar de novo</button>
           </div>
         )}
-        {source.kind === "group" && replying?.ad && onOfferDm && !editing && (
-          <label className="mb-2 flex cursor-pointer items-center gap-2 text-xs text-muted">
-            <input type="checkbox" checked={alsoPrivate} onChange={(e) => setAlsoPrivate(e.target.checked)} className="h-3.5 w-3.5 accent-accent-light" />
-            Mandar também no privado de <b className="text-zinc-200">{replying.sender}</b>
-          </label>
-        )}
-        <div className="flex items-end gap-2">
-          <input ref={fileInput} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void sendAttachment(f); }} aria-label="Anexar arquivo" />
-          {!editing && <button type="button" className="btn-ghost h-10 shrink-0 px-2" onClick={() => fileInput.current?.click()} disabled={uploading} title="Enviar foto, print ou PDF" aria-label="Enviar foto, print ou PDF"><Paperclip className="h-4 w-4" /></button>}
-          <textarea
-            ref={input}
-            className="input min-h-10 flex-1 resize-none text-sm"
-            rows={Math.min(5, Math.max(1, text.split("\n").length))}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
-              if (e.key === "Escape" && (replying || editing)) { e.preventDefault(); cancel(); }
-            }}
-            maxLength={4096}
-            placeholder={target?.ad ? "Sua contraproposta (ex.: 24,50)" : replying ? `Resposta para ${replying.sender}` : group ? `Mensagem para o grupo ${source.chat.title}` : `Mensagem para ${source.dm.name}`}
-            aria-label={editing ? "Editar a mensagem" : replying ? `Resposta para ${replying.sender}` : group ? "Mensagem para o grupo" : "Mensagem no privado"}
-          />
-          <button className="btn-primary h-10" disabled={sending || !text.trim()} title="Enviar (Enter; Shift+Enter quebra a linha)">
-            {editing ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}{sending ? "Enviando…" : editing ? "Salvar" : replying ? "Responder" : "Enviar"}
-          </button>
+        {focusOrder && <OrderSummary o={focusOrder} accounts={accounts} onDetails={() => setPanel?.(true)} />}
+        {erro && <div className="p-3"><Alert>{erro}</Alert></div>}
+        <div ref={box} onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5" aria-live="polite" aria-relevant="additions">
+          {shown === null ? <p className="text-sm text-muted">Carregando as mensagens…</p>
+            : shown.length === 0 ? <p className="py-8 text-center text-sm text-muted">{cleared != null && !msgs?.length ? "Chat limpo. As mensagens novas aparecem aqui." : onlyAds ? "Nenhum pedido nas últimas mensagens." : group ? "Nenhuma mensagem neste grupo." : "Nenhuma mensagem ainda: escreva abaixo para começar a conversa."}</p>
+            : shown.map((m) => {
+              const day = dayLabel(m.date);
+              const sep = day !== lastDay;
+              lastDay = day;
+              return (
+                <div key={m.id} className="space-y-3">
+                  {sep && <div className="flex justify-center"><span className="rounded-full bg-panel2 px-3 py-1 text-xs font-medium text-muted">{day}</span></div>}
+                  <Bubble domId={msgDomId(url, m.id)} m={m} mediaBase={url.replace(/\/messages$/, "")} quoted={m.replyTo ? byId.get(m.replyTo) ?? null : undefined} replying={replying?.id === m.id || editing?.id === m.id} flash={flash === m.id} fresh={fresh.has(m.id)} selected={selected?.id === m.id} offers={m.ad ? offersOf(m) : undefined}
+                    showSender={group} profit={m.ad ? emissionAnalysis(m.ad, myOfferFor(m) ?? m.ad.cpmCents, accounts) : null}
+                    profitAt={m.ad ? (cents) => emissionAnalysis(m.ad!, cents, accounts) : undefined}
+                    onSelect={m.ad ? () => select(m) : undefined}
+                    onCrm={group && m.ad ? (cents) => registerCrm(m, cents) : undefined} registering={registering === m.id}
+                    onReply={() => reply(m)} onDm={group && m.fromUser && !m.out ? () => dm(m.id) : undefined} opening={opening === m.id}
+                    onGroup={!group && m.origin && onGoToGroup ? () => onGoToGroup(m.origin!.chatId, m.origin!.messageId) : undefined}
+                    onEdit={m.out && m.text && !m.fwd ? () => edit(m) : undefined} onDelete={m.out ? () => remove(m) : undefined}
+                    onEditOffer={edit} onDeleteOffer={remove} editingId={editing?.id}
+                    read={!group && m.out ? m.id <= readMax : undefined} />
+                </div>
+              );
+            })}
         </div>
-      </form>
+        <form onSubmit={send} className="border-t border-line p-2 sm:p-3">
+          {(replying || editing) && (
+            <div className="mb-2 flex items-center gap-2 rounded-xl border-l-4 border-accent-light bg-panel2 px-3 py-2 text-sm">
+              {editing ? <Pencil className="h-4 w-4 shrink-0 text-accent-light" /> : <Reply className="h-4 w-4 shrink-0 text-accent-light" />}
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-accent-light">
+                  {editing ? (target?.ad ? `Editando a sua contraproposta para ${target.sender}` : "Editando a sua mensagem") : replying!.ad ? `Contraproposta para ${replying!.sender}` : `Respondendo a ${replying!.sender}`}
+                </p>
+                <p className="truncate text-muted">{target ? quote(target) : quote((editing ?? replying)!)}</p>
+                {/* lucro com o valor digitado (some quando nenhuma conta sua consegue emitir) */}
+                {typedProfit && <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs"><span className="text-muted">Com {fmtBRL(typedCents!)}:</span><AnalysisLine a={typedProfit} compact /></div>}
+              </div>
+              <button type="button" onClick={cancel} className="btn-subtle h-8 w-8 shrink-0 px-0" aria-label={editing ? "Cancelar a edição" : replying!.ad ? "Cancelar a contraproposta" : "Cancelar a resposta"} title="Cancelar (Esc)"><X className="h-4 w-4" /></button>
+            </div>
+          )}
+          {source.kind === "group" && replying?.ad && onOfferDm && !editing && (
+            <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 text-sm text-muted">
+              <input type="checkbox" checked={alsoPrivate} onChange={(e) => setAlsoPrivate(e.target.checked)} className="h-4 w-4 accent-accent-light" />
+              Mandar também no privado de <b className="text-zinc-200">{replying.sender}</b>
+            </label>
+          )}
+          <div className="flex items-end gap-2">
+            <input ref={fileInput} type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/heic" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void sendAttachment(f); }} aria-label="Anexar arquivo" />
+            {!editing && <button type="button" className="btn-subtle h-11 w-11 shrink-0 rounded-full px-0" onClick={() => fileInput.current?.click()} disabled={uploading} title="Enviar foto, print ou PDF" aria-label="Enviar foto, print ou PDF"><Paperclip className="h-5 w-5" /></button>}
+            <textarea
+              ref={input}
+              className="input min-h-11 flex-1 resize-none rounded-[22px] px-4 py-2.5 text-[15px] leading-6"
+              rows={Math.min(5, Math.max(1, text.split("\n").length))}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
+                if (e.key === "Escape" && (replying || editing)) { e.preventDefault(); cancel(); }
+              }}
+              maxLength={4096}
+              placeholder={target?.ad ? "Sua contraproposta (ex.: 24,50)" : replying ? `Resposta para ${replying.sender}` : group ? `Mensagem para o grupo ${source.chat.title}` : `Mensagem para ${source.dm.name}`}
+              aria-label={editing ? "Editar a mensagem" : replying ? `Resposta para ${replying.sender}` : group ? "Mensagem para o grupo" : "Mensagem no privado"}
+            />
+            <button className="btn-primary h-11 w-11 shrink-0 rounded-full px-0" disabled={sending || !text.trim()} aria-label={sending ? "Enviando" : editing ? "Salvar a edição" : replying ? "Responder" : "Enviar"} title="Enviar (Enter; Shift+Enter quebra a linha)">
+              {editing ? <Check className="h-5 w-5" /> : <Send className="h-5 w-5" />}
+            </button>
+          </div>
+        </form>
+      </div>
+      {panel && <OrderPanel o={focusOrder} accounts={accounts} title={title} isGroup={group} onClose={() => setPanel?.(false)} />}
     </div>
   );
 }
 
 type Analysis = ReturnType<typeof emissionAnalysis>;
 
-/** No privado: o pedido do grupo a que a conversa está ligada, a sua contraproposta e o lucro por ela. */
-function OfferStrip({ offer, cpmCents, accounts, initialCrm, onGoToGroup }: { offer: DmOffer; cpmCents: number | null; accounts: EmissionAccount[]; initialCrm?: CrmRef | null; onGoToGroup?: (chatId: string, messageId: number) => void }) {
-  const ad = offer.text ? parseBalcaoAd(offer.text) : null;
-  const [crm, setCrm] = useState(initialCrm ?? null);
-  const [registering, setRegistering] = useState(false);
-  // já tem negociação com conta escolhida: o lucro é o DESSA conta; senão, a sugestão pela regra
-  const dealAccount = crm?.accountId ? accounts.filter((a) => a.id === crm.accountId) : [];
-  const profit = ad ? emissionAnalysis(ad, cpmCents, dealAccount.length ? dealAccount : accounts) : null;
-  /** Registra o pedido no CRM Milhas com o milheiro da sua contraproposta (sem ela, o do pedido). */
-  async function register() {
-    setRegistering(true);
-    const r = await api<{ item: CrmRef }>(`/api/telegram/chats/${offer.chatId}/crm`, "POST", { messageId: offer.messageId, text: offer.text, sender: offer.sender, cpmCents: cpmCents ?? null });
-    setRegistering(false);
-    if (!r.ok) return toast(r.erro, "error");
-    setCrm({ id: r.data.item.id, number: r.data.item.number, stage: r.data.item.stage, accountId: r.data.item.accountId });
-    toast(`Negociação #${r.data.item.number} registrada no CRM Milhas`);
-  }
+/** O pedido em foco na conversa: o que foi pedido, a sua contraproposta, de quem e de onde, e as ações sobre ele. */
+type OrderView = {
+  ad: BalcaoAd; askedCents: number | null; offerCents: number | null; sender: string; group: string | null; at: string; crm: CrmRef | null;
+  onRegister?: (cpmCents?: number) => void; registering?: boolean; onGoToGroup?: () => void; onReply?: () => void; onClear?: () => void;
+};
+/** Lucro do pedido pela sua contraproposta (ou pelo pedido) na conta da negociação, se já tem, ou na sugerida. */
+function orderProfit(o: OrderView, accounts: EmissionAccount[]) {
+  const dealAccount = o.crm?.accountId ? accounts.filter((a) => a.id === o.crm!.accountId) : [];
+  return emissionAnalysis(o.ad, o.offerCents ?? o.askedCents, dealAccount.length ? dealAccount : accounts);
+}
+
+/** Resumo compacto no topo da conversa: "LATAM · 36.000 milhas · 2 CPFs · R$ 26,50/milheiro · Lucro R$ 187,20". */
+function OrderSummary({ o, accounts, onDetails }: { o: OrderView; accounts: EmissionAccount[]; onDetails: () => void }) {
+  const a = orderProfit(o, accounts);
   return (
-    <div className="space-y-0.5 border-b border-line bg-panel2 px-4 py-2 text-xs" aria-label="Pedido desta conversa">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <KanbanSquare className="h-3.5 w-3.5 shrink-0 text-accent-light" />
-        <span className="text-muted">Pedido de <b className="text-zinc-200">{offer.sender}</b> no grupo {offer.group} · {when(offer.at)}</span>
-        {ad && <span className="font-semibold text-zinc-100">{ad.program} · {fmtPts(ad.miles)} milhas · {ad.cpfs ?? 1} {(ad.cpfs ?? 1) === 1 ? "CPF" : "CPFs"}{ad.cpmCents != null ? ` · pediu ${fmtBRL(ad.cpmCents)}` : ""}</span>}
-        {cpmCents != null && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-semibold text-accent-light">Sua contraproposta {fmtBRL(cpmCents)}</span>}
-        {onGoToGroup && <button type="button" onClick={() => onGoToGroup(offer.chatId, offer.messageId)} className="flex shrink-0 items-center gap-1 font-medium text-accent-light hover:underline" title={`Ir para o pedido no grupo ${offer.group}`}><Users className="h-3.5 w-3.5" />Ver no grupo</button>}
-        {crm
-          ? <Link href={`/app/crm-milhas?deal=${crm.id}`} className="ml-auto flex shrink-0 items-center gap-1 font-medium text-emerald-300 hover:underline" title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />No CRM #{crm.number} · {DEAL_STAGE_LABELS[crm.stage as DealStageKey] ?? crm.stage}</Link>
-          : ad && <button type="button" onClick={register} disabled={registering} className="ml-auto flex shrink-0 items-center gap-1 font-medium text-accent-light hover:underline" title={`Registrar no CRM Milhas${cpmCents != null ? ` com ${fmtBRL(cpmCents)} o milheiro (a sua contraproposta)` : ""}`}><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
-      </p>
-      {profit && <AnalysisLine a={profit} compact />}
-      {!ad && offer.text && <p className="truncate text-muted">{offer.text}</p>}
+    <div className="border-b border-line px-2 py-2 sm:px-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-panel2 px-3 py-2 text-sm" aria-label="Pedido em foco">
+        <PlaneTakeoff className="h-4 w-4 shrink-0 text-accent-light" aria-hidden />
+        <span className="min-w-0 flex-1 truncate font-medium text-zinc-100" title={`Pedido de ${o.sender}${o.group ? ` no grupo ${o.group}` : ""}`}>
+          <span className="text-muted">Pedido · </span>{adLine(o.ad, o.offerCents ?? o.askedCents)}
+        </span>
+        {a?.covers && a.profitCents != null && (
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-sm font-semibold ${a.profitCents >= 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`}>{a.profitCents >= 0 ? "Lucro" : "Prejuízo"} {fmtBRL(Math.abs(a.profitCents))}</span>
+        )}
+        {a && !a.covers && <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-sm font-semibold text-amber-300">Nenhuma conta cobre</span>}
+        <span className="flex shrink-0 items-center gap-1">
+          {o.onGoToGroup && <button type="button" onClick={o.onGoToGroup} className="btn h-8 gap-1.5 border border-line px-2.5 text-sm text-accent-light hover:bg-panel" title={o.group ? `Ir para o pedido no grupo ${o.group}` : "Ir para o pedido no grupo"}><ExternalLink className="h-4 w-4" />Ver no grupo</button>}
+          {o.onReply && <button type="button" onClick={o.onReply} className="btn h-8 gap-1.5 border border-line px-2.5 text-sm text-accent-light hover:bg-panel"><Reply className="h-4 w-4" />Contraproposta</button>}
+          <button type="button" onClick={onDetails} className="btn-subtle h-8 w-8 px-0" aria-label="Ver os detalhes do pedido" title="Detalhes"><Info className="h-4 w-4" /></button>
+          {o.onClear && <button type="button" onClick={o.onClear} className="btn-subtle h-8 w-8 px-0" aria-label="Tirar o pedido do foco" title="Tirar do foco"><X className="h-4 w-4" /></button>}
+        </span>
+      </div>
     </div>
   );
 }
 
-/** Uma mensagem. quoted: a mensagem respondida (null = ela não está entre as carregadas; undefined = não é resposta);
- *  offers: as contrapropostas ao pedido; analysis: a análise do pedido pelas regras da negociação (conta, saldo e
- *  CPFs depois, sobra e lucro); profitAt: o lucro por outro milheiro (o da sua contraproposta); onCrm: registra. */
-function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening, onReply, replying, flash, fresh, onGroup, quoted, offers, analysis, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering, read }: {
-  m: Msg; domId?: string; chat?: string; mediaBase?: string; onOpen?: () => void; onNegotiate?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; flash?: boolean; fresh?: boolean; onGroup?: () => void; quoted?: Msg | null; offers?: Msg[];
-  analysis?: Analysis; profitAt?: (cpmCents: number) => Analysis; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
-  onCrm?: (cpmCents?: number) => void; registering?: boolean; read?: boolean; // privado: true = visualizada (verde), false = entregue (amarelo), undefined = não mostra
+/** Painel de detalhes do pedido em foco (à direita; em tela menor abre por cima): companhia, milhas, CPFs, valor por
+ *  milheiro, lucro, a conta que emite e o que sobra nela, quem pediu e onde; CRM, "Ver no grupo" e "Novo lançamento"
+ *  (a emissão avulsa, já preenchida). */
+function OrderPanel({ o, accounts, title, isGroup, onClose }: { o: OrderView | null; accounts: EmissionAccount[]; title: string; isGroup: boolean; onClose: () => void }) {
+  const a = o ? orderProfit(o, accounts) : null;
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !window.matchMedia("(min-width: 1536px)").matches) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  function newEntry() {
+    if (!o) return;
+    openEntryForm("debit", {
+      accountId: o.crm?.accountId ?? (a?.covers ? a.accountId : "") ?? "", type: "FLIGHT_REDEMPTION", points: o.ad.miles,
+      description: `Pedido de ${o.sender}${o.group ? ` · ${o.group}` : ""} · ${adLine(o.ad, o.offerCents ?? o.askedCents)}`, costs: [],
+    });
+  }
+  const row = (label: string, value: React.ReactNode, hint?: string) => (
+    <div className="flex items-baseline justify-between gap-3 py-2" title={hint}>
+      <dt className="text-sm text-muted">{label}</dt>
+      <dd className="text-right text-sm font-medium tabular-nums text-zinc-100">{value}</dd>
+    </div>
+  );
+  return (
+    <>
+      {/* em tela menor o painel fica por cima: o fundo escurecido fecha */}
+      <button type="button" aria-label="Fechar os detalhes" onClick={onClose} className="fixed inset-0 z-30 bg-black/40 2xl:hidden" tabIndex={-1} />
+      <aside className="fixed inset-y-0 right-0 z-40 flex w-[340px] max-w-[92vw] flex-col border-l border-line bg-panel shadow-2xl 2xl:static 2xl:z-auto 2xl:w-[320px] 2xl:max-w-none 2xl:shadow-none" aria-label="Detalhes do pedido">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+          <h3 className="min-w-0 flex-1 truncate font-semibold">Detalhes do pedido</h3>
+          <button ref={closeRef} type="button" onClick={onClose} className="btn-subtle h-9 w-9 px-0" aria-label="Fechar os detalhes"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {!o ? (
+            <div className="space-y-2 text-sm text-muted">
+              <p className="font-medium text-zinc-200">{title}</p>
+              <p>{isGroup ? "Toque em um pedido da conversa (ou em Contraproposta) para ver aqui a companhia, as milhas, os CPFs, o milheiro e o lucro." : "Esta conversa ainda não está ligada a um pedido do grupo."}</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1">
+                <p className="flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${o.ad.kind === "COMPRA" ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300"}`}>{o.ad.kind === "COMPRA" ? "Compra" : "Venda"}</span>
+                  <span className="text-lg font-semibold">{o.ad.program}</span>
+                </p>
+                <p className="text-sm text-muted">De <b className="font-medium text-zinc-200">{o.sender}</b>{o.group ? <> no grupo <b className="font-medium text-zinc-200">{o.group}</b></> : null} · {when(o.at)}</p>
+              </div>
+              <dl className="divide-y divide-line rounded-xl border border-line px-3">
+                {row("Companhia", o.ad.program)}
+                {row("Milhas", fmtPts(o.ad.miles))}
+                {row("CPFs", <>{o.ad.cpfs ?? 1}{o.ad.cpfs == null && <span className="font-normal text-muted"> (não disse)</span>}</>)}
+                {row("Milheiro pedido", o.askedCents != null ? fmtBRL(o.askedCents) : "sem preço")}
+                {o.offerCents != null && row("Sua contraproposta", <span className="text-accent-light">{fmtBRL(o.offerCents)}</span>)}
+                {a?.covers && a.profitCents != null && row(a.profitCents >= 0 ? "Lucro" : "Prejuízo", <span className={a.profitCents >= 0 ? "text-emerald-300" : "text-red-300"}>{fmtBRL(Math.abs(a.profitCents))}<span className="block text-xs font-normal text-muted">{fmtBRL(a.perCpfCents!)} por CPF</span></span>)}
+              </dl>
+              {a && (
+                <div className="space-y-1 rounded-xl bg-panel2 p-3 text-sm">
+                  <p className="font-medium">{a.covers ? "Conta que emite" : "Nenhuma conta cobre sozinha"}</p>
+                  <p className="text-muted">{a.account} · custo {fmtBRL(a.costCpmCents)}/milheiro{a.accounts > 1 ? ` · ${a.accounts} contas no programa` : ""}</p>
+                  {a.covers
+                    ? <p className="text-muted">Depois: {fmtPts(a.balanceAfter)} milhas · {a.cpfAfter} {a.cpfAfter === 1 ? "CPF livre" : "CPFs livres"}{a.leftoverPoints > 0 ? ` · sobra ${a.leftoverCostCents > 0 ? fmtBRL(a.leftoverCostCents) : `${fmtPts(a.leftoverPoints)} milhas`} (não paga outra emissão)` : ""}</p>
+                    : <p className="text-amber-300">{!a.enough ? `Faltam ${fmtPts(a.missingMiles)} milhas` : "Sem CPF livre para os passageiros"}: divida os passageiros entre contas.</p>}
+                </div>
+              )}
+              {!a && <p className="text-sm text-muted">Nenhuma conta sua de {o.ad.program} com saldo para calcular o lucro.</p>}
+              <div className="space-y-2">
+                {o.onGoToGroup && <button type="button" onClick={o.onGoToGroup} className="btn-ghost h-10 w-full gap-2"><ExternalLink className="h-4 w-4" />Ver no grupo</button>}
+                {o.onReply && <button type="button" onClick={o.onReply} className="btn-ghost h-10 w-full gap-2"><Reply className="h-4 w-4" />Mandar contraproposta</button>}
+                {o.crm
+                  ? <Link href={`/app/crm-milhas?deal=${o.crm.id}`} className="btn-ghost h-10 w-full gap-2 text-emerald-300"><KanbanSquare className="h-4 w-4" />No CRM #{o.crm.number} · {DEAL_STAGE_LABELS[o.crm.stage as DealStageKey] ?? o.crm.stage}</Link>
+                  : o.onRegister && <button type="button" onClick={() => o.onRegister!(o.offerCents ?? undefined)} disabled={o.registering} className="btn-ghost h-10 w-full gap-2"><KanbanSquare className="h-4 w-4" />{o.registering ? "Registrando…" : `Registrar no CRM${o.offerCents != null ? ` com ${fmtBRL(o.offerCents)}` : ""}`}</button>}
+                <button type="button" onClick={newEntry} className="btn-primary h-10 w-full gap-2"><Plus className="h-4 w-4" />Novo lançamento</button>
+                <p className="text-xs leading-5 text-muted">Abre a emissão de passagem já preenchida (conta, milhas e descrição). Se o pedido estiver no CRM, a baixa das milhas já acontece ao marcar como emitido lá: não lance duas vezes.</p>
+              </div>
+            </>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/** Uma mensagem, em balão: recebida à esquerda (clara), enviada à direita (azul). O pedido aparece compacto (companhia,
+ *  milhas, CPFs, milheiro e o lucro); os detalhes ficam no painel (onSelect). As contrapropostas aparecem embaixo do
+ *  pedido, como respostas a ele. As ações aparecem ao passar o mouse ou ao focar (no toque, sempre).
+ *  quoted: a mensagem respondida (null = fora das carregadas; undefined = não é resposta); profit: análise do pedido
+ *  pelas regras da negociação; profitAt: o lucro por outro milheiro (o da sua contraproposta). */
+function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening, onReply, replying, flash, fresh, selected, showSender = true, onGroup, onSelect, quoted, offers, analysis, profit, profitAt, onEdit, onDelete, onEditOffer, onDeleteOffer, editingId, onCrm, registering, read }: {
+  m: Msg; domId?: string; chat?: string; mediaBase?: string; onOpen?: () => void; onNegotiate?: () => void; onDm?: () => void; opening?: boolean; onReply?: () => void; replying?: boolean; flash?: boolean; fresh?: boolean; selected?: boolean; showSender?: boolean; onGroup?: () => void; onSelect?: () => void; quoted?: Msg | null; offers?: Msg[];
+  analysis?: Analysis; profit?: Analysis; profitAt?: (cpmCents: number) => Analysis; onEdit?: () => void; onDelete?: () => void; onEditOffer?: (m: Msg) => void; onDeleteOffer?: (m: Msg) => void; editingId?: number;
+  onCrm?: (cpmCents?: number) => void; registering?: boolean; read?: boolean; // privado: true = visualizada, false = entregue, undefined = não mostra
 }) {
   const hit = m.alerts.length > 0;
+  const out = m.out;
+  const a = profit ?? analysis;
+  const [full, setFull] = useState(false); // texto longo do pedido: as primeiras linhas e "ver mais"
   async function copy() {
     try {
       await navigator.clipboard.writeText(m.text);
@@ -662,57 +942,80 @@ function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening,
       toast("Não deu para copiar", "error");
     }
   }
+  const ring = replying ? "ring-2 ring-accent-light" : selected ? "ring-2 ring-accent-light/70" : flash ? "ring-2 ring-amber-400" : fresh ? "ring-2 ring-emerald-400/70" : "";
+  const chip = out ? "bg-black/10 text-zinc-950" : m.ad?.kind === "COMPRA" ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300";
+  const action = "flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light";
   return (
-    <div id={domId} className={`group scroll-mt-4 rounded-xl border px-3 py-2 ${m.out ? "ml-auto max-w-[85%] border-accent-light/40 bg-accent-soft" : hit ? "border-amber-500/50 bg-amber-500/10" : "border-line bg-panel2"} ${m.out ? "" : "mr-auto"} ${replying ? "ring-2 ring-accent-light" : flash ? "ring-2 ring-amber-400" : fresh ? "ring-2 ring-emerald-400/70" : ""} transition-shadow duration-700`}>
-      <div className="flex items-baseline gap-2 text-xs">
-        <span className="truncate font-semibold text-zinc-200">{m.sender}</span>
-        {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
-        <span className="ml-auto shrink-0 text-muted">{when(m.date)}</span>
-        {read !== undefined && <span className="inline-flex shrink-0" title={read ? "Visualizada pela pessoa" : "Entregue — ainda não visualizada"} aria-label={read ? "Visualizada" : "Entregue"}><Check className={`h-5 w-5 ${read ? "text-emerald-400" : "text-amber-400"}`} strokeWidth={3.5} /></span>}
-        {onNegotiate && <button type="button" onClick={onNegotiate} className="flex shrink-0 items-center gap-1 font-medium text-accent-light hover:underline" title="Ir para o pedido no chat e mandar a contraproposta"><Handshake className="h-3.5 w-3.5" />Negociação</button>}
-        {onGroup && <button type="button" onClick={onGroup} className="flex shrink-0 items-center gap-1 font-medium text-accent-light opacity-90 hover:opacity-100" title="Ir para este pedido no grupo"><Users className="h-3.5 w-3.5" />Ver no grupo</button>}
-        {onReply && <button type="button" onClick={onReply} className="flex shrink-0 items-center gap-1 font-medium text-accent-light opacity-90 hover:opacity-100" aria-label={m.ad ? `Contraproposta para ${m.sender}` : `Responder ${m.sender}`} title={m.ad ? "Mandar a sua contraproposta como resposta a este pedido" : "Responder esta mensagem"}><Reply className="h-3.5 w-3.5" />{m.ad ? "Contraproposta" : "Responder"}</button>}
-        {m.crm
-          ? <Link href={`/app/crm-milhas?deal=${m.crm.id}`} className="flex shrink-0 items-center gap-1 font-medium text-emerald-300 hover:underline" title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />No CRM #{m.crm.number} · {DEAL_STAGE_LABELS[m.crm.stage as DealStageKey] ?? m.crm.stage}</Link>
-          : onCrm && <button type="button" onClick={() => onCrm()} disabled={registering} className="flex shrink-0 items-center gap-1 text-accent-light opacity-80 hover:opacity-100" title="Registrar este pedido no CRM Milhas (com o milheiro do pedido)"><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
-        {onDm && <button type="button" onClick={onDm} disabled={opening} className="flex shrink-0 items-center gap-1 text-accent-light opacity-70 hover:opacity-100 group-hover:opacity-100" title="Conversar no privado com quem mandou"><MessageCircle className="h-3.5 w-3.5" />{opening ? "Abrindo…" : "Privado"}</button>}
-        {onEdit && <button type="button" onClick={onEdit} className="shrink-0 text-muted hover:text-zinc-100" aria-label="Editar a sua mensagem" title="Editar"><Pencil className="h-3.5 w-3.5" /></button>}
-        {onDelete && <button type="button" onClick={onDelete} className="shrink-0 text-muted hover:text-red-300" aria-label="Excluir a sua mensagem" title="Excluir para todos"><Trash2 className="h-3.5 w-3.5" /></button>}
-        {m.text && <button type="button" onClick={copy} className="shrink-0 text-muted opacity-0 hover:text-zinc-100 group-hover:opacity-100" aria-label="Copiar mensagem" title="Copiar"><Copy className="h-3.5 w-3.5" /></button>}
+    <div id={domId} className={`group flex scroll-mt-4 gap-2 ${out ? "justify-end" : "justify-start"}`}>
+      {!out && <div className="mt-auto pb-6"><Avatar kind="dm" name={m.sender} size="sm" /></div>}
+      <div className={`flex min-w-0 max-w-[min(85%,600px)] flex-col ${out ? "items-end" : "items-start"}`}>
+        {!out && (showSender || chat) && (
+          <span className="mb-0.5 flex max-w-full items-baseline gap-2 px-3 text-xs">
+            <span className="truncate font-medium text-zinc-300">{m.sender}</span>
+            {chat && <button type="button" onClick={onOpen} className="truncate text-accent-light hover:underline">{chat}</button>}
+          </span>
+        )}
+        <div
+          onClick={onSelect ? (e) => { if (!(e.target as HTMLElement).closest("a,button")) onSelect(); } : undefined}
+          className={`max-w-full rounded-[20px] px-3.5 py-2 transition-shadow duration-700 ${out ? "rounded-br-md bg-accent-light text-zinc-950" : hit ? "rounded-bl-md bg-amber-500/15 ring-1 ring-amber-500/40" : "rounded-bl-md bg-panel2"} ${ring} ${onSelect ? "cursor-pointer" : ""}`}
+        >
+          {quoted !== undefined && (
+            <p className={`mb-1.5 flex items-center gap-1.5 truncate rounded-lg border-l-4 px-2 py-1 text-xs ${out ? "border-zinc-950/30 bg-black/10 text-zinc-900" : "border-line bg-black/10 text-muted"}`}>
+              <CornerDownRight className="h-3.5 w-3.5 shrink-0" />{quoted ? <><b className="font-semibold">{quoted.sender}:</b> {quote(quoted)}</> : "resposta a uma mensagem mais antiga"}
+            </p>
+          )}
+          {m.ad && (
+            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" aria-label="Pedido lido da mensagem">
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${chip}`}>{m.ad.kind === "COMPRA" ? "Compra" : "Venda"}</span>
+              <span className="font-semibold">{adLine(m.ad)}</span>
+              {a?.covers && a.profitCents != null && (
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${out ? "bg-black/10" : a.profitCents >= 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300"}`} title={`${fmtBRL(a.perCpfCents!)} por CPF · ${a.account}`}>{a.profitCents >= 0 ? "Lucro" : "Prejuízo"} {fmtBRL(Math.abs(a.profitCents))}</span>
+              )}
+              {a && !a.covers && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${out ? "bg-black/10" : "bg-amber-500/15 text-amber-300"}`}>Nenhuma conta cobre</span>}
+            </div>
+          )}
+          {m.media && (
+            m.mediaKind === "photo" && mediaBase ? (
+              <a href={`${mediaBase}/media/${m.id}`} target="_blank" rel="noreferrer" className="my-1 block w-fit" title="Abrir a imagem em tamanho cheio">
+                <img src={`${mediaBase}/media/${m.id}`} alt={m.mediaName ?? "foto"} loading="lazy" className="max-h-64 max-w-full rounded-xl object-contain" />
+              </a>
+            ) : m.mediaKind === "file" && mediaBase ? (
+              <a href={`${mediaBase}/media/${m.id}`} download={m.mediaName ?? undefined} className={`my-1 flex w-fit max-w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium ${out ? "bg-black/10" : "bg-black/10 text-accent-light hover:bg-black/20"}`} title="Baixar o arquivo">
+                <Paperclip className="h-4 w-4 shrink-0" />
+                <span className="truncate">{m.mediaName ?? m.media}</span>
+                <Download className="h-4 w-4 shrink-0 opacity-70" />
+              </a>
+            ) : (
+              <p className={`text-sm italic ${out ? "text-zinc-900" : "text-muted"}`}>[{m.media}]</p>
+            )
+          )}
+          {m.text && (m.ad
+            ? <div>
+                <p className={`whitespace-pre-wrap break-words text-sm ${out ? "text-zinc-900" : "text-muted"} ${full ? "" : "line-clamp-3"}`}>{m.text}</p>
+                {m.text.split("\n").length > 3 || m.text.length > 180 ? <button type="button" onClick={() => setFull(!full)} className={`mt-0.5 flex items-center gap-1 text-xs font-medium ${out ? "text-zinc-950" : "text-accent-light"} hover:underline`} aria-expanded={full}><ChevronDown className={`h-3.5 w-3.5 transition-transform ${full ? "rotate-180" : ""}`} />{full ? "ver menos" : "ver mensagem inteira"}</button> : null}
+              </div>
+            : <p className="whitespace-pre-wrap break-words text-[15px] leading-6">{m.text}</p>)}
+          {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((x) => <span key={x} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-300"><BellRing className="h-3.5 w-3.5" />{x}</span>)}</div>}
+        </div>
+        {/* hora, leitura e ações (as ações aparecem ao passar o mouse, ao focar ou no toque) */}
+        <div className={`mt-0.5 flex max-w-full flex-wrap items-center gap-x-0.5 gap-y-0.5 px-1 text-xs text-muted ${out ? "flex-row-reverse" : ""}`}>
+          <span className="px-1.5 tabular-nums">{when(m.date)}</span>
+          {read !== undefined && <span className="inline-flex" title={read ? "Visualizada pela pessoa" : "Entregue — ainda não visualizada"} aria-label={read ? "Visualizada" : "Entregue"}><Check className={`h-4 w-4 ${read ? "text-emerald-400" : "text-zinc-500"}`} strokeWidth={3} /></span>}
+          {m.crm && <Link href={`/app/crm-milhas?deal=${m.crm.id}`} className={`${action} text-emerald-300`} title="Abrir a negociação no CRM Milhas"><KanbanSquare className="h-3.5 w-3.5" />CRM #{m.crm.number} · {DEAL_STAGE_LABELS[m.crm.stage as DealStageKey] ?? m.crm.stage}</Link>}
+          <span className={`flex flex-wrap items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 ${replying || selected ? "opacity-100" : ""} ${out ? "flex-row-reverse" : ""}`}>
+            {onNegotiate && <button type="button" onClick={onNegotiate} className={`${action} text-accent-light`} title="Ir para o pedido no chat e mandar a contraproposta"><Handshake className="h-3.5 w-3.5" />Negociação</button>}
+            {onReply && <button type="button" onClick={onReply} className={`${action} text-accent-light`} aria-label={m.ad ? `Contraproposta para ${m.sender}` : `Responder ${m.sender}`} title={m.ad ? "Mandar a sua contraproposta como resposta a este pedido" : "Responder esta mensagem"}><Reply className="h-3.5 w-3.5" />{m.ad ? "Contraproposta" : "Responder"}</button>}
+            {onSelect && <button type="button" onClick={onSelect} className={`${action} text-accent-light`} title="Ver os detalhes do pedido"><Info className="h-3.5 w-3.5" />Detalhes</button>}
+            {onGroup && <button type="button" onClick={onGroup} className={`${action} text-accent-light`} title="Ir para este pedido no grupo"><ExternalLink className="h-3.5 w-3.5" />Ver no grupo</button>}
+            {!m.crm && onCrm && <button type="button" onClick={() => onCrm()} disabled={registering} className={`${action} text-accent-light`} title="Registrar este pedido no CRM Milhas (com o milheiro do pedido)"><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
+            {onDm && <button type="button" onClick={onDm} disabled={opening} className={`${action} text-accent-light`} title="Conversar no privado com quem mandou"><MessageCircle className="h-3.5 w-3.5" />{opening ? "Abrindo…" : "Privado"}</button>}
+            {onEdit && <button type="button" onClick={onEdit} className={action} aria-label="Editar a sua mensagem" title="Editar"><Pencil className="h-3.5 w-3.5" /></button>}
+            {onDelete && <button type="button" onClick={onDelete} className={`${action} hover:text-red-300`} aria-label="Excluir a sua mensagem" title="Excluir para todos"><Trash2 className="h-3.5 w-3.5" /></button>}
+            {m.text && <button type="button" onClick={copy} className={action} aria-label="Copiar mensagem" title="Copiar"><Copy className="h-3.5 w-3.5" /></button>}
+          </span>
+        </div>
+        {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} onCrm={m.crm ? undefined : onCrm} registering={registering} />}
       </div>
-      {quoted !== undefined && (
-        <p className="mt-1 flex items-center gap-1 truncate rounded border-l-2 border-line bg-black/10 px-2 py-0.5 text-[11px] text-muted">
-          <CornerDownRight className="h-3 w-3 shrink-0" />{quoted ? <><b className="font-semibold text-zinc-300">{quoted.sender}:</b> {quote(quoted)}</> : "resposta a uma mensagem mais antiga"}
-        </p>
-      )}
-      {m.ad && (
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs" aria-label="Pedido lido da mensagem">
-          <span className={`rounded px-1.5 py-0.5 font-semibold ${m.ad.kind === "COMPRA" ? "bg-emerald-500/15 text-emerald-300" : "bg-sky-500/15 text-sky-300"}`}>{m.ad.kind === "COMPRA" ? "Compra" : "Venda"}</span>
-          <span className="font-semibold text-zinc-100">{m.ad.program}</span>
-          <span>{fmtPts(m.ad.miles)} milhas</span>
-          <span>{m.ad.cpfs ?? 1} {(m.ad.cpfs ?? 1) === 1 ? "CPF" : "CPFs"}{m.ad.cpfs == null && <span className="text-muted"> (não disse)</span>}</span>
-          <span className="font-semibold text-zinc-100">{m.ad.cpmCents != null ? `${fmtBRL(m.ad.cpmCents)} o milheiro` : "sem preço"}</span>
-        </p>
-      )}
-      {m.ad && analysis && <AnalysisLine a={analysis} />}
-      {m.media && (
-        m.mediaKind === "photo" && mediaBase ? (
-          <a href={`${mediaBase}/media/${m.id}`} target="_blank" rel="noreferrer" className="mt-1 block w-fit" title="Abrir a imagem em tamanho cheio">
-            <img src={`${mediaBase}/media/${m.id}`} alt={m.mediaName ?? "foto"} loading="lazy" className="max-h-64 max-w-full rounded-lg border border-line object-contain" />
-          </a>
-        ) : m.mediaKind === "file" && mediaBase ? (
-          <a href={`${mediaBase}/media/${m.id}`} download={m.mediaName ?? undefined} className="mt-1 flex w-fit max-w-full items-center gap-2 rounded-lg border border-line bg-black/10 px-2.5 py-1.5 text-xs font-medium text-accent-light hover:bg-black/20" title="Baixar o arquivo">
-            <Paperclip className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{m.mediaName ?? m.media}</span>
-            <Download className="h-3.5 w-3.5 shrink-0 opacity-70" />
-          </a>
-        ) : (
-          <p className="mt-1 text-xs italic text-muted">[{m.media}]</p>
-        )
-      )}
-      {m.text && <p className={`mt-1 whitespace-pre-wrap break-words ${m.ad ? "text-xs text-muted" : "text-sm"}`}>{m.text}</p>}
-      {hit && <div className="mt-1.5 flex flex-wrap gap-1">{m.alerts.map((a) => <span key={a} className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300"><BellRing className="h-3 w-3" />{a}</span>)}</div>}
-      {offers && offers.length > 0 && <Offers offers={offers} onEdit={onEditOffer} onDelete={onDeleteOffer} editingId={editingId} profitAt={profitAt} onCrm={m.crm ? undefined : onCrm} registering={registering} />}
     </div>
   );
 }
@@ -761,30 +1064,31 @@ function Offers({ offers, onEdit, onDelete, editingId, profitAt, onCrm, register
   const best = rows[0]?.cents ?? null;
   const visible = all ? rows : rows.filter((r, i) => i < 5 || r.o.out);
   return (
-    <div className="mt-2 rounded-lg border border-line bg-black/10 px-2.5 py-1.5" aria-label="Contrapropostas">
-      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-        {offers.length} {offers.length === 1 ? "contraproposta" : "contrapropostas"}{best != null && <span className="normal-case tracking-normal"> · menor {fmtBRL(best)}</span>}
+    // as contrapropostas como respostas ligadas ao pedido (um fio embaixo do balão)
+    <div className="mt-1 w-full max-w-full border-l-2 border-accent-light/40 pl-3" aria-label="Contrapropostas a este pedido">
+      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+        <CornerDownRight className="h-3.5 w-3.5" aria-hidden />{offers.length} {offers.length === 1 ? "contraproposta" : "contrapropostas"}{best != null && <span className="font-normal"> · menor <b className="font-semibold text-emerald-300">{fmtBRL(best)}</b></span>}
       </p>
-      <ul className="space-y-0.5">
+      <ul className="space-y-1">
         {visible.map(({ o, cents }) => {
           const mine = o.out && cents != null && profitAt ? profitAt(cents) : null; // o lucro pelo seu preço
           return (
-            <li key={`${o.group ? "g" : "m"}${o.id}`} className={`text-xs ${o.out ? "font-semibold text-accent-light" : ""} ${!o.group && editingId === o.id ? "rounded bg-accent-soft" : ""}`}>
+            <li key={`${o.group ? "g" : "m"}${o.id}`} className={`rounded-xl px-2.5 py-1.5 text-sm ${o.out ? "bg-accent-soft" : "bg-panel2"} ${!o.group && editingId === o.id ? "ring-2 ring-accent-light" : ""}`}>
               <div className="flex items-baseline gap-2">
-                <span className={`w-20 shrink-0 tabular-nums ${cents != null && cents === best ? "font-semibold text-emerald-300" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
-                <span className="min-w-0 flex-1 truncate" title={o.group ? `${o.text} (no grupo)` : o.text}>{o.sender}{o.group && <span className="ml-1 rounded bg-zinc-500/20 px-1 text-[10px] font-normal text-muted">no grupo</span>}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
+                <span className={`w-20 shrink-0 font-semibold tabular-nums ${cents != null && cents === best ? "text-emerald-300" : o.out ? "text-accent-light" : "text-zinc-100"}`}>{cents != null ? fmtBRL(cents) : "—"}</span>
+                <span className="min-w-0 flex-1 truncate" title={o.group ? `${o.text} (no grupo)` : o.text}><span className={o.out ? "font-semibold text-accent-light" : "font-medium"}>{o.out ? "Você" : o.sender}</span>{o.group && <span className="ml-1.5 rounded-full bg-zinc-500/20 px-1.5 py-0.5 text-xs text-muted">no grupo</span>}{cents == null || o.text.replace(/[\d\s.,?r$]/gi, "").length > 0 ? <span className="text-muted"> · {o.text.replace(/\s+/g, " ").slice(0, 60)}</span> : null}</span>
                 {o.out && cents != null && onCrm && <button type="button" onClick={() => onCrm(cents)} disabled={registering} className="flex shrink-0 items-center gap-1 self-center font-medium text-accent-light hover:underline" title="Registrar no CRM Milhas com o milheiro da sua contraproposta"><KanbanSquare className="h-3.5 w-3.5" />{registering ? "Registrando…" : "CRM"}</button>}
                 {o.out && onEdit && <button type="button" onClick={() => onEdit(o)} className="shrink-0 self-center text-muted hover:text-zinc-100" aria-label="Editar a sua contraproposta" title="Editar a sua contraproposta"><Pencil className="h-3.5 w-3.5" /></button>}
                 {o.out && onDelete && <button type="button" onClick={() => onDelete(o)} className="shrink-0 self-center text-muted hover:text-red-300" aria-label="Excluir a sua contraproposta" title="Excluir a sua contraproposta"><Trash2 className="h-3.5 w-3.5" /></button>}
-                <span className="shrink-0 font-normal text-muted">{when(o.date)}</span>
+                <span className="shrink-0 text-xs text-muted">{when(o.date)}</span>
               </div>
-              {mine && <div className="mb-1 ml-[5.5rem] font-normal"><AnalysisLine a={mine} compact /></div>}
+              {mine && <div className="mt-0.5 sm:ml-[5.5rem]"><AnalysisLine a={mine} compact /></div>}
             </li>
           );
         })}
       </ul>
-      {rows.length > visible.length && <button type="button" onClick={() => setAll(true)} className="mt-0.5 text-[11px] text-accent-light hover:underline">Ver todas ({rows.length})</button>}
-      {all && rows.length > 5 && <button type="button" onClick={() => setAll(false)} className="mt-0.5 text-[11px] text-accent-light hover:underline">Mostrar menos</button>}
+      {rows.length > visible.length && <button type="button" onClick={() => setAll(true)} className="mt-1 text-xs font-medium text-accent-light hover:underline">Ver todas ({rows.length})</button>}
+      {all && rows.length > 5 && <button type="button" onClick={() => setAll(false)} className="mt-1 text-xs font-medium text-accent-light hover:underline">Mostrar menos</button>}
     </div>
   );
 }
@@ -833,7 +1137,7 @@ function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload, a
   const titleOf = (id: string) => chats.find((c) => c.id === id)?.title ?? "";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+    <div className="grid gap-4 2xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <div className="space-y-4">
         <form onSubmit={save} className="card card-pad space-y-3">
           <p className="font-semibold">Novo alerta</p>
@@ -896,7 +1200,7 @@ function AlertsTab({ alerts, setAlerts, feed, errors, chats, openChat, reload, a
           <button type="button" className="btn-subtle h-8 w-8 px-0" onClick={() => void reload()} aria-label="Atualizar agora" title="Atualizar agora"><RefreshCw className="h-4 w-4" /></button>
         </div>
         {errors.map((e) => <div key={e.chat} className="px-3 pt-3"><Alert>{e.chat}: {e.erro}</Alert></div>)}
-        <div className="max-h-[65vh] space-y-2 overflow-y-auto p-4">
+        <div className="space-y-3 p-4">
           {!alerts.some((a) => a.active) ? <p className="text-sm text-muted">Crie um alerta para os pedidos que te interessam aparecerem aqui.</p>
             : feed === null ? <p className="text-sm text-muted">Procurando nos chats…</p>
             : feed.length === 0 ? <p className="text-sm text-muted">Nenhuma mensagem recente com os seus alertas.</p>

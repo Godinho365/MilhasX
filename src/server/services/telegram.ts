@@ -617,6 +617,25 @@ async function storedMessages(where: { groupId: string } | { dmId: string }, opt
   }));
 }
 
+/** Última mensagem de cada conversa do Chat Balcões (grupos e privados abertos), para a lista de conversas: o texto,
+ *  quem mandou, quando e o pedido lido (se for pedido). Só do que o gateway gravou (sem tempo real, fica vazio). */
+export async function chatPreviews(userId: string) {
+  if (!gatewayUrl()) return { groups: {}, dms: {} };
+  const [groups, dms] = await Promise.all([
+    prisma.telegramGroup.findMany({ where: { userId, link: { status: "ACTIVE" } }, select: { id: true, clearedUpTo: true } }),
+    prisma.telegramDm.findMany({ where: { userId, closed: false, link: { status: "ACTIVE" } }, select: { id: true, clearedUpTo: true } }),
+  ]);
+  const view = (r: { text: string; date: Date; senderName: string; out: boolean; media: string | null } | null) =>
+    r && { text: r.text.replace(/\s+/g, " ").trim().slice(0, 140), date: r.date.toISOString(), sender: r.out ? "Você" : r.senderName, out: r.out, media: r.media, ad: r.text ? parseBalcaoAd(r.text) : null };
+  const select = { text: true, date: true, senderName: true, out: true, media: true } as const;
+  const last = (where: Prisma.TelegramMessageWhereInput) => prisma.telegramMessage.findFirst({ where: { ...where, deletedAt: null }, orderBy: { msgId: "desc" }, select });
+  const [g, d] = await Promise.all([
+    Promise.all(groups.map(async (x) => [x.id, view(await last({ groupId: x.id, msgId: { gt: x.clearedUpTo ?? 0 } }))] as const)),
+    Promise.all(dms.map(async (x) => [x.id, view(await last({ dmId: x.id, msgId: { gt: x.clearedUpTo ?? 0 } }))] as const)),
+  ]);
+  return { groups: Object.fromEntries(g.filter(([, v]) => v)), dms: Object.fromEntries(d.filter(([, v]) => v)) };
+}
+
 /** Eventos do Chat Balcões depois do id `after` (a aba que reconectou pede o que perdeu). reset = perdeu demais (ou os
  *  eventos já foram limpos): a aba recarrega tudo. */
 export async function telegramEventsSince(userId: string, after: string) {
