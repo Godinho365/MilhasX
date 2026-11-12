@@ -399,6 +399,22 @@ model Session {
   @@index([userId])
 }
 
+/// Código de 6 dígitos mandado por e-mail para confirmar o endereço antes de criar a conta. Só o hash fica gravado.
+model EmailCode {
+  id        String    @id @default(cuid())
+  email     String
+  purpose   String    @default("signup")
+  codeHash  String
+  attempts  Int       @default(0)
+  ip        String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, purpose, createdAt])
+  @@index([ip, createdAt])
+}
+
 model LoginAttempt {
   id        String   @id @default(cuid())
   email     String

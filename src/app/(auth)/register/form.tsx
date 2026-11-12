@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
@@ -15,10 +15,19 @@ export function maskPhone(raw: string) {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
 
-export function RegisterForm({ google, siteKey, initialError }: { google: boolean; siteKey: string; initialError: string }) {
+/** Só os dígitos, no máximo 6 (aceita colar "123 456" ou "123-456"). */
+export const cleanCode = (raw: string) => raw.replace(/\D/g, "").slice(0, 6);
+
+export function RegisterForm({ google, siteKey, initialError, codeRequired }: { google: boolean; siteKey: string; initialError: string; codeRequired: boolean }) {
   const ready = useHydrated();
   const [erro, setErro] = useState(initialError);
+  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<"dados" | "codigo">("dados");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [resendIn, setResendIn] = useState(0);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -32,30 +41,77 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
 
   const ref = () => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("ref"));
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    if (password !== confirm) return setErro("As senhas não conferem");
-    if (!terms) return setErro("Aceite os Termos de Serviço e a Política de Privacidade");
+  // Contagem para liberar o "Reenviar código"
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  function resetCaptcha() {
+    // O token da Cloudflare vale uma vez: gera outro para a próxima tentativa
+    setCaptcha("");
+    setCaptchaKey((k) => k + 1);
+  }
+
+  async function sendCode() {
+    setBusy(true);
+    setErro("");
+    setInfo("");
+    const r = await api<{ resendSeconds: number }>("/api/auth/register/code", "POST", { email, captcha: captcha || undefined });
+    setBusy(false);
+    resetCaptcha();
+    if (!r.ok) {
+      setErro(r.erro);
+      return false;
+    }
+    setResendIn(r.data.resendSeconds);
+    return true;
+  }
+
+  async function createAccount() {
     setBusy(true);
     setErro("");
     const r = await api("/api/auth/register", "POST", {
-      name: f.get("name"),
-      email: f.get("email"),
+      name,
+      email,
       phone,
       password,
       acceptTerms: true,
-      captcha: captcha || undefined,
+      captcha: codeRequired ? undefined : captcha || undefined,
+      code: codeRequired ? code : undefined,
       ref: ref() || undefined,
     });
     setBusy(false);
     if (!r.ok) {
-      // O token do Cloudflare vale uma vez: gera outro para a próxima tentativa
-      setCaptcha("");
-      setCaptchaKey((k) => k + 1);
+      if (!codeRequired) resetCaptcha();
       return setErro(r.erro);
     }
     window.location.href = "/app";
+  }
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (password !== confirm) return setErro("As senhas não conferem");
+    if (!terms) return setErro("Aceite os Termos de Serviço e a Política de Privacidade");
+    if (!codeRequired) return createAccount();
+    if (await sendCode()) {
+      setCode("");
+      setStep("codigo");
+    }
+  }
+
+  async function submitCode(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (code.length !== 6) return setErro("Digite o código de 6 dígitos");
+    await createAccount();
+  }
+
+  async function resend() {
+    if (await sendCode()) {
+      setCode("");
+      setInfo("Enviamos um código novo. O anterior deixou de valer.");
+    }
   }
 
   function googleSignup() {
@@ -67,6 +123,54 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
     window.location.href = `/api/auth/google?${q}`;
   }
 
+  if (step === "codigo") {
+    return (
+      <div>
+        <AuthTitle title="Confirme seu e-mail" subtitle="Falta só um passo para criar sua conta" />
+        <form onSubmit={submitCode} method="post" className="space-y-4">
+          {erro && <Alert>{erro}</Alert>}
+          {info && <Alert kind="ok">{info}</Alert>}
+          <p className="text-sm text-muted">
+            Enviamos um código de 6 dígitos para <strong className="break-all text-zinc-100">{email}</strong>. Ele vale por 10 minutos. Confira também a caixa de spam.
+          </p>
+          <label className="block">
+            <span className="label">Código de verificação</span>
+            <input
+              className="input h-12 text-center font-mono text-2xl tracking-[0.5em]"
+              name="code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="\d{6}"
+              maxLength={7}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(cleanCode(e.target.value))}
+              required
+              autoFocus
+            />
+          </label>
+          <button className="btn-primary h-10 w-full" disabled={busy || !ready || code.length !== 6}>{busy ? "Criando conta…" : "Confirmar e criar conta"}</button>
+        </form>
+        <div className="mt-5 space-y-3 border-t border-line pt-4 text-sm">
+          {siteKey && resendIn <= 0 && <Turnstile key={captchaKey} siteKey={siteKey} onToken={setCaptcha} />}
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" className="text-muted hover:text-accent-light" onClick={() => { setStep("dados"); setErro(""); setInfo(""); }}>
+              ← Alterar e-mail
+            </button>
+            <button
+              type="button"
+              className="font-medium text-accent-light disabled:font-normal disabled:text-muted"
+              onClick={resend}
+              disabled={busy || resendIn > 0 || (!!siteKey && !captcha)}
+            >
+              {resendIn > 0 ? `Reenviar código em ${resendIn}s` : "Reenviar código"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <AuthTitle title="Cadastrar" subtitle="Digite seus dados para criar sua conta" />
@@ -74,11 +178,11 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
         {erro && <Alert>{erro}</Alert>}
         <label className="block">
           <span className="label">Nome</span>
-          <input className="input" name="name" autoComplete="name" placeholder="Digite seu nome" required minLength={2} maxLength={100} />
+          <input className="input" name="name" autoComplete="name" placeholder="Digite seu nome" required minLength={2} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="block">
           <span className="label">E-mail</span>
-          <input className="input" name="email" type="email" autoComplete="email" placeholder="Digite seu e-mail" required />
+          <input className="input" name="email" type="email" autoComplete="email" placeholder="Digite seu e-mail" required maxLength={200} value={email} onChange={(e) => setEmail(e.target.value.trim())} />
         </label>
         <label className="block">
           <span className="label">Telefone (WhatsApp)</span>
@@ -115,7 +219,7 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
           </span>
         </label>
         {siteKey && <Turnstile key={captchaKey} siteKey={siteKey} onToken={setCaptcha} />}
-        <button className="btn-primary h-10 w-full" disabled={busy || !canSubmit}>{busy ? "Criando conta…" : "Cadastrar com e-mail"}</button>
+        <button className="btn-primary h-10 w-full" disabled={busy || !canSubmit}>{busy ? (codeRequired ? "Enviando código…" : "Criando conta…") : "Cadastrar com e-mail"}</button>
       </form>
       {google && (
         <div className="mt-4 space-y-4">

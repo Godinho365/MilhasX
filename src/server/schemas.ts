@@ -31,6 +31,8 @@ export const registerSchema = z.object({
     .optional(),
   acceptTerms: z.boolean().optional(),
   captcha: z.string().max(4096).optional(),
+  // Código de 6 dígitos mandado ao e-mail (exigido quando o envio de e-mail está configurado)
+  code: z.string().trim().max(20).optional(),
 });
 export const loginSchema = z.object({ email: z.string().trim().min(1).max(200), password: z.string().min(1).max(128) });
 export const forgotSchema = z.object({ email: z.string().trim().email("E-mail inválido").max(200) });
