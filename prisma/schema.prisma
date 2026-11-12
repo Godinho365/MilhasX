@@ -836,6 +836,7 @@ model CreditCard {
   expYear         Int?
   limitCents      Int?
   annualFeeMonth  Int? // mês em que a anuidade é cobrada (1-12)
+  otherIsPersonal Boolean  @default(false) // fatura: o que passa das compras lançadas (valor real − lançados) é gasto pessoal, fora do Financeiro
   color           String? // cor do cartão na vitrine (#rrggbb)
   benefits        String[] @default([])
   benefitsUrl     String?

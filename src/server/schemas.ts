@@ -370,6 +370,7 @@ export const cardSchema = z.object({
   expYear: z.number().int().min(2000).max(2100).optional().nullable(),
   limitCents: cents.optional().nullable(),
   annualFeeMonth: z.number().int().min(1).max(12).optional().nullable(),
+  otherIsPersonal: z.boolean().optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida").optional().nullable(),
   benefits: z.array(z.string().trim().min(1).max(60)).max(60).optional(),
   benefitsUrl: z.string().trim().url("Link inválido").max(300).optional().nullable().or(z.literal("").transform(() => null)),

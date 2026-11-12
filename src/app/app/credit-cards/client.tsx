@@ -15,7 +15,7 @@ import { CardDialog, CardFace } from "./card-dialog";
 type Invoice = { id: string; closingDate: string; dueDate: string; amountCents: number; expectedPoints: number; feeCents: number; pointsIncluded: boolean; status: "OPEN" | "CLOSED" | "RECEIVED" };
 export type CardView = {
   id: string; name: string; brand: string | null; program: string; programId: string; logo: string | null; color: string; holder: string; accountId: string;
-  pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null;
+  pointsPerDollar: number; dollarRateCents: number; closingDay: number; dueDay: number; annualFeeCents: number; feeWaiverCents: number | null; otherIsPersonal: boolean;
   bank: string | null; brandTier: string | null; last4: string | null; printedName: string | null; modality: string | null; cardType: string | null; status: string;
   expMonth: number | null; expYear: number | null; limitCents: number | null; annualFeeMonth: number | null; cardColor: string | null;
   benefits: string[]; benefitsUrl: string | null; tags: string[]; notes: string | null;

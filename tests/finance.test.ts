@@ -135,6 +135,17 @@ describe("contas do financeiro (domínio)", () => {
     expect(only).toMatchObject([{ dueDate: "2027-01-17", itemsCents: 0, totalCents: 8_000, status: "open" }]);
     expect(billCashTxs(only).map((t) => [t.source, t.category, t.amountCents])).toEqual([["cardOther", "Outras despesas", 8_000]]);
     expect(billAdjustTxs(cardBills(charges.slice(0, 1), today, new Map([[k, { realCents: 9_000, dueOverride: null }]])))).toMatchObject([{ type: "INCOME", amountCents: 1_000, category: "Outras receitas" }]);
+
+    // cartão com os outros gastos pessoais: a fatura continua com o valor real, mas a parte pessoal fica fora do Financeiro
+    const mine = cardBills(charges, today, new Map([[k, { realCents: 15_000, dueOverride: null }]]), new Map([[k, [{ id: "p1", paidAt: "2026-10-18", amountCents: 5_000, accountId: "bank" }]]]), new Set(["c1"]));
+    expect(mine[0]).toMatchObject({ personal: true, adjustCents: 3_000, totalCents: 15_000, openCents: 10_000 });
+    const mineCash = billCashTxs([mine[0]!]);
+    expect(mineCash.some((t) => t.source === "cardOther")).toBe(false);
+    expect(mineCash.filter((t) => t.paidAt).map((t) => [t.source, t.amountCents])).toEqual([["purchases", 3_333], ["saleCosts", 666]]);
+    expect(mineCash.filter((t) => !t.paidAt).reduce((s, t) => s + t.amountCents, 0)).toBe(7_999); // 80% de 10.000 (o arredondamento fica com a parte pessoal)
+    expect(billAdjustTxs([mine[0]!])).toEqual([]);
+    // estorno continua entrando, mesmo no cartão pessoal
+    expect(billAdjustTxs(cardBills(charges.slice(0, 1), today, new Map([[k, { realCents: 9_000, dueOverride: null }]]), undefined, new Set(["c1"])))).toMatchObject([{ type: "INCOME", amountCents: 1_000 }]);
   });
 
   it("categorias em grupo › item", () => {

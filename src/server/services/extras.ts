@@ -93,7 +93,7 @@ export interface CardInput {
   feeWaiverCents?: number | null;
   bank?: string | null; brandTier?: string | null; last4?: string | null; printedName?: string | null;
   modality?: string | null; cardType?: string | null; status?: string;
-  expMonth?: number | null; expYear?: number | null; limitCents?: number | null; annualFeeMonth?: number | null;
+  expMonth?: number | null; expYear?: number | null; limitCents?: number | null; annualFeeMonth?: number | null; otherIsPersonal?: boolean;
   color?: string | null; benefits?: string[]; benefitsUrl?: string | null; tags?: string[]; notes?: string | null;
 }
 

@@ -34,7 +34,7 @@ export default async function CreditCardsPage() {
       cards={o.cards.map((c) => ({
         id: c.id, name: c.name, brand: c.brand, program: c.account.program.name, programId: c.account.programId, logo: c.account.program.logoUpdatedAt?.getTime().toString() ?? null, color: c.account.program.color, holder: c.account.holder.name, accountId: c.accountId,
         pointsPerDollar: c.pointsPerDollar / 100, dollarRateCents: c.dollarRateCents, closingDay: c.closingDay, dueDay: c.dueDay,
-        annualFeeCents: c.annualFeeCents, feeWaiverCents: c.feeWaiverCents,
+        annualFeeCents: c.annualFeeCents, feeWaiverCents: c.feeWaiverCents, otherIsPersonal: c.otherIsPersonal,
         bank: c.bank, brandTier: c.brandTier, last4: c.last4, printedName: c.printedName, modality: c.modality, cardType: c.cardType, status: c.status,
         expMonth: c.expMonth, expYear: c.expYear, limitCents: c.limitCents, annualFeeMonth: c.annualFeeMonth, cardColor: c.color,
         benefits: c.benefits, benefitsUrl: c.benefitsUrl, tags: c.tags, notes: c.notes,

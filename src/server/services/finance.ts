@@ -25,7 +25,7 @@ const isCharge = (t: Tx) => !!t.cardId && t.type === "EXPENSE";
 /** Cartões do usuário, ajustes das faturas (valor real, vencimento) e pagamentos. */
 async function cardContext(userId: string) {
   const [cards, edits, payments] = await Promise.all([
-    prisma.creditCard.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, last4: true, color: true, closingDay: true, dueDay: true, active: true } }),
+    prisma.creditCard.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, last4: true, color: true, closingDay: true, dueDay: true, active: true, otherIsPersonal: true } }),
     prisma.cardBill.findMany({ where: { userId }, select: { cardId: true, dueDate: true, realCents: true, dueOverride: true } }),
     prisma.cardBillPayment.findMany({ where: { userId }, select: { id: true, cardId: true, dueDate: true, paidAt: true, amountCents: true, accountId: true } }),
   ]);
@@ -38,6 +38,7 @@ async function cardContext(userId: string) {
     cards: new Map(cards.map((c) => [c.id, c])),
     edits: new Map<string, BillEdit>(edits.map((e) => [billKey(e.cardId, day(e.dueDate)), { realCents: e.realCents, dueOverride: e.dueOverride ? day(e.dueOverride) : null }])),
     payments: pays,
+    personalCards: new Set(cards.filter((c) => c.otherIsPersonal).map((c) => c.id)),
   };
 }
 type CardCtx = Awaited<ReturnType<typeof cardContext>>;
@@ -65,7 +66,7 @@ async function financeBook(userId: string) {
   const all = [...manual, ...automatic];
   const charges = all.filter(isCharge);
   const plain = all.filter((t) => !isCharge(t));
-  const bills = cardBills(charges, brDay(), ctx.edits, ctx.payments);
+  const bills = cardBills(charges, brDay(), ctx.edits, ctx.payments, ctx.personalCards);
   const billOf = new Map(bills.map((b) => [billKey(b.cardId, b.dueDate), b]));
   const billCash = billCashTxs(bills);
   // a compra no cartão fica paga quando a fatura dela é quitada

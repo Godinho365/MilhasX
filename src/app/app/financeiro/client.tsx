@@ -212,7 +212,7 @@ type BillRef = { kind: "fin" | "entry" | "sale"; id: string };
 type BillItem = { description: string | null; amountCents: number; source: string; category: string | null; day: string; ref: BillRef | null; accountId: string };
 type BillPay = { id: string; paidAt: string; amountCents: number; accountId: string | null };
 type Bill = {
-  cardId: string; dueDate: string; effectiveDue: string; itemsCents: number; realCents: number | null; adjustCents: number; totalCents: number;
+  cardId: string; dueDate: string; effectiveDue: string; itemsCents: number; realCents: number | null; adjustCents: number; personal: boolean; totalCents: number;
   paidCents: number; openCents: number; status: "open" | "partial" | "paid"; overdue: boolean; paidAt: string | null; payments: BillPay[]; items: BillItem[];
 };
 type CardBills = { id: string; name: string; last4: string | null; color: string | null; closingDay: number; dueDay: number; openCents: number; overdueCents: number; open: Bill[]; paid: Bill[] };
@@ -310,7 +310,7 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
                 <span className="tabular-nums">{fmtBRL(i.amountCents)}</span>
               </li>
             ))}
-            {b.adjustCents !== 0 && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? "Outros gastos no cartão (valor real − compras lançadas)" : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
+            {b.adjustCents !== 0 && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? (b.personal ? "Gastos pessoais (valor real − compras lançadas; fora do Financeiro)" : "Outros gastos no cartão (valor real − compras lançadas)") : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
             {b.payments.map((p) => <li key={p.id} className="flex gap-3 text-emerald-300"><span className="w-20 shrink-0 tabular-nums">{fmtDate(p.paidAt)}</span><span className="min-w-0 flex-1 truncate">Pagamento{p.accountId ? ` · ${accounts.find((a) => a.id === p.accountId)?.name ?? "conta"}` : ""}</span><span className="tabular-nums">−{fmtBRL(p.amountCents)}</span></li>)}
             <li><button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setAdding({ card: c, bill: b })}>+ Adicionar compra nesta fatura</button></li>
           </ul>
