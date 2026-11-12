@@ -2,8 +2,64 @@
 import { prisma, DomainError } from "../db";
 import { brDay } from "@/domain/brasilia";
 import { deadlineStatus } from "@/domain/viaje-facil";
+import { projectClub, type ClubEvent, type ClubFreq } from "@/domain/club-calendar";
 
 /* ---------------- Clubes ---------------- */
+
+/** Calendário dos clubes no ano: os planos de cada conta (assinatura, dia da cobrança, próxima, fim) e as cobranças
+ *  dia a dia. O que já passou vem dos pontos de clube do Extrato; daqui para a frente, da recorrência do clube. */
+export async function clubCalendar(userId: string, holderId: string | undefined, year: number) {
+  const today = brDay();
+  const from = `${year}-01-01`, to = `${year}-12-31`;
+  const recs = await prisma.recurrence.findMany({
+    where: { userId, type: "CLUB", account: { archived: false, ...(holderId ? { holderId } : {}) } },
+    include: { account: { include: { program: true, holder: true } } },
+  });
+  const withRec = new Set(recs.map((r) => r.accountId));
+  const loose = await prisma.account.findMany({
+    where: { userId, archived: false, ...(holderId ? { holderId } : {}), id: { notIn: [...withRec] }, entries: { some: { type: "CLUB", occurredAt: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${to}T23:59:59Z`) } } } },
+    include: { program: true, holder: true },
+  });
+  const accountIds = [...withRec, ...loose.map((a) => a.id)];
+  const [entries, firsts] = await Promise.all([
+    prisma.entry.findMany({
+      where: { userId, type: "CLUB", accountId: { in: accountIds }, occurredAt: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${to}T23:59:59Z`) } },
+      select: { accountId: true, occurredAt: true, points: true, inputCostCents: true },
+    }),
+    prisma.entry.groupBy({ by: ["accountId"], where: { userId, type: "CLUB", accountId: { in: accountIds } }, _min: { occurredAt: true } }),
+  ]);
+  const signed = new Map(firsts.map((f) => [f.accountId, f._min.occurredAt ? f._min.occurredAt.toISOString().slice(0, 10) : null]));
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+
+  // um clube por conta (com recorrência, ou só com pontos de clube no Extrato)
+  const clubs = [
+    ...recs.map((r) => ({
+      id: r.accountId, accountId: r.accountId, program: r.account.program.name, holder: r.account.holder.name, color: r.account.program.color,
+      label: r.account.nickname || `${r.account.program.name} · ${r.account.holder.name}`, description: r.description,
+      points: r.points, costCents: r.costCents, frequency: r.frequency as ClubFreq, interval: r.interval,
+      chargeDay: r.dayOfMonth ?? r.nextDate.getUTCDate(), signedAt: signed.get(r.accountId) ?? day(r.createdAt),
+      nextDate: r.active ? day(r.nextDate) : null, endDate: r.endDate ? day(r.endDate) : null,
+      active: r.active && (!r.endDate || day(r.endDate) >= today), fromEntries: false,
+      rec: r,
+    })),
+    ...loose.map((a) => ({
+      id: a.id, accountId: a.id, program: a.program.name, holder: a.holder.name, color: a.program.color,
+      label: a.nickname || `${a.program.name} · ${a.holder.name}`, description: "Pontos de clube lançados no Extrato (sem recorrência)",
+      points: 0, costCents: 0, frequency: "MONTHLY" as ClubFreq, interval: 1, chargeDay: null as number | null, signedAt: signed.get(a.id) ?? null,
+      nextDate: null as string | null, endDate: null as string | null, active: false, fromEntries: true, rec: null,
+    })),
+  ].sort((a, b) => a.program.localeCompare(b.program) || a.holder.localeCompare(b.holder));
+
+  // já aconteceu: o Extrato; vem pela frente: a recorrência (a partir da próxima data, sem repetir o que já foi lançado)
+  const past: ClubEvent[] = entries.map((e) => ({ clubId: e.accountId, day: day(e.occurredAt), points: e.points, costCents: e.inputCostCents, projected: false }));
+  const future = clubs.flatMap((c) => {
+    if (!c.rec || !c.active || !c.nextDate) return [];
+    const start = c.nextDate > today ? c.nextDate : today;
+    return projectClub({ id: c.id, nextDate: c.nextDate, frequency: c.frequency, interval: c.interval, dayOfMonth: c.rec.dayOfMonth, endDate: c.endDate, points: c.points, costCents: c.costCents }, start < from ? from : start, to);
+  });
+  return { year, today, clubs: clubs.map(({ rec: _rec, ...c }) => c), events: [...past, ...future] };
+}
+
 
 /** Pontos por mês de cada frequência (o clube anual vira 1/12 por mês, o trimestral 1/3). */
 const PER_MONTH: Record<string, number> = { DAILY: 30, WEEKLY: 52 / 12, MONTHLY: 1, QUARTERLY: 1 / 3, YEARLY: 1 / 12 };

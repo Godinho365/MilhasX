@@ -68,6 +68,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: "Recursos", items: [
     { key: "milhas", label: "Milhas", icon: WalletCards, children: [
       { href: "/app", label: "Painel", icon: LayoutDashboard },
+      { href: "/app/milhas/calendario", label: "Calendário", icon: CalendarDays },
       { href: "/app/entries", label: "Extrato", icon: FileText },
       { href: "/app/programs", label: "Central de Contas", icon: Wallet },
       { href: "/app/credit-cards", label: "Central de Cartões", icon: CreditCard },
@@ -114,7 +115,7 @@ const TITLES: [string, string][] = [
   ["/app/acompanhamentos/mapa", "Mapa de viagens"], ["/app/acompanhamentos/voos", "Voos"], ["/app/acompanhamentos/hospedagens", "Hospedagens"],
   ["/app/acompanhamentos/transportes", "Transportes"], ["/app/acompanhamentos/cruzeiros", "Cruzeiros"], ["/app/acompanhamentos/seguros", "Seguros"],
   ["/app/acompanhamentos/adicionais", "Adicionais"],
-  ["/app/metricas", "Métricas"], ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas e comissões"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
+  ["/app/metricas", "Métricas"], ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas e comissões"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/calendario", "Calendário de clubes"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
   ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/site", "Site"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
   ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/chat-balcoes", "Chat Balcões"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
