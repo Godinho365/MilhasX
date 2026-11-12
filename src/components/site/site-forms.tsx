@@ -4,6 +4,7 @@
 // obrigatórios, prova de privacidade e confirmação clara: o básico de formulário que converte.
 import { useId, useState } from "react";
 import { AIRPORTS, airportCodeOf } from "@/domain/airports";
+import { readUtm } from "@/components/utm-keeper";
 import type { SiteTheme } from "@/domain/site-themes";
 import { btnStyle, inputStyle } from "./site-style";
 import { WhatsappIcon } from "./site-icons";
@@ -47,7 +48,7 @@ export function SiteQuoteForm({ t, slug, button, whatsapp, preview }: { t: SiteT
       customerName: f.name, customerPhone: f.phone, customerEmail: f.email || null, tripType: round ? "ROUND_TRIP" : "ONE_WAY", cabin: "ECONOMY",
       segments: [{ origin, destination, date: f.go || null }, ...(round ? [{ origin: destination, destination: origin, date: f.back }] : [])],
       adults: Math.min(9, Math.max(1, Number(f.adults) || 1)), children: Math.min(8, Math.max(0, Number(f.children) || 0)), infants: 0,
-      flexibleDates: !f.go, notes: f.notes ? `Pelo site: ${f.notes}` : "Pedido feito pelo site", website: f.website,
+      flexibleDates: !f.go, notes: f.notes ? `Pelo site: ${f.notes}` : "Pedido feito pelo site", website: f.website, utm: readUtm(),
     };
     const r = await fetch(`/api/public/orders/${encodeURIComponent(slug)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = (await r.json().catch(() => ({}))) as { number?: number; erro?: string };

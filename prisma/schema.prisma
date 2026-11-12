@@ -164,6 +164,8 @@ model User {
   telegramGroups      TelegramGroup[]
   telegramAlerts      TelegramAlert[]
   telegramDms         TelegramDm[]
+  trafficConnection   TrafficConnection?
+  trafficReports      TrafficReport[]
 
   @@index([workspaceOwnerId])
 }
@@ -1118,6 +1120,7 @@ model TravelOrder {
   budgetCents   Int?
   notes         String?
   source        String             @default("MANUAL") // MANUAL | PUBLIC
+  utm           Json? // de onde o cliente veio (pedido pela página): utm_source, utm_campaign, utm_content... e fbclid
   archivedAt    DateTime?
   archiveReason String?
   shareToken    String?            @unique // link das páginas "Cotação" e "Reserva confirmada" para o cliente
@@ -1763,4 +1766,31 @@ model CalendarFeed {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String   @unique
   createdAt DateTime @default(now())
+}
+
+/// Tráfego: conexão com o Meta (só leitura dos anúncios). O token fica criptografado com a CREDENTIALS_KEY.
+model TrafficConnection {
+  userId       String    @id
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  metaUserId   String
+  metaUserName String
+  tokenEnc     String
+  expiresAt    DateTime?
+  accounts     Json // contas de anúncios que a pessoa pode ver: [{ id, name, currency, status }]
+  selected     String[]  @default([]) // até 3 contas mostradas no painel (act_...)
+  status       String    @default("OK") // OK | EXPIRED (token vencido ou permissão tirada)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+/// Tráfego: cópia das consultas ao Meta (evita bater no limite de chamadas).
+model TrafficReport {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String // conta|nível|início|fim
+  data      Json
+  fetchedAt DateTime @default(now())
+
+  @@unique([userId, key])
 }

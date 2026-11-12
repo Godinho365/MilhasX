@@ -449,7 +449,19 @@ export const orderSchema = z.object({
   stageId: z.string().max(40).nullable().optional(), // coluna onde o pedido novo entra
 });
 // "website" é um campo-armadilha: pessoas não veem, robôs preenchem
-export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, stageId: true }).extend({ website: z.string().max(0).optional() });
+// de onde o cliente veio (parâmetros do link do anúncio); o serviço só guarda as chaves conhecidas
+const utmSchema = z.record(z.string().max(200)).refine((o) => Object.keys(o).length <= 10, "Parâmetros demais").nullable().optional();
+export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, stageId: true }).extend({ website: z.string().max(0).optional(), utm: utmSchema });
+// Tráfego (anúncios do Meta)
+const trafficDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida");
+export const trafficQuerySchema = z.object({
+  periodo: z.enum(["hoje", "ontem", "7", "30", "custom"]).default("30"),
+  de: trafficDay.optional(), ate: trafficDay.optional(),
+  nivel: z.enum(["campaign", "adset", "ad"]).default("campaign"),
+  conta: z.string().regex(/^act_\d{1,30}$/, "Conta inválida").optional(),
+  atualizar: z.enum(["1"]).optional(),
+});
+export const trafficAccountsSchema = z.object({ selected: z.array(z.string().regex(/^act_\d{1,30}$/, "Conta inválida")).max(3, "Escolha no máximo 3 contas") });
 export const orderMoveSchema = z.object({ stageId: z.string().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() });
 // Funis e colunas do CRM Passagens
 const pipelineName = z.string().trim().min(1, "Dê um nome").max(40, "Nome com mais de 40 letras");

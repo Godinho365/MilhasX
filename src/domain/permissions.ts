@@ -140,6 +140,8 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/miles-deals", "crmMilhas"],
   ["/api/flight-searches", "buscador"],
   ["/api/showcase", "marketing"], ["/api/site", "marketing"], ["/api/sales-profile", "marketing"],
+  ["/api/traffic/meta", "marketing", "edit"], // conectar e desconectar o Meta (o retorno é um GET)
+  ["/api/traffic", "marketing"],
   ["/api/customers", "contatos"], ["/api/passengers", "contatos"], ["/api/interests", "contatos"],
   ["/api/processes/ask", "tarefas", "view"], // perguntar à IA só lê os processos
   ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"],
