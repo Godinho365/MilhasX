@@ -21,7 +21,7 @@ export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }
   { key: "buscador", label: "Buscador de passagens", hint: "Pesquisa de voos em milhas", edit: true },
   { key: "marketing", label: "Marketing", hint: "Vitrine, site, criativos e tráfego", edit: true },
   { key: "contatos", label: "Contatos", hint: "Clientes, passageiros, fornecedores e interesses de viagem", edit: true },
-  { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e processos da equipe", edit: true },
+  { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e os fluxogramas dos processos; ver = consultar e perguntar à IA, editar = desenhar, gerar com IA e usar", edit: true },
   { key: "calendario", label: "Calendário", hint: "Eventos da agência (criar, importar). Embarques, tarefas, aniversários e vencimentos aparecem conforme as outras áreas que a função vê", edit: true },
   { key: "metas", label: "Metas e comissões", hint: "Metas da equipe, regras de comissão, extrato e pagamentos (mostra quanto cada um ganha)", edit: true },
   { key: "equipe", label: "Equipe", hint: "Ver a equipe; editar = convidar, mudar funções e tirar acessos", edit: true },
@@ -109,6 +109,7 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/flight-searches", "buscador"],
   ["/api/showcase", "marketing"], ["/api/site", "marketing"], ["/api/sales-profile", "marketing"],
   ["/api/customers", "contatos"], ["/api/passengers", "contatos"], ["/api/interests", "contatos"],
+  ["/api/processes/ask", "tarefas", "view"], // perguntar à IA só lê os processos
   ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"],
   ["/api/goals", "metas"], ["/api/key-results", "metas"], ["/api/commissions", "metas"],
   ["/api/calendar/feed", "owner"], // o link do Google Agenda mostra tudo: só o dono gera

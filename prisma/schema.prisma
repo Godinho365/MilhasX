@@ -1661,7 +1661,8 @@ model Process {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   description String?
-  steps       Json // [{ title, detail? }]
+  steps       Json // [{ title, detail? }] (do fluxograma, na ordem de execução: o "Usar" cria as tarefas daqui)
+  flow        Json? // fluxograma: { nodes: [{ id, kind, x, y, title, detail?, owner?, link? }], edges: [{ id, from, to, label? }] }
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

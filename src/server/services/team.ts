@@ -1,4 +1,5 @@
 // Equipe: membros, parceiros, tarefas em quadros, metas com resultados-chave e processos (passo a passo que vira tarefas).
+import { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { listSales } from "./sales";
 import { detectAttachment, MAX_BYTES, MAX_FILES } from "./holder-files";
@@ -7,6 +8,7 @@ import { brDay } from "@/domain/brasilia";
 import { dropMemberLogin } from "./team-access";
 import { ROLE_LABEL, rolePermissions, type RoleKey } from "@/domain/permissions";
 import { statsFor } from "@/domain/commissions";
+import { FlowError, cleanFlow, flowFromSteps, stepsOf, type Flow } from "@/domain/process-flow";
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const utc = (s: string) => new Date(`${s.slice(0, 10)}T00:00:00Z`);
@@ -410,17 +412,39 @@ export async function deleteGoal(userId: string, id: string) {
 
 /* ---------------- Processos ---------------- */
 
-export type ProcessInput = { title: string; description?: string | null; steps: { title: string; detail?: string | null }[] };
+export type ProcessInput = { title: string; description?: string | null; steps?: { title: string; detail?: string | null }[]; flow?: unknown };
+type Step = { title: string; detail?: string | null };
+
+/** Processo para a tela: o fluxograma salvo ou (processo de antes do fluxograma) o montado da lista de etapas. */
+function presentProcess(p: { id: string; title: string; description: string | null; steps: unknown; flow: unknown; updatedAt: Date }) {
+  const steps = (Array.isArray(p.steps) ? p.steps : []) as Step[];
+  let flow: Flow;
+  try { flow = p.flow ? cleanFlow(p.flow) : flowFromSteps(steps); } catch { flow = flowFromSteps(steps); }
+  return { id: p.id, title: p.title, description: p.description, steps, flow, updatedAt: p.updatedAt.toISOString() };
+}
+export type ProcessView = ReturnType<typeof presentProcess>;
 
 export async function listProcesses(userId: string) {
   const rows = await prisma.process.findMany({ where: { userId }, orderBy: { title: "asc" } });
-  return rows.map((p) => ({ id: p.id, title: p.title, description: p.description, steps: (Array.isArray(p.steps) ? p.steps : []) as { title: string; detail?: string | null }[], updatedAt: p.updatedAt.toISOString() }));
+  return rows.map(presentProcess);
 }
 
+/**
+ * Salva o processo. Com fluxograma, as etapas (o que o "Usar" vira em tarefas) saem dele, na ordem de execução;
+ * só com a lista de etapas (jeito antigo), o fluxograma é montado quando a tela abre.
+ */
 export async function saveProcess(userId: string, id: string | null, input: ProcessInput) {
-  const steps = input.steps.map((s) => ({ title: s.title.trim(), detail: s.detail?.trim() || null })).filter((s) => s.title);
-  if (!steps.length) throw new DomainError(400, "Inclua ao menos uma etapa");
-  const data = { title: input.title.trim(), description: input.description?.trim() || null, steps };
+  let steps: Step[];
+  let flow: Flow | null = null;
+  if (input.flow !== undefined && input.flow !== null) {
+    try { flow = cleanFlow(input.flow); } catch (e) { if (e instanceof FlowError) throw new DomainError(400, e.message); throw e; }
+    steps = stepsOf(flow);
+    if (!steps.length) throw new DomainError(400, "Inclua ao menos uma etapa no fluxograma");
+  } else {
+    steps = (input.steps ?? []).map((s) => ({ title: s.title.trim(), detail: s.detail?.trim() || null })).filter((s) => s.title);
+    if (!steps.length) throw new DomainError(400, "Inclua ao menos uma etapa");
+  }
+  const data = { title: input.title.trim(), description: input.description?.trim() || null, steps, flow: flow ?? Prisma.DbNull };
   if (!id) return (await prisma.process.create({ data: { userId, ...data } })).id;
   const { count } = await prisma.process.updateMany({ where: { id, userId }, data });
   if (!count) throw new DomainError(404, "Processo não encontrado");
