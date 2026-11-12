@@ -202,3 +202,32 @@ describe("tirar o acesso", () => {
     expect([ws?.id, ws?.role, ws?.actor.isOwner]).toEqual([ownerId, "USER", false]);
   });
 });
+
+describe("funções novas da equipe", () => {
+  it("cada função tem o acesso do seu trabalho", () => {
+    const has = (r: Parameters<typeof rolePermissions>[0], p: string) => rolePermissions(r).includes(p as never);
+    expect(has("COMERCIAL", "crm:edit") && has("COMERCIAL", "crmMilhas:edit") && has("COMERCIAL", "vendas:view")).toBe(true);
+    expect(has("OPORTUNIDADES", "chat:edit") && has("OPORTUNIDADES", "milhas:view")).toBe(true);
+    expect(has("CONTAS", "milhas:edit") && has("CONTAS", "senhas:edit")).toBe(true);
+    expect(has("COMPLIANCE", "financeiro:view") && !has("COMPLIANCE", "financeiro:edit")).toBe(true);
+    expect(has("INTELIGENCIA", "painel:view") && has("INTELIGENCIA", "metas:view")).toBe(true);
+    expect(has("MARKETING", "marketing:edit") && has("MARKETING", "contatos:edit")).toBe(true);
+    // senhas das contas e comissões só onde faz sentido
+    for (const r of ["COMERCIAL", "OPORTUNIDADES", "COMPLIANCE", "INTELIGENCIA", "MARKETING"] as const) expect(rolePermissions(r).some((p) => p.startsWith("senhas:"))).toBe(false);
+    for (const r of ["COMERCIAL", "OPORTUNIDADES", "CONTAS", "COMPLIANCE", "MARKETING"] as const) expect(rolePermissions(r).some((p) => p.startsWith("metas:"))).toBe(false);
+    // ninguém além do Administrador mexe na equipe nem nas configurações
+    for (const r of ["COMERCIAL", "OPORTUNIDADES", "CONTAS", "COMPLIANCE", "INTELIGENCIA", "MARKETING"] as const) {
+      expect(rolePermissions(r).some((p) => p === "equipe:edit" || p.startsWith("configuracoes:"))).toBe(false);
+    }
+  });
+
+  it("dá para convidar com a função nova e o servidor aplica as permissões", async () => {
+    const id = await newMember();
+    const m = await join(id, "MARKETING");
+    expect((await m.call(customers.GET, "GET", "/api/customers")).status).toBe(200);
+    expect((await m.call(sales.GET, "GET", "/api/sales")).status).toBe(403);
+    expect((await owner.call(accessRoute.PATCH, "PATCH", "/x", { role: "INTELIGENCIA" }, { id })).status).toBe(200);
+    expect((await m.call(sales.GET, "GET", "/api/sales")).status).toBe(200);
+    expect((await owner.call(accessRoute.PATCH, "PATCH", "/x", { role: "INVENTADA" }, { id })).status).toBe(400);
+  });
+});

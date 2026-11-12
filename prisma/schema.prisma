@@ -1500,7 +1500,7 @@ model TeamMember {
   goals     Goal[]
 
   // Acesso ao app com login próprio (vazio = só cadastro, sem entrar)
-  accessRole      String? // ADMIN | EMISSOR | ATENDIMENTO | FINANCEIRO | CONTADOR | CUSTOM
+  accessRole      String? // ADMIN | EMISSOR | ATENDIMENTO | FINANCEIRO | CONTADOR | COMERCIAL | OPORTUNIDADES | CONTAS | COMPLIANCE | INTELIGENCIA | MARKETING | CUSTOM
   permissions     String[]  @default([]) // "area:view" / "area:edit" (domain/permissions.ts)
   loginUserId     String?   @unique // o login do membro (User com workspaceOwnerId = o dono)
   loginUser       User?     @relation("TeamLogin", fields: [loginUserId], references: [id], onDelete: SetNull)

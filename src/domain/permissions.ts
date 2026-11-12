@@ -54,8 +54,40 @@ export const ROLES = {
     hint: "Só consulta: financeiro, vendas e relatórios",
     perms: ["painel:view", "financeiro:view", "vendas:view"] as Permission[],
   },
+  COMERCIAL: {
+    label: "Comercial",
+    hint: "Propostas, negociação e acompanhamento: CRMs, cotações, buscador e contatos (vendas para consulta)",
+    perms: ["painel:view", "crm:edit", "crmMilhas:edit", "buscador:edit", "contatos:edit", "vendas:view", "chat:view", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  OPORTUNIDADES: {
+    label: "Oportunidades",
+    hint: "Compra e venda de milhas: Chat Balcões, CRM Milhas e buscador (saldos para consulta)",
+    perms: ["painel:view", "chat:edit", "crmMilhas:edit", "buscador:edit", "milhas:view", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  CONTAS: {
+    label: "Contas",
+    hint: "Saldos, contas e movimentações: milhas, titulares, transferências e as senhas das contas",
+    perms: ["painel:view", "milhas:edit", "senhas:edit", "vendas:view", "contatos:view", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  COMPLIANCE: {
+    label: "Compliance",
+    hint: "Regras e riscos: consulta milhas, vendas, financeiro, CRMs e contatos; cuida dos processos",
+    perms: ["painel:view", "milhas:view", "vendas:view", "financeiro:view", "crm:view", "crmMilhas:view", "contatos:view", "tarefas:edit", "calendario:view", "equipe:view"] as Permission[],
+  },
+  INTELIGENCIA: {
+    label: "Inteligência",
+    hint: "Indicadores e análises: painel e relatórios, com milhas, vendas, financeiro, CRMs e metas para consulta",
+    perms: ["painel:view", "milhas:view", "vendas:view", "financeiro:view", "crm:view", "crmMilhas:view", "metas:view", "tarefas:edit", "calendario:view", "equipe:view"] as Permission[],
+  },
+  MARKETING: {
+    label: "Marketing",
+    hint: "Vitrine, site, criativos e tráfego; leads do CRM e contatos",
+    perms: ["painel:view", "marketing:edit", "crm:view", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
 } satisfies Record<string, { label: string; hint: string; perms: Permission[] }>;
 export type RoleKey = keyof typeof ROLES | "CUSTOM";
+/** Todas as funções, para validar o que chega pela API. */
+export const ROLE_KEYS = ["CUSTOM", ...(Object.keys(ROLES) as (keyof typeof ROLES)[])] as [RoleKey, ...RoleKey[]];
 export const ROLE_LABEL: Record<RoleKey, string> = { ...Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, r.label])), CUSTOM: "Personalizada" } as Record<RoleKey, string>;
 
 const AREA_KEYS = new Set(AREAS.map((a) => a.key));
