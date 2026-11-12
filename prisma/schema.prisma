@@ -81,6 +81,13 @@ model User {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  /// Telefone (WhatsApp) informado no cadastro
+  phone           String?
+  /// Quando aceitou os Termos de Serviço e a Política de Privacidade
+  termsAcceptedAt DateTime?
+  /// "sub" da conta Google vinculada (Continuar com Google)
+  googleId        String?   @unique
+
   /// Login de membro da equipe: entra com o próprio e-mail e senha e trabalha nos dados deste dono da conta, só nas
   /// áreas que a função dele permite (TeamMember.loginUserId). Vazio = conta própria (dono).
   workspaceOwnerId String?

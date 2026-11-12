@@ -126,3 +126,21 @@ html[data-values="hidden"] main .tabular-nums:hover { filter: none; }
 [data-theme="dark"] .only-light, [data-theme="light"] .only-dark, [data-theme="client"] .only-dark { display: none; }
 @media (prefers-color-scheme: dark) { [data-theme="system"] .only-light { display: none; } }
 @media (prefers-color-scheme: light) { [data-theme="system"] .only-dark { display: none; } }
+
+/* Termos de Serviço e Política de Privacidade */
+.legal h1 { @apply mb-1 text-2xl font-semibold; }
+.legal h2 { @apply mb-2 mt-7 text-lg font-semibold; }
+.legal p, .legal li { @apply text-sm leading-relaxed text-zinc-300; }
+.legal p { @apply mb-3; }
+.legal ul { @apply mb-3 list-disc space-y-1 pl-5; }
+.legal .updated { @apply mb-6 text-xs text-muted; }
+
+/* Faixa de logos da página inicial */
+.logo-marquee { mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent); }
+.logo-track { animation: logo-scroll 45s linear infinite; }
+.logo-marquee:hover .logo-track { animation-play-state: paused; }
+@keyframes logo-scroll { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .logo-track { animation: none; flex-wrap: wrap; justify-content: center; width: auto; }
+  .logo-track > [aria-hidden="true"] { display: none; }
+}

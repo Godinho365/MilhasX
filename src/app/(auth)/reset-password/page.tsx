@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Alert, Field } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
+import { AuthTitle } from "../parts";
 
 function ResetForm() {
   const ready = useHydrated();
@@ -22,7 +23,7 @@ function ResetForm() {
   if (done) return <div className="space-y-4"><Alert kind="ok">Senha redefinida.</Alert><Link className="btn-primary w-full" href="/login">Entrar</Link></div>;
   return (
     <form onSubmit={submit} method="post" className="space-y-4">
-      <h1 className="text-lg font-semibold">Nova senha</h1>
+      <AuthTitle title="Nova senha" subtitle="Escolha uma nova senha para sua conta" />
       {!token && <Alert>Link inválido.</Alert>}
       {erro && <Alert>{erro}</Alert>}
       <Field label="Nova senha"><input className="input" name="password" type="password" required minLength={8} autoComplete="new-password" /></Field>
