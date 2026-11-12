@@ -15,5 +15,17 @@ services:
       test: ["CMD-SHELL", "pg_isready -U milheiro"]
       interval: 5s
       retries: 10
+  # Redis do Chat Balcões em tempo real (Pub/Sub dos eventos do Telegram). Só memória: nada a guardar em disco,
+  # o que importa fica no Postgres. Exposto só na máquina (desenvolvimento e testes).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
 volumes:
   milheiro_pg:

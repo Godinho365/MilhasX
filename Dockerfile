@@ -14,7 +14,8 @@ FROM node:22-alpine AS run
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=build /app ./
+# dono "app": o Next grava o cache de imagens em .next/cache (como root dava EACCES)
+COPY --from=build --chown=app:app /app ./
 USER app
 EXPOSE 3100
 # Aplica migrações pendentes e sobe o servidor

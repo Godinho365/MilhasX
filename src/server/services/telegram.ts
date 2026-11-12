@@ -18,6 +18,7 @@ import { parseBalcaoAd, parseCounterOffer, emissionAnalysis, type EmissionAccoun
 import { balcaoForGroup, buyerDataFromMessages } from "@/domain/miles-deals";
 import { createDeal, markDealTermsSent, moveDeal } from "./miles-deals";
 import { emissionAccounts } from "./capacity";
+import { gatewayUrl, remoteClient } from "../telegram-rpc";
 
 /** Como chegar no chat direto (sem listar os chats da conta): supergrupo/canal e pessoa precisam do hash de acesso. */
 export type TgPeer = { kind: "channel"; id: string; hash: string } | { kind: "chat"; id: string } | { kind: "user"; id: string; hash: string };
@@ -62,12 +63,12 @@ export interface TgClient {
 }
 
 /** O chat no formato da API do Telegram. */
-function inputPeer(p: TgPeer) {
+export function inputPeer(p: TgPeer) {
   if (p.kind === "channel") return new Api.InputPeerChannel({ channelId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
   if (p.kind === "user") return new Api.InputPeerUser({ userId: returnBigInt(p.id), accessHash: returnBigInt(p.hash) });
   return new Api.InputPeerChat({ chatId: returnBigInt(p.id) });
 }
-function toMessage(m: Api.Message): TgMessage {
+export function toMessage(m: Api.Message): TgMessage {
   const mm = mediaMeta(m.media);
   return {
     id: m.id, date: new Date(m.date * 1000).toISOString(), sender: m.out ? "Você" : senderName(m.sender), text: m.message ?? "",
@@ -111,7 +112,7 @@ function mediaMeta(m: Api.TypeMessageMedia | undefined): { kind: "photo" | "file
   return { kind: null, name: null };
 }
 
-function apiCredentials() {
+export function apiCredentials() {
   const apiId = Number(process.env.TELEGRAM_API_ID);
   const apiHash = process.env.TELEGRAM_API_HASH?.trim();
   return apiId && apiHash ? { apiId, apiHash } : null;
@@ -119,11 +120,22 @@ function apiCredentials() {
 /** O servidor tem as chaves do Telegram e a chave de criptografia das sessões. */
 export const telegramEnabled = () => !!apiCredentials() && credentialsEnabled();
 
-function gramClient(session: string): TgClient {
+/** Cliente GramJS da sessão (sem conectar). O gateway do tempo real cria o dele com mais tentativas de reconexão. */
+export function newGramClient(session: string, opts: { connectionRetries?: number } = {}) {
   const creds = apiCredentials();
   if (!creds) throw new DomainError(503, "Telegram desativado: defina TELEGRAM_API_ID e TELEGRAM_API_HASH no servidor");
-  const c = new TelegramClient(new StringSession(session), creds.apiId, creds.apiHash, { connectionRetries: 2 });
+  const c = new TelegramClient(new StringSession(session), creds.apiId, creds.apiHash, { connectionRetries: opts.connectionRetries ?? 2 });
   c.setLogLevel(LogLevel.ERROR);
+  return c;
+}
+
+function gramClient(session: string): TgClient {
+  return wrapGram(newGramClient(session));
+}
+
+/** O que o app usa do Telegram em cima de um cliente GramJS (o do pool do site ou o permanente do gateway). */
+export function wrapGram(c: TelegramClient): TgClient {
+  const creds = apiCredentials()!;
   return {
     connect: async () => { await c.connect(); },
     close: async () => { await c.destroy().catch(() => {}); },
@@ -259,11 +271,16 @@ function tgError(e: unknown): never {
   };
   const k = known[msg];
   if (k) throw new DomainError(k[0], k[1]);
-  if (["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "USER_DEACTIVATED", "AUTH_KEY_DUPLICATED"].includes(msg)) throw new SessionEnded();
+  if (SESSION_ENDED.includes(msg)) throw new SessionEnded();
+  // a mesma sessão usada por duas conexões ao mesmo tempo: o Telegram derruba esta conexão, mas a conta continua
+  // valendo (não apaga a conta do app; a próxima tentativa conecta de novo)
+  if (msg === "AUTH_KEY_DUPLICATED") throw new DomainError(503, "A conexão com o Telegram caiu (sessão usada em outro lugar ao mesmo tempo): tente de novo em instantes");
   if (!msg) throw e; // não veio do Telegram (rede, banco...): erro interno, registrado no log
   throw new DomainError(502, `O Telegram recusou (${msg}): tente de novo`);
 }
 class SessionEnded extends Error {}
+/** Erros do Telegram que querem dizer "esta sessão não vale mais" (encerrada no app do Telegram, conta apagada...). */
+export const SESSION_ENDED = ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "USER_DEACTIVATED"];
 
 /** Conecta, faz o que precisa e fecha a conexão (cada etapa é curta); demora demais = 504. */
 async function withClient<T>(session: string, fn: (c: TgClient) => Promise<T>): Promise<T> {
@@ -297,6 +314,9 @@ function dropPooled(id: string) {
   void p.c.close();
 }
 async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: TgClient) => Promise<T>): Promise<T> {
+  // tempo real ligado: quem conecta no Telegram é só o gateway (uma conexão por conta); o site pede a ele
+  const gw = gatewayUrl();
+  if (gw) return withGateway(gw, link.id, fn);
   let p = pool.get(link.id);
   if (p && p.key !== poolKey(link.sessionEnc)) {
     dropPooled(link.id);
@@ -318,6 +338,19 @@ async function withPooled<T>(link: { id: string; sessionEnc: string }, fn: (c: T
     return await Promise.race([fn(cur.c), timeout]);
   } catch (e) {
     dropPooled(link.id); // na próxima, conecta de novo
+    return tgError(e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** O Telegram pelo gateway: mesma interface, cada chamada vira um pedido HTTP na rede interna. */
+async function withGateway<T>(url: string, linkId: string, fn: (c: TgClient) => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DomainError(504, "O Telegram demorou para responder: tente de novo")), 45_000); });
+  try {
+    return await Promise.race([fn(remoteClient(url, linkId)), timeout]);
+  } catch (e) {
     return tgError(e);
   } finally {
     clearTimeout(timer);
@@ -502,12 +535,15 @@ const brl = (cents: number) => `R$ ${(cents / 100).toLocaleString("pt-BR", { min
 /** Mensagens do grupo (da mais antiga para a mais nova), com o pedido lido, os alertas que disparam e, se o pedido
  *  já foi registrado, a negociação do CRM Milhas. minId = só as que chegaram depois dela (e nada do que foi limpo
  *  no app). Ler pelo app não marca nada como lido no Telegram. */
-export async function chatMessages(userId: string, chatId: string, opts: { limit?: number; minId?: number; rules?: AlertRule[]; accounts?: EmissionAccount[] } = {}) {
+export async function chatMessages(userId: string, chatId: string, opts: { limit?: number; minId?: number; ids?: number[]; rules?: AlertRule[]; accounts?: EmissionAccount[] } = {}) {
   const c = await ownChat(userId, chatId);
-  const peer = await chatPeer(c);
   const minId = Math.max(opts.minId ?? 0, c.clearedUpTo ?? 0) || undefined;
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const fetching = fromStore(c)
+    ? storedMessages({ groupId: c.id }, { limit, minId, ids: opts.ids?.filter((id) => id > (c.clearedUpTo ?? 0)) })
+    : chatPeer(c).then((peer) => guardSession(c.link, () => withPooled(c.link, (cl) => cl.messages(peer, { limit, minId }))));
   const [msgs, rules] = await Promise.all([
-    guardSession(c.link, () => withPooled(c.link, (cl) => cl.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }))),
+    fetching,
     opts.rules ?? activeAlerts(userId),
   ]);
   // as suas contas só quando algum alerta olha o lucro
@@ -561,6 +597,42 @@ function messageText(raw: string) {
   return text;
 }
 const plain = (m: TgMessage) => ({ ...m, ad: null, alerts: [] as string[] });
+
+/* ---------------- Tempo real: leitura pelo banco ---------------- */
+
+/** Com o gateway ligado, o chat que ele já sincronizou é lido do banco (rápido, sem consultar o Telegram). */
+const fromStore = (chat: { syncedAt: Date | null }) => !!gatewayUrl() && chat.syncedAt != null;
+
+/** Mensagens gravadas pelo gateway, no mesmo formato das lidas do Telegram (da mais antiga para a mais nova).
+ *  ids = só essas (a tela relê uma mensagem editada); senão as `limit` mais novas depois de minId. */
+async function storedMessages(where: { groupId: string } | { dmId: string }, opts: { limit?: number; minId?: number; ids?: number[] }): Promise<TgMessage[]> {
+  const rows = await prisma.telegramMessage.findMany({
+    where: { ...where, deletedAt: null, ...(opts.ids ? { msgId: { in: opts.ids } } : opts.minId ? { msgId: { gt: opts.minId } } : {}) },
+    orderBy: { msgId: "desc" },
+    take: Math.min(Math.max(opts.limit ?? 50, 1), 100),
+  });
+  return rows.reverse().map((r) => ({
+    id: r.msgId, date: r.date.toISOString(), sender: r.out ? "Você" : r.senderName, text: r.text, media: r.media,
+    mediaKind: (r.mediaKind as "photo" | "file" | null) ?? null, mediaName: r.mediaName, out: r.out, fromUser: r.fromUser, replyTo: r.replyTo, fwd: r.fwd,
+  }));
+}
+
+/** Eventos do Chat Balcões depois do id `after` (a aba que reconectou pede o que perdeu). reset = perdeu demais (ou os
+ *  eventos já foram limpos): a aba recarrega tudo. */
+export async function telegramEventsSince(userId: string, after: string) {
+  const from = /^\d{1,19}$/.test(after) ? BigInt(after) : 0n;
+  const MAX = 500;
+  const [items, oldest] = await Promise.all([
+    prisma.telegramEvent.findMany({ where: { userId, id: { gt: from } }, orderBy: { id: "asc" }, take: MAX + 1 }),
+    prisma.telegramEvent.findFirst({ where: { userId }, orderBy: { id: "asc" }, select: { id: true } }),
+  ]);
+  const reset = items.length > MAX || (oldest != null && from > 0n && oldest.id > from + 1n);
+  return {
+    reset,
+    items: reset ? [] : items.map((e) => ({ id: e.id.toString(), type: e.type, chatKind: e.chatKind, chatId: e.chatId, msgId: e.msgId })),
+    lastId: (items.at(-1)?.id ?? from).toString(),
+  };
+}
 
 /** Manda a mensagem no grupo (escrita e enviada pelo usuário); replyTo = como resposta a uma mensagem do grupo
  *  (a contraproposta a um pedido). */
@@ -667,6 +739,22 @@ export async function openDmFromDeal(userId: string, dealId: string) {
   return openTelegramDm(userId, chat.id, Number(ref[3]));
 }
 
+/** A conversa no privado com quem postou o pedido da negociação, achada pelo banco (o autor do pedido gravado pelo
+ *  gateway); null = ainda não dá (sem tempo real, pedido não gravado ou conversa nunca aberta). */
+async function storedDealDm(userId: string, dealId: string) {
+  if (!gatewayUrl()) return null;
+  const d = await prisma.milesDeal.findFirst({ where: { id: dealId, userId }, select: { sourceRef: true } });
+  const ref = d?.sourceRef?.match(/^tg:([^:]+):(-?\d+):(\d+)$/);
+  if (!ref) return null;
+  const group = await prisma.telegramGroup.findFirst({ where: { userId, linkId: ref[1], groupId: ref[2] }, select: { id: true } });
+  const ad = group ? await prisma.telegramMessage.findUnique({ where: { groupId_msgId: { groupId: group.id, msgId: Number(ref[3]) } }, select: { senderId: true } }) : null;
+  if (!ad?.senderId) return null;
+  const dm = await prisma.telegramDm.findFirst({ where: { userId, linkId: ref[1], peerId: ad.senderId }, select: { id: true, name: true, closed: true } });
+  if (!dm) return null;
+  if (dm.closed) await prisma.telegramDm.update({ where: { id: dm.id }, data: { closed: false } }); // como o abrir faz
+  return dm;
+}
+
 /** Quanto antes da negociação ser criada ainda conta como conversa dela (o pedido às vezes é registrado depois de
  *  ele já ter mandado os dados). */
 const DEAL_CHAT_MARGIN_MS = 3 * 3600_000;
@@ -677,11 +765,12 @@ const DEAL_CHAT_MARGIN_MS = 3 * 3600_000;
 export async function dealBuyerData(userId: string, dealId: string) {
   const deal = await prisma.milesDeal.findFirst({ where: { id: dealId, userId }, select: { createdAt: true } });
   if (!deal) throw new DomainError(404, "Negociação não encontrada");
-  const dm = await openDmFromDeal(userId, dealId);
+  // com o tempo real, a conversa sai do banco (quem postou o pedido e as mensagens dele), sem consultar o Telegram
+  const dm = (await storedDealDm(userId, dealId)) ?? (await openDmFromDeal(userId, dealId));
   const d = await ownDm(userId, dm.id);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
   const since = new Date(deal.createdAt.getTime() - DEAL_CHAT_MARGIN_MS);
-  const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: 100 })));
+  const msgs = fromStore(d) ? await storedMessages({ dmId: d.id }, { limit: 100 }) : await guardSession(d.link, () => withPooled(d.link, (c) => c.messages(peer, { limit: 100 })));
   const theirs = msgs.filter((m) => !m.out && m.text.trim() && new Date(m.date) >= since);
   return { dmId: dm.id, contact: dm.name, since: since.toISOString(), messages: theirs.length, ...buyerDataFromMessages(theirs.map((m) => m.text)) };
 }
@@ -714,17 +803,40 @@ async function ownDm(userId: string, dmId: string) {
 
 /** Mensagens da conversa no privado (minId = só as novas; nada do que foi limpo no app). O pedido encaminhado do
  *  grupo vem lido, como no grupo. */
-export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number } = {}) {
+export async function dmMessages(userId: string, dmId: string, opts: { limit?: number; minId?: number; ids?: number[] } = {}) {
   const d = await ownDm(userId, dmId);
   const peer: TgPeer = { kind: "user", id: d.peerId, hash: d.peerHash };
   const minId = Math.max(opts.minId ?? 0, d.clearedUpTo ?? 0) || undefined;
-  const { msgs, readMax } = await guardSession(d.link, () => withPooled(d.link, async (c) => ({
-    msgs: await c.messages(peer, { limit: Math.min(Math.max(opts.limit ?? 50, 1), 100), minId }),
-    readMax: await c.readOutboxMaxId(peer).catch(() => 0), // até onde a pessoa já leu as suas mensagens
-  })));
-  const items = msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[] } : plain(m)));
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const { msgs, readMax } = fromStore(d)
+    ? {
+        msgs: await storedMessages({ dmId: d.id }, { limit, minId, ids: opts.ids?.filter((id) => id > (d.clearedUpTo ?? 0)) }),
+        // os checks de leitura: uma pergunta ao Telegram (os eventos de leitura chegam pelo tempo real depois)
+        readMax: opts.ids ? undefined : await guardSession(d.link, () => withPooled(d.link, (c) => c.readOutboxMaxId(peer))).catch(() => 0),
+      }
+    : await guardSession(d.link, () => withPooled(d.link, async (c) => ({
+        msgs: await c.messages(peer, { limit, minId }),
+        readMax: await c.readOutboxMaxId(peer).catch(() => 0), // até onde a pessoa já leu as suas mensagens
+      })));
+  // pedido encaminhado: de qual mensagem do grupo veio (os antigos, sem o registro, só se for o pedido da contraproposta)
+  const links = offerLinksOf(d.offerLinks);
+  const offer = d.offer as DmOffer | null;
+  const originOf = (m: TgMessage): DmOrigin | null => {
+    const l = links.find((x) => x.fwdId === m.id);
+    if (l) return { chatId: l.chatId, messageId: l.messageId };
+    return offer && m.text.trim() === offer.text.trim() ? { chatId: offer.chatId, messageId: offer.messageId } : null;
+  };
+  const items = msgs.map((m) => (m.fwd && m.text ? { ...m, ad: parseBalcaoAd(m.text), alerts: [] as string[], origin: originOf(m) } : plain(m)));
   return { items, readMax };
 }
+
+/** De onde veio o pedido encaminhado para o privado: o grupo (no Chat Balcões) e a mensagem lá. */
+export type DmOrigin = { chatId: string; messageId: number };
+type OfferLink = DmOrigin & { fwdId: number };
+/** Quantos pedidos encaminhados a conversa lembra (os mais novos). */
+const MAX_OFFER_LINKS = 50;
+const offerLinksOf = (v: Prisma.JsonValue | null): OfferLink[] =>
+  (Array.isArray(v) ? v : []).filter((x): x is OfferLink => !!x && typeof x === "object" && typeof (x as OfferLink).fwdId === "number" && typeof (x as OfferLink).chatId === "string" && typeof (x as OfferLink).messageId === "number");
 
 /**
  * Contraproposta no privado de quem postou o pedido, pela conta do grupo: encaminha o pedido para a conversa e manda
@@ -749,7 +861,11 @@ export async function sendOfferDm(userId: string, chatId: string, messageId: num
   const offer: DmOffer = { chatId, messageId, text: (fwd?.text || adText).slice(0, 1500), sender: d.name, group: c.title, cpmCents: parseCounterOffer(text), at: sent.date };
   const updated = await prisma.telegramDm.update({
     where: { id: d.id },
-    data: { offer: offer as unknown as Prisma.InputJsonValue, offerAt: new Date(), closed: false, seenUpTo: sent.id },
+    data: {
+      offer: offer as unknown as Prisma.InputJsonValue, offerAt: new Date(), closed: false, seenUpTo: sent.id,
+      // o pedido encaminhado lembra de onde veio (botão "Ver no grupo" e as contrapropostas dos outros no privado)
+      ...(fwd ? { offerLinks: [...offerLinksOf(d.offerLinks).filter((l) => l.fwdId !== fwd!.id), { fwdId: fwd.id, chatId, messageId }].slice(-MAX_OFFER_LINKS) as unknown as Prisma.InputJsonValue } : {}),
+    },
     include: DM_INCLUDE,
   });
   return { dm: dmView(updated), forwarded: !!fwd, message: plain(sent) };
@@ -777,7 +893,9 @@ export async function dmUnread(userId: string) {
   const items = await Promise.all(dms.map(async (d) => {
     const from = Math.max(d.seenUpTo ?? 0, d.clearedUpTo ?? 0) || undefined;
     try {
-      const msgs = await guardSession(d.link, () => withPooled(d.link, (c) => c.messages({ kind: "user", id: d.peerId, hash: d.peerHash }, { limit: 50, minId: from })));
+      const msgs = fromStore(d)
+        ? await storedMessages({ dmId: d.id }, { limit: 50, minId: from })
+        : await guardSession(d.link, () => withPooled(d.link, (c) => c.messages({ kind: "user", id: d.peerId, hash: d.peerHash }, { limit: 50, minId: from })));
       const theirs = msgs.filter((m) => !m.out && (!d.offerAt || new Date(m.date) >= d.offerAt));
       if (!theirs.length) return d.closed ? null : { id: d.id, unread: 0, reopened: false, last: null, dm: dmView(d) };
       const reopened = d.closed;
@@ -800,6 +918,16 @@ export async function groupUnread(userId: string) {
   const chats = await prisma.telegramGroup.findMany({ where: { userId, link: { status: "ACTIVE" } }, include: { link: true }, orderBy: { createdAt: "asc" } });
   const items = await Promise.all(chats.map(async (c) => {
     try {
+      if (fromStore(c)) {
+        // pelo banco: as dos outros depois da última vista (nunca visto: começa do zero a partir da mais nova)
+        if (c.seenUpTo == null) {
+          const last = await prisma.telegramMessage.findFirst({ where: { groupId: c.id }, orderBy: { msgId: "desc" }, select: { msgId: true } });
+          if (last) await prisma.telegramGroup.update({ where: { id: c.id }, data: { seenUpTo: last.msgId } });
+          return { id: c.id, unread: 0 };
+        }
+        const from = Math.max(c.seenUpTo, c.clearedUpTo ?? 0);
+        return { id: c.id, unread: await prisma.telegramMessage.count({ where: { groupId: c.id, msgId: { gt: from }, out: false, deletedAt: null } }) };
+      }
       const peer = await chatPeer(c);
       const from = Math.max(c.seenUpTo ?? 0, c.clearedUpTo ?? 0) || undefined;
       const msgs = await guardSession(c.link, () => withPooled(c.link, (cl) => cl.messages(peer, { limit: c.seenUpTo == null ? 1 : 100, minId: from })));
@@ -939,7 +1067,10 @@ export async function disconnectTelegram(userId: string, id: string) {
   const l = await own(userId, id);
   dropPooled(l.id);
   if (l.status === "ACTIVE" && telegramEnabled()) {
-    await withClient(decrypt(l.sessionEnc), (c) => c.logOut()).catch(() => {}); // já encerrada lá: só apaga aqui
+    // com o gateway, sai pela conexão dele (abrir outra com a mesma sessão derrubaria as duas)
+    const gw = gatewayUrl();
+    const out = gw ? withGateway(gw, l.id, (c) => c.logOut()) : withClient(decrypt(l.sessionEnc), (c) => c.logOut());
+    await out.catch(() => {}); // já encerrada lá: só apaga aqui
   }
   await prisma.telegramLink.deleteMany({ where: { id, userId } });
   return telegramStatus(userId);
