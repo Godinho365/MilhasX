@@ -778,7 +778,7 @@ function ChatView({ source, visible, onDm, onOfferDm, onSeen, onGoToGroup, focus
             {!editing && <button type="button" className="btn-subtle h-11 w-11 shrink-0 rounded-full px-0" onClick={() => fileInput.current?.click()} disabled={uploading} title="Enviar foto, print ou PDF" aria-label="Enviar foto, print ou PDF"><Paperclip className="h-5 w-5" /></button>}
             <textarea
               ref={input}
-              className="input min-h-11 flex-1 resize-none rounded-[22px] px-4 py-2.5 text-[15px] leading-6"
+              className="input h-auto min-h-11 flex-1 resize-none rounded-[22px] px-4 py-2 text-[15px] leading-6"
               rows={Math.min(5, Math.max(1, text.split("\n").length))}
               value={text}
               onChange={(e) => setText(e.target.value)}
