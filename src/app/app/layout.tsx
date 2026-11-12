@@ -5,6 +5,7 @@ import { unreadNews } from "@/server/services/extras";
 import { getSettings } from "@/server/services/admin";
 import { processDueRecurrences } from "@/server/services/accounts";
 import { notifyMonthlyBonus, bonusUsage } from "@/server/services/transfer-bonus";
+import { notifyTodayEvents } from "@/server/services/calendar";
 import { accountsCapacity } from "@/server/services/capacity";
 import { prisma } from "@/server/db";
 import { Shell } from "@/components/shell";
@@ -21,6 +22,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   await processDueRecurrences(user.id);
   // No 1º acesso do mês: aviso de que o limite de bônus de transferência renovou
   if (me.isOwner) await notifyMonthlyBonus(user.id);
+  // No 1º acesso do dia: aviso com a agenda de hoje (embarques, check-ins, aniversários, eventos com "avisar")
+  if (me.isOwner) await notifyTodayEvents(user.id, new Date(), { memo: true }).catch(() => false);
   const none = <T,>(v: T) => Promise.resolve(v);
   const [holders, accounts, unread, holderId, news, settings, pref, cards, guides, clubs, cap, bonusCaps] = await Promise.all([
     miles ? listHolders(user.id) : none([] as Awaited<ReturnType<typeof listHolders>>),

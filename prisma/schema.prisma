@@ -143,6 +143,8 @@ model User {
   teamMembers         TeamMember[]        @relation("TeamOwner")
   commissionRules     CommissionRule[]
   commissionEntries   CommissionEntry[]
+  calendarEvents      CalendarEvent[]
+  calendarFeed        CalendarFeed?
   taskBoards          TaskBoard[]
   partners            Partner[]
   tasks               Task[]
@@ -399,6 +401,22 @@ model Session {
   @@index([userId])
 }
 
+/// Código de 6 dígitos mandado por e-mail para confirmar o endereço antes de criar a conta. Só o hash fica gravado.
+model EmailCode {
+  id        String    @id @default(cuid())
+  email     String
+  purpose   String    @default("signup")
+  codeHash  String
+  attempts  Int       @default(0)
+  ip        String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, purpose, createdAt])
+  @@index([ip, createdAt])
+}
+
 model LoginAttempt {
   id        String   @id @default(cuid())
   email     String
@@ -558,6 +576,7 @@ model Customer {
   saleItems       SaleItem[]       @relation("SaleItemCustomers")
   orders          TravelOrder[]
   milesDeals      MilesDeal[]
+  calendarEvents  CalendarEvent[]
 
   @@index([userId])
 }
@@ -694,6 +713,7 @@ model UserPreference {
   pix                Json? // dados do PIX para cobrar o comprador: { keyType, key, name, bank }
   emissionTerms      String? // termo de emissão mandado ao comprador antes de emitir (vazio = o padrão do MilhasX)
   metricsHidden      String[]  @default([]) // blocos escondidos na página Métricas ("vendas.mix", ...)
+  overviewWidgets    String[]  @default([]) // blocos da Visão geral, na ordem (vazio = o padrão)
 }
 
 model AuditLog {
@@ -1671,4 +1691,41 @@ model Partner {
   commissionEntries CommissionEntry[]
 
   @@index([userId])
+}
+
+/// Calendário da agência: evento criado à mão ou importado de outra agenda (.ics). Os automáticos (embarques,
+/// tarefas, aniversários, vencimentos) não ficam gravados: saem das vendas, tarefas, passageiros e do Financeiro.
+model CalendarEvent {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String // CHECKIN | BOARDING | HOTEL | CAR | TOUR | FOLLOWUP | BIRTHDAY | PASSPORT | VISA | REMINDER (src/domain/calendar.ts)
+  title       String
+  date        DateTime // dia (início)
+  endDate     DateTime? // último dia (eventos de vários dias)
+  time        String? // HH:MM (vazio = o dia todo)
+  endTime     String?
+  recurrence  String    @default("NONE") // NONE | WEEKLY | MONTHLY | YEARLY
+  memberIds   String[]  @default([]) // responsáveis (TeamMember)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  location    String?
+  notes       String?
+  remind      Boolean   @default(true) // entra no aviso "Agenda de hoje"
+  source      String    @default("MANUAL") // MANUAL | IMPORT
+  externalUid String? // UID do .ics importado (importar de novo atualiza em vez de duplicar)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, externalUid])
+  @@index([userId, date])
+}
+
+/// Link secreto do calendário em .ics (o Google Agenda assina pela URL). Só o hash fica guardado.
+model CalendarFeed {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
 }

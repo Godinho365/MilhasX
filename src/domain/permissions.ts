@@ -6,7 +6,7 @@
 export type Level = "view" | "edit";
 export type AreaKey =
   | "painel" | "milhas" | "senhas" | "vendas" | "financeiro" | "crm" | "crmMilhas" | "chat" | "buscador"
-  | "marketing" | "contatos" | "tarefas" | "metas" | "equipe" | "configuracoes";
+  | "marketing" | "contatos" | "tarefas" | "metas" | "calendario" | "equipe" | "configuracoes";
 
 /** Uma área do sistema: o que ela cobre e se tem o nível "editar" (algumas são só de leitura). */
 export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }[] = [
@@ -22,6 +22,7 @@ export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }
   { key: "marketing", label: "Marketing", hint: "Vitrine, site, criativos e tráfego", edit: true },
   { key: "contatos", label: "Contatos", hint: "Clientes, passageiros, fornecedores e interesses de viagem", edit: true },
   { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e processos da equipe", edit: true },
+  { key: "calendario", label: "Calendário", hint: "Eventos da agência (criar, importar). Embarques, tarefas, aniversários e vencimentos aparecem conforme as outras áreas que a função vê", edit: true },
   { key: "metas", label: "Metas e comissões", hint: "Metas da equipe, regras de comissão, extrato e pagamentos (mostra quanto cada um ganha)", edit: true },
   { key: "equipe", label: "Equipe", hint: "Ver a equipe; editar = convidar, mudar funções e tirar acessos", edit: true },
   { key: "configuracoes", label: "Configurações", hint: "Configurações da agência e as contas do Telegram", edit: true },
@@ -36,17 +37,17 @@ export const ROLES = {
   EMISSOR: {
     label: "Emissor",
     hint: "Emite e vende: milhas, vendas, CRMs, Chat Balcões e buscador",
-    perms: ["painel:view", "milhas:edit", "senhas:edit", "vendas:edit", "crm:edit", "crmMilhas:edit", "chat:edit", "buscador:edit", "contatos:edit", "tarefas:edit", "equipe:view"] as Permission[],
+    perms: ["painel:view", "milhas:edit", "senhas:edit", "vendas:edit", "crm:edit", "crmMilhas:edit", "chat:edit", "buscador:edit", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
   },
   ATENDIMENTO: {
     label: "Atendimento",
     hint: "Atende e negocia: CRMs, Chat Balcões, buscador e contatos (vendas só para consulta)",
-    perms: ["vendas:view", "crm:edit", "crmMilhas:edit", "chat:edit", "buscador:edit", "contatos:edit", "tarefas:edit", "equipe:view"] as Permission[],
+    perms: ["vendas:view", "crm:edit", "crmMilhas:edit", "chat:edit", "buscador:edit", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
   },
   FINANCEIRO: {
     label: "Financeiro",
     hint: "Financeiro completo; vendas, milhas e relatórios para consulta",
-    perms: ["painel:view", "financeiro:edit", "vendas:view", "milhas:view", "contatos:view", "tarefas:edit", "metas:edit", "equipe:view"] as Permission[],
+    perms: ["painel:view", "financeiro:edit", "vendas:view", "milhas:view", "contatos:view", "tarefas:edit", "metas:edit", "calendario:edit", "equipe:view"] as Permission[],
   },
   CONTADOR: {
     label: "Contador",
@@ -110,11 +111,14 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/customers", "contatos"], ["/api/passengers", "contatos"], ["/api/interests", "contatos"],
   ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"],
   ["/api/goals", "metas"], ["/api/key-results", "metas"], ["/api/commissions", "metas"],
+  ["/api/calendar/feed", "owner"], // o link do Google Agenda mostra tudo: só o dono gera
+  ["/api/calendar", "calendario"],
 ];
 
 /** Páginas do app (/app/...). */
 const PAGE_RULES: [prefix: string, area: AreaKey | "any" | "owner"][] = [
   ["/app/upgrade", "owner"],
+  ["/app/visao-geral", "any"], // cada bloco segue a função
   ["/app/notifications", "any"], ["/app/news", "any"], ["/app/guides", "any"], ["/app/calculadoras", "any"], ["/app/tradutor", "any"], ["/app/sem-acesso", "any"],
   ["/app/metricas", "painel"], ["/app/reports", "painel"],
   ["/app/programs", "milhas"], ["/app/entries", "milhas"], ["/app/milhas", "milhas"], ["/app/management", "contatos"], // management = Fornecedores
@@ -126,6 +130,7 @@ const PAGE_RULES: [prefix: string, area: AreaKey | "any" | "owner"][] = [
   ["/app/marketing", "marketing"],
   ["/app/contatos", "contatos"],
   ["/app/equipe/metas", "metas"], ["/app/equipe/", "tarefas"], ["/app/equipe", "equipe"],
+  ["/app/calendario", "calendario"],
   ["/app/settings", "any"], // as abas da página seguem a função (perfil e preferências pessoais são de todos)
   ["/preview/central", "marketing"],
 ];
@@ -169,7 +174,7 @@ export function homeFor(perms: readonly string[] | "ALL") {
   const order: [AreaKey, string][] = [
     ["painel", "/app"], ["crm", "/app/crm"], ["crmMilhas", "/app/crm-milhas"], ["chat", "/app/chat-balcoes"], ["vendas", "/app/sales"],
     ["milhas", "/app/programs"], ["financeiro", "/app/financeiro"], ["contatos", "/app/contatos/passageiros"], ["buscador", "/app/buscador"],
-    ["marketing", "/app/marketing/vitrine"], ["tarefas", "/app/equipe/tarefas"], ["metas", "/app/equipe/metas"], ["equipe", "/app/equipe"], ["configuracoes", "/app/settings"],
+    ["marketing", "/app/marketing/vitrine"], ["tarefas", "/app/equipe/tarefas"], ["metas", "/app/equipe/metas"], ["calendario", "/app/calendario"], ["equipe", "/app/equipe"], ["configuracoes", "/app/settings"],
   ];
   return order.find(([a]) => can(perms, a))?.[1] ?? "/app/sem-acesso";
 }

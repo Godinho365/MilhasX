@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
-import { AuthTitle, GoogleButton, OrDivider } from "../parts";
+import { AuthTitle, GoogleButton, OrDivider, PasswordField } from "../parts";
 
 export function LoginForm({ google, initialError }: { google: boolean; initialError: string }) {
   const ready = useHydrated();
@@ -30,10 +30,7 @@ export function LoginForm({ google, initialError }: { google: boolean; initialEr
           <input className="input" name="email" type="email" autoComplete="email" placeholder="Digite seu e-mail" required />
         </label>
         <div>
-          <label className="block">
-            <span className="label">Senha</span>
-            <input className="input" name="password" type="password" autoComplete="current-password" placeholder="Digite sua senha" required />
-          </label>
+          <PasswordField label="Senha" name="password" autoComplete="current-password" placeholder="Digite sua senha" />
           <div className="mt-2 text-right text-sm">
             <Link href="/forgot-password" className="text-muted hover:text-accent-light">Esqueceu sua senha?</Link>
           </div>

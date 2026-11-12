@@ -57,6 +57,9 @@ test("cadastro, saída e login", async () => {
   await page.getByLabel("E-mail").fill(user.email);
   await page.getByLabel("Telefone (WhatsApp)").fill("11987654321");
   await page.getByLabel(/^Senha/).fill(user.password);
+  await page.getByLabel("Confirmar senha").fill(user.password);
+  await page.getByRole("button", { name: "Mostrar senha" }).first().click();
+  await expect(page.getByLabel(/^Senha/)).toHaveAttribute("type", "text");
   await page.getByRole("checkbox", { name: /Termos de Serviço/ }).check();
   await page.getByRole("button", { name: "Cadastrar com e-mail" }).click();
   await expect(page).toHaveURL(/\/app$/);
@@ -67,11 +70,11 @@ test("cadastro, saída e login", async () => {
   await expect(page).toHaveURL(/\/login/);
 
   await page.getByLabel("E-mail").fill(user.email);
-  await page.getByLabel("Senha").fill("senha-errada");
+  await page.getByLabel("Senha", { exact: true }).fill("senha-errada");
   await page.getByRole("button", { name: "Entrar com e-mail" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "inválidos" })).toBeVisible();
 
-  await page.getByLabel("Senha").fill(user.password);
+  await page.getByLabel("Senha", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "Entrar com e-mail" }).click();
   await expect(page).toHaveURL(/\/app$/);
 });

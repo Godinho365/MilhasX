@@ -31,6 +31,8 @@ export const registerSchema = z.object({
     .optional(),
   acceptTerms: z.boolean().optional(),
   captcha: z.string().max(4096).optional(),
+  // Código de 6 dígitos mandado ao e-mail (exigido quando o envio de e-mail está configurado)
+  code: z.string().trim().max(20).optional(),
 });
 export const loginSchema = z.object({ email: z.string().trim().min(1).max(200), password: z.string().min(1).max(128) });
 export const forgotSchema = z.object({ email: z.string().trim().email("E-mail inválido").max(200) });
@@ -715,6 +717,27 @@ export const goalSchema = z.object({
   })).min(1, "Inclua ao menos um resultado-chave").max(10),
 });
 export const checkInSchema = z.object({ current: z.number().int().min(0).max(10_000_000_000) });
+// Calendário: evento criado à mão, importação de .ics e os blocos da Visão geral.
+const hhmm = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Horário inválido (use HH:MM)");
+export const calendarEventSchema = z.object({
+  kind: z.enum(["CHECKIN", "BOARDING", "HOTEL", "CAR", "TOUR", "FOLLOWUP", "BIRTHDAY", "PASSPORT", "VISA", "REMINDER"]),
+  title: z.string().trim().min(1, "Dê um nome ao evento").max(200),
+  date: dateStr,
+  endDate: dateStr.nullable().optional(),
+  time: hhmm.nullable().optional().or(z.literal("").transform(() => null)),
+  endTime: hhmm.nullable().optional().or(z.literal("").transform(() => null)),
+  recurrence: z.enum(["NONE", "WEEKLY", "MONTHLY", "YEARLY"]).default("NONE"),
+  memberIds: z.array(id).max(20).default([]),
+  customerId: id.nullable().optional(),
+  location: z.string().trim().max(200).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  remind: z.boolean().default(true),
+});
+export const calendarImportSchema = z.object({
+  ics: z.string().min(10).max(3_000_000, "Arquivo grande demais (até 3 MB)"),
+  kind: z.enum(["CHECKIN", "BOARDING", "HOTEL", "CAR", "TOUR", "FOLLOWUP", "BIRTHDAY", "PASSPORT", "VISA", "REMINDER"]).default("REMINDER"),
+});
+export const overviewWidgetsSchema = z.object({ widgets: z.array(z.string().trim().min(1).max(30)).max(20) });
 // Metas e comissões. % em centésimos (10% = 1000); R$ em centavos; faixas no medidor da regra.
 export const commissionRuleSchema = z.object({
   memberId: id,
