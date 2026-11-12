@@ -2,6 +2,8 @@ import { ZodError, type ZodType, type ZodTypeDef } from "zod";
 import type { User } from "@prisma/client";
 import { DomainError, log } from "./db";
 import { getUserByToken, SESSION_COOKIE } from "./auth";
+import { resolveWorkspace, type WorkspaceUser } from "./workspace";
+import { allowed, apiRequirement } from "@/domain/permissions";
 
 export const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
@@ -34,12 +36,30 @@ function checkOrigin(req: Request) {
   if (!allowed.has(origin)) throw new DomainError(403, "Origem não permitida");
 }
 
-export type SessionUser = Omit<User, "avatar">;
+/** O usuário das rotas: os dados são da conta da agência (o dono); `actor` é quem entrou (o dono ou um membro). */
+export type SessionUser = WorkspaceUser;
 
+/**
+ * Sessão + conta da agência + permissão da rota. Para membro da equipe, a rota precisa estar liberada pela função
+ * dele (GET = ver; o resto = editar); rota que não está no mapa de permissões é negada para membro.
+ */
 export async function requireUser(req: Request): Promise<SessionUser> {
-  const user = await getUserByToken(readCookie(req, SESSION_COOKIE));
-  if (!user) throw new DomainError(401, "Não autenticado");
-  return user;
+  const person = await getUserByToken(readCookie(req, SESSION_COOKIE));
+  if (!person) throw new DomainError(401, "Não autenticado");
+  const ws = await resolveWorkspace(person);
+  if (!ws) throw new DomainError(401, "Seu acesso à equipe foi encerrado: fale com o dono da conta");
+  if (!ws.actor.isOwner && !allowed(apiRequirement(new URL(req.url).pathname, req.method), ws.actor.permissions, false)) {
+    throw new DomainError(403, "Sua função na equipe não dá acesso a isto");
+  }
+  return ws;
+}
+
+/** A pessoa que entrou (para o que é dela: senha, nome, foto, sair). Membro com acesso encerrado não passa. */
+export async function requireActor(req: Request): Promise<Omit<User, "avatar">> {
+  const person = await getUserByToken(readCookie(req, SESSION_COOKIE));
+  if (!person) throw new DomainError(401, "Não autenticado");
+  if (!(await resolveWorkspace(person))) throw new DomainError(401, "Seu acesso à equipe foi encerrado: fale com o dono da conta");
+  return person;
 }
 
 export async function requireAdmin(req: Request): Promise<SessionUser> {

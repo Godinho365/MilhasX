@@ -6,6 +6,6 @@ import { revealCredential } from "@/server/services/accounts";
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);
   const { password } = await parseBody(req, revealSchema);
-  const data = await revealCredential(u.id, (await params).id!, password, clientIp(req));
+  const data = await revealCredential(u.id, (await params).id!, password, clientIp(req), u.actor.id);
   return json({ ok: true, ...data }, 200, { "cache-control": "no-store" });
 });

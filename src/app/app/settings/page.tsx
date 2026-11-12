@@ -7,33 +7,41 @@ import { GeneralTab, ProfileTab } from "./client";
 import { BillingTab, ReferralsTab, SalesProfileTab } from "./tabs";
 import { TelegramTab } from "./telegram";
 import { telegramStatus } from "@/server/services/telegram";
+import { can, type AreaKey } from "@/domain/permissions";
 
-const TABS = [
-  ["", "Geral"],
-  ["profile", "Perfil"],
-  ["billing", "Assinatura"],
-  ["referrals", "Indicações"],
-  ["sales-profile", `Sua ${publicBrand()}`],
-  ["telegram", "Telegram"],
+// Abas e quem vê: as pessoais (geral, perfil) todo mundo; assinatura e indicações só o dono; as da agência pela
+// função do membro da equipe
+const TABS: readonly (readonly [string, string, "any" | "owner" | AreaKey])[] = [
+  ["", "Geral", "any"],
+  ["profile", "Perfil", "any"],
+  ["billing", "Assinatura", "owner"],
+  ["referrals", "Indicações", "owner"],
+  ["sales-profile", `Sua ${publicBrand()}`, "marketing"],
+  ["telegram", "Telegram", "configuracoes"],
 ] as const;
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; preapproval_id?: string }> }) {
   const user = await requirePageUser();
   const sp = await searchParams;
+  const me = user.actor;
+  const tabs = TABS.filter(([, , who]) => who === "any" || me.isOwner || (who !== "owner" && can(me.permissions, who)));
   let checkout: "ok" | "pendente" | "erro" | null = null;
-  if (sp.preapproval_id && mpEnabled()) {
+  if (sp.preapproval_id && mpEnabled() && me.isOwner) {
     try {
       checkout = (await syncSubscription(sp.preapproval_id, user.id)).status === "AUTHORIZED" ? "ok" : "pendente";
     } catch {
       checkout = "erro";
     }
   }
-  const tab = TABS.find(([k]) => k === sp.tab)?.[0] ?? "";
+  const tab = tabs.find(([k]) => k === sp.tab)?.[0] ?? "";
+  // preferências: as pessoais de quem entrou; as da agência (avisos, PIX, termo) da conta do dono
+  const personal = await getPreferences(me.id);
+  const prefs = me.isOwner ? personal : await getPreferences(user.id).then((a) => ({ ...personal, notifications: a.notifications, pix: a.pix, emissionTerms: a.emissionTerms }));
   return (
     <>
       <PageHeader title="Configurações" />
       <nav className="mb-5 flex gap-1 overflow-x-auto border-b border-line" aria-label="Seções das configurações">
-        {TABS.map(([k, l]) => (
+        {tabs.map(([k, l]) => (
           <Link
             key={k}
             href={k ? `/app/settings?tab=${k}` : "/app/settings"}
@@ -45,8 +53,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         ))}
       </nav>
       <div className="mx-auto w-full max-w-2xl">
-        {tab === "" && <GeneralTab prefs={await getPreferences(user.id)} />}
-        {tab === "profile" && <ProfileTab name={user.name} email={user.email} avatarVersion={user.avatarUpdatedAt?.getTime().toString() ?? null} deletionRequestedAt={user.deletionRequestedAt?.toISOString() ?? null} />}
+        {tab === "" && <GeneralTab prefs={prefs} />}
+        {tab === "profile" && <ProfileTab name={me.name} email={me.email} avatarVersion={me.avatarUpdatedAt?.getTime().toString() ?? null} deletionRequestedAt={me.isOwner ? user.deletionRequestedAt?.toISOString() ?? null : null} canDelete={me.isOwner} />}
         {tab === "billing" && <BillingTab state={await billingState(user.id)} checkout={checkout} />}
         {tab === "referrals" && <ReferralsTab state={await referralState(user.id)} />}
         {tab === "sales-profile" && <SalesProfileTab profile={await getSalesProfile(user.id)} defaultName={user.name} brand={publicBrand()} />}

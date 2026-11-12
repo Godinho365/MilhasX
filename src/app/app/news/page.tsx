@@ -8,7 +8,7 @@ import { Empty } from "@/components/ui";
 
 export default async function NewsPage() {
   const user = await requirePageUser();
-  const [items, pref] = await Promise.all([listNews(), prisma.userPreference.findUnique({ where: { userId: user.id }, select: { newsReadAt: true } })]);
+  const [items, pref] = await Promise.all([listNews(), prisma.userPreference.findUnique({ where: { userId: user.actor.id }, select: { newsReadAt: true } })]);
   const lastRead = pref?.newsReadAt ?? new Date(0);
   return (
     <>

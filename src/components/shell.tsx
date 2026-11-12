@@ -22,6 +22,7 @@ import { EntryForms, type AccountOpt } from "./entry-forms";
 import type { CardOpt } from "./form-parts";
 import { ProgramLogo } from "./program-logo";
 import { AssistantButton } from "./assistant";
+import { allowed, can, pageRequirement } from "@/domain/permissions";
 
 type Icon = React.ComponentType<{ className?: string }>;
 
@@ -109,6 +110,26 @@ const TUTORIAL_TAGS: [string, string][] = [
   ["/app/reports", "Métricas"], ["/app/programs", "Programas"],
 ];
 
+/** Membro da equipe: só os itens do menu que a função dele abre (o dono vê tudo). O Painel (/app) depende de "painel". */
+type Access = { isOwner: boolean; permissions: readonly string[] | "ALL"; roleLabel: string | null; workspaceName: string | null };
+function canOpen(access: Access | undefined, href: string) {
+  if (!access || access.isOwner || href.startsWith("mailto:")) return true;
+  const path = href.split("?")[0]!;
+  if (path === "/app") return can(access.permissions, "painel");
+  return allowed(pageRequirement(path), access.permissions, false);
+}
+function visibleNav(access: Access | undefined) {
+  if (!access || access.isOwner) return NAV;
+  return NAV.map((g) => ({
+    ...g,
+    items: g.items.flatMap((it): NavItem[] => {
+      if (!isGroup(it)) return canOpen(access, it.href) ? [it] : [];
+      const children = it.children.filter((c) => canOpen(access, c.href));
+      return children.length ? [{ ...it, children }] : [];
+    }),
+  })).filter((g) => g.items.length);
+}
+
 const BOTTOM: { href: string; label: string; icon: Icon }[] = [
   { href: "/app", label: "Painel", icon: LayoutDashboard },
   { href: "/app/sales", label: "Vendas", icon: ReceiptText },
@@ -118,6 +139,7 @@ const BOTTOM: { href: string; label: string; icon: Icon }[] = [
 export function Shell(props: {
   appName: string;
   user: { name: string; email: string; role: string; avatarVersion: string | null };
+  access?: Access;
   holders: HolderOpt[];
   programs: { id: string; name: string; color: string }[];
   accounts: AccountOpt[];
@@ -354,12 +376,12 @@ export function Shell(props: {
         <button className="btn-subtle ml-auto h-8 w-8 px-0 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Fechar menu"><X className="h-4 w-4" /></button>
       </div>
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-3" aria-label="Menu principal">
-        {NAV.map((g, i) => (
+        {visibleNav(props.access).map((g, i) => (
           <div key={g.group} className="space-y-4">
             <div>
               <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{g.group}</p>
               <div className="space-y-px">
-                {[...g.items, ...(extra[g.group] ?? [])].map((it) => (isGroup(it) ? navGroup(it) : navLink(it.href, it.label, it.icon, badgeOf(it.badge), it.external)))}
+                {[...g.items, ...(extra[g.group] ?? [])].filter((it) => isGroup(it) || canOpen(props.access, it.href)).map((it) => (isGroup(it) ? navGroup(it) : navLink(it.href, it.label, it.icon, badgeOf(it.badge), it.external)))}
               </div>
             </div>
             {i === 0 && programsBlock}
@@ -371,7 +393,7 @@ export function Shell(props: {
           <button onClick={() => setUserMenu((v) => !v)} aria-expanded={userMenu} aria-haspopup="menu" className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-panel2">
             <UserAvatar name={props.user.name} version={props.user.avatarVersion} />
             <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5"><span className="truncate text-sm font-semibold">{props.user.name}</span><span className="shrink-0 rounded bg-accent-soft px-1 text-[10px] font-bold uppercase text-accent-light">{props.plan.name}</span></span>
+              <span className="flex items-center gap-1.5"><span className="truncate text-sm font-semibold">{props.user.name}</span><span className="shrink-0 rounded bg-accent-soft px-1 text-[10px] font-bold uppercase text-accent-light" title={props.access?.workspaceName ? `Equipe de ${props.access.workspaceName}` : undefined}>{props.access && !props.access.isOwner ? props.access.roleLabel ?? "Equipe" : props.plan.name}</span></span>
               <span className="block truncate text-xs text-muted">{props.user.email}</span>
             </span>
             <ChevronsUpDown className="h-4 w-4 text-muted" />
@@ -453,7 +475,7 @@ export function Shell(props: {
 
       {/* Barra inferior no celular */}
       <nav aria-label="Navegação rápida" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
-        {BOTTOM.map((it) => (
+        {BOTTOM.filter((it) => canOpen(props.access, it.href)).map((it) => (
           <Link key={it.href} href={it.href} aria-current={active(it.href) ? "page" : undefined} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${active(it.href) ? "text-accent-light" : "text-muted"}`}>
             <it.icon className="h-5 w-5" />
             {it.label}
@@ -465,7 +487,8 @@ export function Shell(props: {
           {(props.unreadNews > 0 || props.unread > 0) && <span className="absolute right-[30%] top-2 h-2 w-2 rounded-full bg-red-500" aria-hidden />}
         </button>
       </nav>
-      <EntryForms accounts={formAccounts} defaultAccountId={pageAccount?.id} cards={props.cards} fab={fab} />
+      {/* "Novo lançamento" (o menu padrão) só para quem edita milhas; a ação da página segue a página */}
+      {(fab || !props.access || props.access.isOwner || can(props.access.permissions, "milhas", "edit")) && <EntryForms accounts={formAccounts} defaultAccountId={pageAccount?.id} cards={props.cards} fab={fab} />}
     </div>
   );
 }

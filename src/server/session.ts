@@ -1,21 +1,36 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getUserByToken, SESSION_COOKIE } from "./auth";
+import { resolveWorkspace } from "./workspace";
+import { allowed, can, homeFor, pageRequirement } from "@/domain/permissions";
 import { prisma } from "./db";
 import { findChosenHolder, HOLDER_CHOICE_COOKIE, SELF_HOLDER } from "./services/holder-choice";
 
 export const HOLDER_COOKIE = HOLDER_CHOICE_COOKIE;
 export { SELF_HOLDER };
 
+/** Quem entrou, já na conta da agência (o dono; para membro, `actor` é o membro). Membro com acesso encerrado = null. */
 export async function currentUser() {
   const jar = await cookies();
-  return getUserByToken(jar.get(SESSION_COOKIE)?.value);
+  const person = await getUserByToken(jar.get(SESSION_COOKIE)?.value);
+  return person ? resolveWorkspace(person) : null;
 }
 
+/**
+ * Página do app: precisa estar logado e, para membro da equipe, a página precisa estar liberada pela função dele
+ * (senão vai para a primeira área que ele pode abrir). Sem o endereço (fora das rotas do middleware), membro não
+ * passa.
+ */
 export async function requirePageUser() {
   const u = await currentUser();
   if (!u) redirect("/login");
+  if (!u.actor.isOwner) {
+    const path = (await headers()).get("x-pathname");
+    const perms = u.actor.permissions;
+    if (!path || !allowed(pageRequirement(path), perms, false)) redirect(homeFor(perms));
+    if ((path === "/app" || path === "/app/") && !can(perms, "painel")) redirect(homeFor(perms));
+  }
   return u;
 }
 

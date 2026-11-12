@@ -128,7 +128,7 @@ export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
   );
 }
 
-export function ProfileTab({ name, email, avatarVersion, deletionRequestedAt }: { name: string; email: string; avatarVersion: string | null; deletionRequestedAt: string | null }) {
+export function ProfileTab({ name, email, avatarVersion, deletionRequestedAt, canDelete = true }: { name: string; email: string; avatarVersion: string | null; deletionRequestedAt: string | null; canDelete?: boolean }) {
   const router = useRouter();
   const [value, setValue] = useState(name);
   const [busy, setBusy] = useState(false);
@@ -175,6 +175,11 @@ export function ProfileTab({ name, email, avatarVersion, deletionRequestedAt }: 
           <button className="btn-primary" disabled={busy || value.trim() === name}>Salvar alterações</button>
         </form>
       </Section>
+      {!canDelete ? (
+        <Section title="Acesso da equipe">
+          <p className="text-sm text-muted">Você entra na conta da agência como membro da equipe. Para sair da equipe ou mudar o que você pode acessar, fale com o dono da conta.</p>
+        </Section>
+      ) : (
       <Section title="Excluir conta" danger>
         {deletionRequestedAt ? (
           <div className="space-y-3">
@@ -188,6 +193,7 @@ export function ProfileTab({ name, email, avatarVersion, deletionRequestedAt }: 
           </div>
         )}
       </Section>
+      )}
     </>
   );
 }

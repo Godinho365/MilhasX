@@ -3,6 +3,6 @@ import { markNewsRead } from "@/server/services/extras";
 
 export const POST = route(async (req) => {
   const u = await requireUser(req);
-  await markNewsRead(u.id);
+  await markNewsRead(u.actor.id); // novidades lidas: de quem entrou
   return json({ ok: true });
 });
