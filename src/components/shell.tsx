@@ -9,7 +9,7 @@ import {
   LogOut, PanelLeft, ChevronsUpDown, Layers, ShieldCheck, ChevronRight, Menu, X, GraduationCap, Megaphone, LifeBuoy,
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Plane, ChevronDown, Users, Gem, Landmark, Briefcase,
   Ticket, ArrowLeftRight, CalendarClock, Crown, Lightbulb, ShoppingCart, Luggage, FileSpreadsheet, ListChecks, Workflow, Target, UserRound,
-  Truck, IdCard, MapPinned, Wallet, Sparkles, Store, Globe, TrendingUp, BarChart3, MessagesSquare,
+  Truck, IdCard, MapPinned, Wallet, Sparkles, Store, Globe, TrendingUp, BarChart3, MessagesSquare, CalendarDays, Gauge,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -35,6 +35,8 @@ const isGroup = (it: NavItem): it is NavGroup => "children" in it;
 // dependem das props, por isso são montados no componente.
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: "Menu principal", items: [
+    { href: "/app/visao-geral", label: "Visão geral", icon: Gauge },
+    { href: "/app/calendario", label: "Calendário", icon: CalendarDays },
     { href: "/app/metricas", label: "Métricas", icon: BarChart3 },
     { href: "/app/reports", label: "Relatórios", icon: LineChart },
   ] },
@@ -98,6 +100,7 @@ const NAV_HREFS = NAV.flatMap((g) => g.items.flatMap((it) => (isGroup(it) ? it.c
 
 const REPORT_LABELS: Record<string, string> = { overview: "Visão Geral", "credit-cards": "Cartões", savings: "Economia", evolution: "Evolução", sales: "Vendas", assets: "Bens e Direitos" };
 const TITLES: [string, string][] = [
+  ["/app/visao-geral", "Visão geral"], ["/app/calendario", "Calendário"],
   ["/app/metricas", "Métricas"], ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas e comissões"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
   ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/site", "Site"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
