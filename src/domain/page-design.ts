@@ -9,6 +9,8 @@ export type PageButton = { kind: ButtonKind; label: string; description: string;
 export type PageDesign = {
   /** Com site da agência, as páginas usam as cores e fontes do tema do site (no lugar de bgColor). */
   siteTheme: boolean;
+  /** Sem nome de exibição: a Bio não mostra o nome (a marca fica no logo/banner). */
+  hideName: boolean;
   bgColor: string | null;
   buttons: PageButton[];
   captacao: { title: string; text: string; submit: string; thanksTitle: string; thanks: string; askBudget: boolean; askBaggage: boolean; askDirect: boolean; askFlexible: boolean };
@@ -41,6 +43,7 @@ export const BUILTIN_BUTTONS: Record<Exclude<ButtonKind, "link">, { label: strin
 
 export const DEFAULT_DESIGN: PageDesign = {
   siteTheme: true,
+  hideName: false,
   bgColor: null,
   buttons: (["cotacao", "gestao", "whatsapp"] as const).map((kind) => ({ kind, ...BUILTIN_BUTTONS[kind] })),
   captacao: { title: "Solicite sua cotação", text: "Conte para onde quer ir. Cotamos com milhas e respondemos pelo WhatsApp.", submit: "Enviar solicitação", thanksTitle: "Solicitação enviada!", thanks: "Recebemos seu pedido e vamos falar com você pelo WhatsApp em breve.", askBudget: false, askBaggage: true, askDirect: true, askFlexible: true },
@@ -106,6 +109,7 @@ export function resolveDesign(raw: unknown): PageDesign {
   const share = (o.share && typeof o.share === "object" ? o.share : {}) as Record<string, unknown>;
   return {
     siteTheme: typeof o.siteTheme === "boolean" ? o.siteTheme : true,
+    hideName: o.hideName === true,
     bgColor: typeof o.bgColor === "string" && HEX.test(o.bgColor) ? o.bgColor.toLowerCase() : null,
     buttons,
     captacao: sect("captacao"),

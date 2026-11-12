@@ -52,6 +52,16 @@
 [data-look] .btn-primary { background-color: rgb(var(--lime)); color: rgb(var(--lime-ink)); border-radius: var(--look-btn-radius); }
 [data-look] .btn-primary:hover { filter: brightness(0.95); }
 [data-look] .btn-ghost { border-radius: var(--look-btn-radius); }
+/* Cartões como no site: com sombra (sem borda), só a linha, ou chapados */
+[data-look][data-cards="shadow"] .card { border-color: transparent; box-shadow: 0 1px 2px rgb(var(--zinc-100) / 0.06), 0 10px 30px -14px rgb(var(--zinc-100) / 0.28); }
+[data-look][data-cards="flat"] .card { border-color: transparent; background-color: rgb(var(--panel2)); box-shadow: none; }
+[data-look][data-cards="shadow"] .look-action:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgb(var(--zinc-100) / 0.08), 0 16px 36px -14px rgb(var(--zinc-100) / 0.35); }
+[data-look] .look-action:hover { border-color: rgb(var(--accent) / 0.5); }
+/* Faixa colorida do site (topo da Bio) e ícones na cor de destaque, como os botões do site */
+[data-look] .look-band { background-color: rgb(var(--hero)); color: rgb(var(--on-hero)); }
+[data-look] .look-band h1 { color: rgb(var(--on-hero)); }
+[data-look] .look-band-muted { color: rgb(var(--on-hero) / 0.85); }
+[data-look] .look-chip { background-color: rgb(var(--accent)); color: rgb(var(--lime-ink)); border-radius: var(--look-btn-radius); }
 
 /* Claro: escala zinc invertida (texto escuro sobre fundo claro) e tons fortes para manter o contraste */
 [data-theme="light"] {

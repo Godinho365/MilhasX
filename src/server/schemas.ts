@@ -257,7 +257,8 @@ export const planRequestSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GES
 export const adminPlanSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).nullable().default(null) });
 export const salesProfileSchema = z.object({
   slug: z.string().trim().toLowerCase().min(3, "Mínimo de 3 caracteres").max(40).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "Use letras minúsculas, números e hífen"),
-  displayName: z.string().trim().min(2, "Informe o nome de exibição").max(80),
+  // Opcional: vazio esconde o nome na Bio (o servidor guarda o nome da conta para os textos)
+  displayName: z.string().trim().max(80).refine((v) => v.length === 0 || v.length >= 2, "Nome de exibição com pelo menos 2 letras").default(""),
   bio: z.string().trim().max(500).nullable().optional(),
   whatsapp: z.string().trim().max(20).regex(/^[\d\s()+-]*$/, "WhatsApp inválido").nullable().optional(),
   instagram: z.string().trim().max(31).regex(/^@?[A-Za-z0-9._]*$/, "Instagram inválido").nullable().optional(),

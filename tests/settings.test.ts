@@ -11,6 +11,7 @@ import * as salesProfile from "@/app/api/sales-profile/route";
 import * as adminPlan from "@/app/api/admin/users/[id]/plan/route";
 import { publicSalesProfile } from "@/server/services/settings";
 import { prisma } from "@/server/db";
+import { resolveDesign } from "@/domain/page-design";
 
 let c: Client;
 let userId: string;
@@ -116,5 +117,18 @@ describe("perfil público", () => {
     await b.call(register.POST, "POST", "/r", { name: "Bia", email: "bia@x.test", password: "senha-forte-2" });
     expect((await b.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...body })).status).toBe(409);
     expect((await b.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...body, slug: "Com Espaço" })).status).toBe(400);
+  });
+
+  it("nome de exibição é opcional: vazio esconde o nome na Bio e guarda o nome da conta para os textos", async () => {
+    const body = { slug: "sem-nome", displayName: "", programIds: [], published: true };
+    const r = await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", body);
+    expect(r.status).toBe(200);
+    const p = await publicSalesProfile("sem-nome");
+    expect(p?.displayName.length).toBeGreaterThan(1);
+    expect(resolveDesign(r.data.item.design).hideName).toBe(true);
+    const named = await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...body, displayName: "Ana Viagens" });
+    expect(resolveDesign(named.data.item.design).hideName).toBe(false);
+    expect((await publicSalesProfile("sem-nome"))?.displayName).toBe("Ana Viagens");
+    expect((await c.call(salesProfile.PUT, "PUT", "/api/sales-profile", { ...body, displayName: "A" })).status).toBe(400);
   });
 });

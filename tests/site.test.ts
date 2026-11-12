@@ -153,7 +153,8 @@ describe("site: salvar, publicar e fotos", () => {
 describe("Central de atendimento com o tema do site", () => {
   it("o tema vira as cores, fontes e cantos da Central (claro ou escuro) e respeita a cor de destaque", () => {
     const light = centralLook(themeById("atlantico"));
-    expect(light).toMatchObject({ base: "client", name: "Atlântico" });
+    expect(light).toMatchObject({ base: "client", name: "Atlântico", cards: "shadow" });
+    expect(light.vars).toMatchObject({ "--hero": "14 116 144", "--on-hero": "255 255 255" });
     expect(light.vars).toMatchObject({ "--bg": "251 247 240", "--accent": "14 116 144", "--look-radius": "20px", "--look-btn-radius": "999px" });
     const dark = centralLook(themeById("prestige"), "#ff0000");
     expect(dark.base).toBe("dark");

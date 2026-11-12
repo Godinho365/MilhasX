@@ -203,11 +203,15 @@ export async function saveSalesProfile(userId: string, input: SalesProfileInput)
   const programs = await prisma.program.findMany({ where: { id: { in: input.programIds }, active: true }, select: { id: true } });
   const saved = await prisma.salesProfile.findUnique({ where: { userId }, select: { design: true } });
   const design = resolveDesign(input.design === undefined ? saved?.design : input.design);
+  // Sem nome de exibição: a Bio não mostra nome; os textos (cotação, termo, prévia do link) usam o nome da conta
+  const name = input.displayName.trim();
+  design.hideName = !name;
+  const displayName = name || (await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } })).name;
   // Cor de fundo e prévia do link são do plano PRO; manter o que já estava salvo é sempre permitido
   if (brandingKey(design) !== brandingKey(resolveDesign(saved?.design))) await assertFeature(userId, "pageBranding");
   const data = {
     slug,
-    displayName: input.displayName.trim(),
+    displayName,
     bio: input.bio?.trim() || null,
     whatsapp: input.whatsapp?.replace(/\D/g, "") || null,
     instagram: input.instagram?.trim().replace(/^@/, "") || null,
