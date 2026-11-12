@@ -3,9 +3,9 @@ import Link from "next/link";
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { Alert, Field } from "@/components/ui";
+import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
-import { AuthTitle } from "../parts";
+import { AuthTitle, PasswordField } from "../parts";
 
 function ResetForm() {
   const ready = useHydrated();
@@ -26,8 +26,8 @@ function ResetForm() {
       <AuthTitle title="Nova senha" subtitle="Escolha uma nova senha para sua conta" />
       {!token && <Alert>Link inválido.</Alert>}
       {erro && <Alert>{erro}</Alert>}
-      <Field label="Nova senha"><input className="input" name="password" type="password" required minLength={8} autoComplete="new-password" /></Field>
-      <Field label="Confirmar"><input className="input" name="confirm" type="password" required minLength={8} autoComplete="new-password" /></Field>
+      <PasswordField label="Nova senha" name="password" autoComplete="new-password" placeholder="Mínimo de 8 caracteres" minLength={8} />
+      <PasswordField label="Confirmar nova senha" name="confirm" autoComplete="new-password" placeholder="Repita a senha" minLength={8} />
       <button className="btn-primary w-full" disabled={!token || !ready}>Salvar</button>
     </form>
   );

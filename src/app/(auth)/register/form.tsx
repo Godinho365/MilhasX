@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
-import { AuthTitle, GoogleButton, OrDivider, Turnstile } from "../parts";
+import { AuthTitle, GoogleButton, OrDivider, PasswordField, Turnstile } from "../parts";
 
 /** (11) 98765-4321 enquanto digita; fixo de 10 dígitos fica (11) 3456-7890. */
 export function maskPhone(raw: string) {
@@ -20,6 +20,10 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
   const [erro, setErro] = useState(initialError);
   const [busy, setBusy] = useState(false);
   const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  // Só acusa a diferença depois que a confirmação tem o mesmo tamanho (não grita enquanto a pessoa digita)
+  const mismatch = confirm.length > 0 && confirm.length >= password.length && confirm !== password;
   const [terms, setTerms] = useState(false);
   const [captcha, setCaptcha] = useState("");
   const [captchaKey, setCaptchaKey] = useState(0);
@@ -31,6 +35,7 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if (password !== confirm) return setErro("As senhas não conferem");
     if (!terms) return setErro("Aceite os Termos de Serviço e a Política de Privacidade");
     setBusy(true);
     setErro("");
@@ -38,7 +43,7 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
       name: f.get("name"),
       email: f.get("email"),
       phone,
-      password: f.get("password"),
+      password,
       acceptTerms: true,
       captcha: captcha || undefined,
       ref: ref() || undefined,
@@ -91,10 +96,17 @@ export function RegisterForm({ google, siteKey, initialError }: { google: boolea
             required
           />
         </label>
-        <label className="block">
-          <span className="label">Senha</span>
-          <input className="input" name="password" type="password" autoComplete="new-password" placeholder="Mínimo de 8 caracteres" required minLength={8} maxLength={128} />
-        </label>
+        <PasswordField label="Senha" name="password" autoComplete="new-password" placeholder="Mínimo de 8 caracteres" minLength={8} value={password} onChange={setPassword} />
+        <PasswordField
+          label="Confirmar senha"
+          name="confirm"
+          autoComplete="new-password"
+          placeholder="Repita a senha"
+          minLength={8}
+          value={confirm}
+          onChange={setConfirm}
+          error={mismatch ? "As senhas não conferem" : undefined}
+        />
         <label className="flex cursor-pointer items-start gap-3 text-sm">
           <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-[rgb(var(--accent))]" checked={terms} onChange={(e) => setTerms(e.target.checked)} required />
           <span>

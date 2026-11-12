@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 
 /** Título + subtítulo do cartão, com a linha separadora embaixo. */
 export function AuthTitle({ title, subtitle }: { title: string; subtitle: string }) {
@@ -100,4 +101,64 @@ export function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (tok
     };
   }, [siteKey]);
   return <div ref={box} className="min-h-[65px]" />;
+}
+
+/** Campo de senha com rótulo e botão de olho para mostrar/esconder o que foi digitado. */
+export function PasswordField({
+  label,
+  name,
+  autoComplete,
+  placeholder,
+  minLength,
+  value,
+  onChange,
+  error,
+}: {
+  label: string;
+  name: string;
+  autoComplete: "current-password" | "new-password";
+  placeholder?: string;
+  minLength?: number;
+  value?: string;
+  onChange?: (v: string) => void;
+  error?: string;
+}) {
+  const id = useId();
+  const errId = `${id}-erro`;
+  const [visible, setVisible] = useState(false);
+  return (
+    <div>
+      <label htmlFor={id} className="label">{label}</label>
+      <div className="relative">
+        <input
+          id={id}
+          className={`input pr-11 ${error ? "border-red-400/70 focus:border-red-400" : ""}`}
+          name={name}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+          required
+          minLength={minLength}
+          maxLength={128}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          {...(value !== undefined ? { value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value) } : {})}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errId : undefined}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[10px] text-muted hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          aria-label={visible ? "Esconder senha" : "Mostrar senha"}
+          aria-pressed={visible}
+          aria-controls={id}
+        >
+          {visible ? <EyeOff size={18} aria-hidden /> : <Eye size={18} aria-hidden />}
+        </button>
+      </div>
+      {error && <p id={errId} className="mt-1.5 text-xs text-red-400">{error}</p>}
+    </div>
+  );
 }
