@@ -103,66 +103,78 @@ export default async function ClubCalendarPage({ searchParams }: { searchParams:
             </div>
           </section>
 
-          <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted">
-            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-zinc-300" aria-hidden />cobrado (Extrato)</span>
-            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full border border-zinc-300" aria-hidden />previsto (recorrência)</span>
+          <section className="card overflow-hidden" aria-label={`Calendário de ${year}`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+              {months.map((m, mi) => (
+                <div key={m.month} className="border-b border-r border-line p-3" aria-label={`${MONTHS[mi]} de ${year}`}>
+                  <h2 className={`mb-2 rounded-md py-1 text-center text-sm font-semibold uppercase tracking-wider ${m.month === curMonth ? "bg-accent text-zinc-950" : "bg-accent/15 text-accent-light"}`}>
+                    {MONTHS[mi]}
+                  </h2>
+                  <table className="w-full table-fixed text-center text-[13px]">
+                    <thead><tr>{WEEK.map((w, i) => <th key={i} className={`pb-1 text-[11px] font-semibold ${i === 0 || i === 6 ? "text-accent-light" : ""}`}>{w}</th>)}</tr></thead>
+                    <tbody>
+                      {m.weeks.map((wk, wi) => (
+                        <tr key={wi}>
+                          {wk.map((d, di) => {
+                            if (!d) return <td key={di} />;
+                            const evs = m.byDay.get(d) ?? [];
+                            const title = evs.map((e) => { const c = byId.get(e.clubId); return `${c?.program} · ${c?.holder} · ${fmtBRL(e.costCents)}${e.projected ? " (previsto)" : ""}`; }).join("\n");
+                            const color = evs.length ? byId.get(evs[0]!.clubId)?.color ?? "#a1a1aa" : undefined;
+                            const done = evs.some((e) => !e.projected);
+                            const weekend = di === 0 || di === 6;
+                            return (
+                              <td key={di} className="py-0.5" title={title || undefined}>
+                                <span
+                                  className={`relative mx-auto flex h-7 w-7 items-center justify-center rounded-full tabular-nums ${evs.length ? "font-semibold text-white" : weekend ? "text-accent-light" : "text-muted"} ${d === cal.today ? "ring-1 ring-white" : ""}`}
+                                  style={evs.length ? (done ? { backgroundColor: color } : { boxShadow: `inset 0 0 0 1.5px ${color}` }) : undefined}
+                                >
+                                  {Number(d.slice(8))}
+                                  {evs.length > 1 && <span className="absolute -right-1 -top-1 rounded-full bg-white px-1 text-[9px] font-bold leading-[14px] text-zinc-950">{evs.length}</span>}
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-1 text-center text-[11px] tabular-nums text-muted">{m.events.length ? `${m.events.length} ${m.events.length === 1 ? "cobrança" : "cobranças"} · ${fmtBRL(m.totalCents)}` : "\u00a0"}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted">
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full bg-zinc-300" aria-hidden />cobrado (Extrato)</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" aria-hidden />previsto (recorrência)</span>
+            {programs.map((pr) => { const c = cal.clubs.find((x) => x.program === pr); return <span key={pr} className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: c?.color }} aria-hidden />{pr}</span>; })}
+            <span>número no canto = mais de um clube no dia (passe o mouse para ver)</span>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {months.map((m, mi) => (
-              <section key={m.month} className={`card card-pad ${m.month === curMonth ? "ring-1 ring-accent" : ""}`} aria-label={`${MONTHS[mi]} de ${year}`}>
-                <header className="mb-2 flex items-baseline justify-between gap-2">
-                  <h2 className="font-semibold">{MONTHS[mi]}</h2>
-                  <span className="text-xs tabular-nums text-muted">{m.events.length ? `${m.events.length} · ${fmtBRL(m.totalCents)}` : "sem cobranças"}</span>
-                </header>
-                <table className="w-full table-fixed text-center text-xs">
-                  <thead><tr>{WEEK.map((w, i) => <th key={i} className="pb-1 font-normal text-muted">{w}</th>)}</tr></thead>
-                  <tbody>
-                    {m.weeks.map((wk, wi) => (
-                      <tr key={wi}>
-                        {wk.map((d, di) => {
-                          if (!d) return <td key={di} />;
-                          const evs = m.byDay.get(d) ?? [];
-                          const title = evs.map((e) => { const c = byId.get(e.clubId); return `${c?.program} · ${c?.holder} · ${fmtBRL(e.costCents)}${e.projected ? " (previsto)" : ""}`; }).join("\n");
-                          return (
-                            <td key={di} className="p-0.5 align-top" title={title || undefined}>
-                              <div className={`flex h-9 flex-col items-center justify-start rounded-md pt-0.5 ${evs.length ? "bg-panel2" : ""} ${d === cal.today ? "ring-1 ring-accent" : ""}`}>
-                                <span className={`tabular-nums ${evs.length ? "font-semibold text-white" : "text-muted"}`}>{Number(d.slice(8))}</span>
-                                {evs.length > 0 && (
-                                  <span className="mt-0.5 flex flex-wrap justify-center gap-0.5">
-                                    {evs.slice(0, 4).map((e, i) => {
-                                      const color = byId.get(e.clubId)?.color ?? "#a1a1aa";
-                                      return <span key={i} className="h-1.5 w-1.5 rounded-full" style={e.projected ? { border: `1px solid ${color}` } : { backgroundColor: color }} aria-hidden />;
-                                    })}
-                                    {evs.length > 4 && <span className="text-[9px] leading-none text-muted">+{evs.length - 4}</span>}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {m.events.length > 0 && (
-                  <ul className="mt-2 space-y-0.5 border-t border-line pt-2 text-xs">
-                    {m.events.map((e, i) => {
-                      const c = byId.get(e.clubId);
-                      return (
-                        <li key={i} className={`flex items-center gap-2 ${e.projected ? "text-muted" : ""}`}>
-                          <span className="w-5 shrink-0 tabular-nums">{Number(e.day.slice(8))}</span>
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={e.projected ? { border: `1px solid ${c?.color}` } : { backgroundColor: c?.color }} aria-hidden />
-                          <span className="min-w-0 flex-1 truncate">{c?.program} · {c?.holder}</span>
-                          <span className="tabular-nums">{e.costCents ? fmtBRL(e.costCents) : `${fmtPts(e.points)} pts`}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+          {(() => {
+            const limit = new Date(Date.parse(`${cal.today}T00:00:00Z`) + 45 * 86_400_000).toISOString().slice(0, 10);
+            const next = events.filter((e) => e.day >= cal.today && e.day <= limit).sort((a, b) => a.day.localeCompare(b.day));
+            if (!next.length) return null;
+            return (
+              <section className="card card-pad mt-5" aria-label="Próximas cobranças">
+                <h2 className="mb-2 font-semibold">Próximas cobranças <span className="text-sm font-normal text-muted">(45 dias)</span></h2>
+                <ul className="divide-y divide-line text-sm">
+                  {next.map((e, i) => {
+                    const c = byId.get(e.clubId);
+                    return (
+                      <li key={i} className="flex items-center gap-3 py-1.5">
+                        <span className="w-12 shrink-0 tabular-nums text-muted">{fmtDate(e.day).slice(0, 5)}</span>
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: c?.color }} aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{c?.program} · {c?.holder}</span>
+                        <span className="tabular-nums text-muted">{fmtPts(e.points)} pts</span>
+                        <span className="w-24 text-right tabular-nums">{fmtBRL(e.costCents)}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               </section>
-            ))}
-          </div>
+            );
+          })()}
           <p className="mt-3 text-xs text-muted">Cobrado = pontos de clube lançados no Extrato. Previsto = próximas cobranças pela recorrência do clube (dia da cobrança e fim do plano ficam no lançamento recorrente da conta). Assinatura = primeiro crédito de clube da conta.</p>
         </>
       )}
