@@ -8,9 +8,9 @@ import { projectClub, type ClubEvent, type ClubFreq } from "@/domain/club-calend
 
 /** Calendário dos clubes no ano: os planos de cada conta (assinatura, dia da cobrança, próxima, fim) e as cobranças
  *  dia a dia. O que já passou vem dos pontos de clube do Extrato; daqui para a frente, da recorrência do clube. */
-export async function clubCalendar(userId: string, holderId: string | undefined, year: number) {
+export async function clubCalendar(userId: string, holderId: string | undefined, fromYear: number, toYear = fromYear) {
   const today = brDay();
-  const from = `${year}-01-01`, to = `${year}-12-31`;
+  const from = `${fromYear}-01-01`, to = `${toYear}-12-31`;
   const recs = await prisma.recurrence.findMany({
     where: { userId, type: "CLUB", account: { archived: false, ...(holderId ? { holderId } : {}) } },
     include: { account: { include: { program: true, holder: true } } },
@@ -57,7 +57,7 @@ export async function clubCalendar(userId: string, holderId: string | undefined,
     const start = c.nextDate > today ? c.nextDate : today;
     return projectClub({ id: c.id, nextDate: c.nextDate, frequency: c.frequency, interval: c.interval, dayOfMonth: c.rec.dayOfMonth, endDate: c.endDate, points: c.points, costCents: c.costCents }, start < from ? from : start, to);
   });
-  return { year, today, clubs: clubs.map(({ rec: _rec, ...c }) => c), events: [...past, ...future] };
+  return { fromYear, toYear, today, clubs: clubs.map(({ rec: _rec, ...c }) => c), events: [...past, ...future] };
 }
 
 
