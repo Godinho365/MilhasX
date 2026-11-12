@@ -24,7 +24,7 @@ import { brDay } from "@/domain/brasilia";
 type Customer = { id: string; name: string; phone: string | null };
 // "2026-11-30" → "30/11/2026" sem passar por fuso (a data da tela não tem horário)
 const ymdBR = (v: string) => v.split("-").reverse().join("/");
-type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
+type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null; cpf?: string | null };
 type CardOpt = { id: string; name: string; last4: string | null; closingDay: number; dueDay: number };
 
 const STAGE_COLOR: Record<DealStageKey, string> = { NEW: "#60a5fa", NEGOTIATION: "#f59e0b", AWAITING: "#a78bfa", ISSUED: "#22c55e", PAID: "#94a3b8" };
@@ -270,6 +270,21 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             <option value="">Escolher depois</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
+          {acc && (
+            <div className="mt-2 flex items-center gap-2 text-sm">
+              <span className="text-muted">CPF da conta:</span>
+              {acc.cpf ? (
+                <>
+                  <span className="font-mono font-medium tabular-nums">{fmtCpf(acc.cpf)}</span>
+                  <button type="button" className="btn-ghost h-7 px-2 text-xs" onClick={() => navigator.clipboard.writeText(acc.cpf!).then(() => toast("CPF copiado"), () => toast("Não foi possível copiar", "error"))} aria-label={`Copiar CPF ${fmtCpf(acc.cpf)}`}>
+                    <Copy className="h-3.5 w-3.5" />Copiar
+                  </button>
+                </>
+              ) : (
+                <span className="text-xs text-muted">não cadastrado no titular (Milhas › Titulares)</span>
+              )}
+            </div>
+          )}
         </Field>
         <Field label="Colar pedido do comprador">
           <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} onPaste={pasteImage} disabled={ocr != null} placeholder="Link, texto ou print (Ctrl+V) da tela da LATAM. Ex.: 8.673K, 1CPF, Taxas: R$35,75" />
