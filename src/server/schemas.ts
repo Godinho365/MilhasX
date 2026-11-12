@@ -715,6 +715,33 @@ export const goalSchema = z.object({
   })).min(1, "Inclua ao menos um resultado-chave").max(10),
 });
 export const checkInSchema = z.object({ current: z.number().int().min(0).max(10_000_000_000) });
+// Metas e comissões. % em centésimos (10% = 1000); R$ em centavos; faixas no medidor da regra.
+export const commissionRuleSchema = z.object({
+  memberId: id,
+  kind: z.enum(["SALE_PCT", "PROFIT_PCT", "FIXED", "PER_K_MILES"]),
+  value: z.number().int().min(0).max(100_000_000),
+  base: z.enum(["INDIVIDUAL", "TEAM"]).default("INDIVIDUAL"),
+  tiers: z.array(z.object({ min: z.number().min(0).max(100_000_000_000), value: z.number().int().min(0).max(100_000_000) })).max(10).default([]),
+  period: z.enum(["MONTH", "QUARTER"]).default("MONTH"),
+  startsAt: dateStr,
+  active: z.boolean().optional(),
+});
+const commissionOwner = z.object({ memberId: id.optional(), partnerId: id.optional() })
+  .refine((o) => !!o.memberId !== !!o.partnerId, "Escolha um membro ou um parceiro");
+export const commissionEntrySchema = z.object({
+  memberId: id.optional(), partnerId: id.optional(),
+  kind: z.enum(["BONUS", "ADJUST"]),
+  amountCents: z.number().int().min(-100_000_000_00).max(100_000_000_00),
+  date: dateStr,
+  note: z.string().trim().max(300).optional().nullable(),
+}).and(commissionOwner);
+export const commissionPaySchema = z.object({
+  memberId: id.optional(), partnerId: id.optional(),
+  amountCents: cents.refine((v) => v > 0, "Informe o valor pago"),
+  date: dateStr,
+  finAccountId: id.optional().nullable(),
+  note: z.string().trim().max(300).optional().nullable(),
+}).and(commissionOwner);
 export const processSchema = z.object({
   title: z.string().trim().min(1, "Dê um nome ao processo").max(120),
   description: z.string().trim().max(1000).nullable().optional(),

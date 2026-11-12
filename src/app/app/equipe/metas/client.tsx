@@ -17,7 +17,7 @@ const isMoney = (m: Metric) => m === "REVENUE" || m === "PROFIT";
 const show = (m: Metric, v: number) => (isMoney(m) ? fmtBRL(v) : fmtPts(v));
 const bar = (p: number) => (p >= 100 ? "bg-emerald-400" : p >= 60 ? "bg-accent-light" : p >= 30 ? "bg-amber-400" : "bg-red-400");
 
-export function GoalsClient({ goals, members, period, start }: { goals: G[]; members: M[]; period: string; start: string }) {
+export function GoalsClient({ goals, members, period, start, canEdit = true }: { goals: G[]; members: M[]; period: string; start: string; canEdit?: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState<G | "new" | null>(null);
   async function checkIn(k: KR) {
@@ -43,7 +43,7 @@ export function GoalsClient({ goals, members, period, start }: { goals: G[]; mem
       <div className="mb-3 flex flex-wrap items-center gap-3">
         {goals.length > 0 && <p className="text-sm text-muted">Progresso médio <span className="font-semibold text-white">{avg}%</span> em {goals.length} {goals.length === 1 ? "objetivo" : "objetivos"}</p>}
         <span className="flex-1" />
-        <button className="btn-primary" onClick={() => setEditing("new")}><Plus className="h-4 w-4" />Novo objetivo</button>
+        {canEdit && <button className="btn-primary" onClick={() => setEditing("new")}><Plus className="h-4 w-4" />Novo objetivo</button>}
       </div>
       {goals.length === 0 ? (
         <Empty title="Nenhum objetivo neste período" icon={<Target className="h-5 w-5" />}>
@@ -59,8 +59,8 @@ export function GoalsClient({ goals, members, period, start }: { goals: G[]; mem
                   <p className="text-xs text-muted">{g.member ? <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: g.memberColor ?? "#94a3b8" }} aria-hidden />{g.member}</span> : "Empresa"}</p>
                 </div>
                 <span className="text-lg font-semibold tabular-nums">{g.progress}%</span>
-                <button className="btn-subtle h-8 w-8 px-0" onClick={() => setEditing(g)} aria-label={`Editar ${g.title}`}><Pencil className="h-4 w-4" /></button>
-                <button className="btn-subtle h-8 w-8 px-0" onClick={() => remove(g)} aria-label={`Excluir ${g.title}`}><Trash2 className="h-4 w-4" /></button>
+                {canEdit && <button className="btn-subtle h-8 w-8 px-0" onClick={() => setEditing(g)} aria-label={`Editar ${g.title}`}><Pencil className="h-4 w-4" /></button>}
+                {canEdit && <button className="btn-subtle h-8 w-8 px-0" onClick={() => remove(g)} aria-label={`Excluir ${g.title}`}><Trash2 className="h-4 w-4" /></button>}
               </div>
               <ul className="mt-3 space-y-3">
                 {g.keyResults.map((k) => (
@@ -68,7 +68,7 @@ export function GoalsClient({ goals, members, period, start }: { goals: G[]; mem
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate">{k.title}{k.metric !== "MANUAL" && <Zap className="ml-1 inline h-3 w-3 text-amber-300" aria-label="Medido pelas vendas" />}</span>
                       <span className="tabular-nums text-muted">{show(k.metric, k.current)} / {show(k.metric, k.target)}</span>
-                      {k.metric === "MANUAL" && <button className="btn-ghost h-7 px-2 text-xs" onClick={() => checkIn(k)}>Check-in</button>}
+                      {k.metric === "MANUAL" && canEdit && <button className="btn-ghost h-7 px-2 text-xs" onClick={() => checkIn(k)}>Check-in</button>}
                     </div>
                     <div className="mt-1 h-2 overflow-hidden rounded-full bg-panel2"><div className={`h-full rounded-full ${bar(k.progress)}`} style={{ width: `${k.progress}%` }} /></div>
                   </li>

@@ -6,6 +6,7 @@ import { nextDue, columnStatus, BASIC_COLUMNS, type Recurrence, type BoardColumn
 import { brDay } from "@/domain/brasilia";
 import { dropMemberLogin } from "./team-access";
 import { ROLE_LABEL, rolePermissions, type RoleKey } from "@/domain/permissions";
+import { statsFor } from "@/domain/commissions";
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const utc = (s: string) => new Date(`${s.slice(0, 10)}T00:00:00Z`);
@@ -339,18 +340,28 @@ export function periodStart(period: string, d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), m, 1));
 }
 
-/** Valor atual dos resultados medidos pelas vendas do período. */
+/**
+ * Valor atual dos resultados medidos pelas vendas do período: os da empresa (meta sem responsável) ou os de um
+ * membro (só as vendas que ele emitiu, a parte dele quando a venda tem vários emissores; clientes novos são da empresa).
+ */
 async function measured(userId: string, start: Date, end: Date) {
   const sales = await listSales(userId, { from: start, to: new Date(end.getTime() - 86_400_000) });
   const sold = sales.filter((s) => !s.refund);
   const customers = await prisma.customer.count({ where: { userId, createdAt: { gte: start, lt: end } } });
-  return {
+  type Values = Record<Exclude<Metric, "MANUAL">, number>;
+  const company: Values = {
     REVENUE: sales.reduce((t, s) => t + s.totalCents, 0),
     PROFIT: sales.reduce((t, s) => t + s.resultCents, 0),
     SALES: sold.length,
     MILES: sold.reduce((t, s) => t + s.points, 0),
     CUSTOMERS: customers,
-  } as Record<Exclude<Metric, "MANUAL">, number>;
+  };
+  const lite = sales.map((s) => ({ occurredAt: s.date, issuerIds: s.issuerIds, totalCents: s.totalCents, resultCents: s.resultCents, points: s.points, refunded: !!s.refund }));
+  return (memberId: string | null): Values => {
+    if (!memberId) return company;
+    const st = statsFor(lite, memberId, "INDIVIDUAL");
+    return { REVENUE: Math.round(st.revenue), PROFIT: Math.round(st.profit), SALES: Math.round(st.sales * 10) / 10, MILES: Math.round(st.miles), CUSTOMERS: customers };
+  };
 }
 
 export async function listGoals(userId: string, period: "MONTH" | "QUARTER" | "YEAR", start: Date) {
@@ -362,7 +373,7 @@ export async function listGoals(userId: string, period: "MONTH" | "QUARTER" | "Y
   const m = goals.some((g) => g.keyResults.some((k) => k.metric !== "MANUAL")) ? await measured(userId, start, periodEnd(period, start)) : null;
   return goals.map((g) => {
     const krs = g.keyResults.map((k) => {
-      const current = k.metric === "MANUAL" ? k.current : m![k.metric as Exclude<Metric, "MANUAL">] ?? 0;
+      const current = k.metric === "MANUAL" ? k.current : m!(g.memberId)[k.metric as Exclude<Metric, "MANUAL">] ?? 0;
       return { id: k.id, title: k.title, metric: k.metric as Metric, target: k.target, current, progress: k.target > 0 ? Math.min(100, Math.round((current / k.target) * 100)) : 0 };
     });
     return { id: g.id, title: g.title, period: g.period, start: day(g.start), memberId: g.memberId, member: g.member?.name ?? null, memberColor: g.member?.color ?? null, keyResults: krs, progress: krs.length ? Math.round(krs.reduce((t, k) => t + k.progress, 0) / krs.length) : 0 };

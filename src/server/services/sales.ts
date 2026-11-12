@@ -609,6 +609,13 @@ export async function setSalePartner(userId: string, saleId: string, partnerId: 
   return getSale(userId, saleId);
 }
 
+/** Venda feita por um membro da equipe (com login próprio) fica em nome dele, se ninguém foi escolhido como
+ *  emissor: entra nas metas e na comissão dele. */
+export async function creditIssuer(userId: string, saleId: string | null | undefined, memberId: string | null) {
+  if (!saleId || !memberId) return;
+  await prisma.sale.updateMany({ where: { id: saleId, userId, issuerIds: { isEmpty: true } }, data: { issuerIds: [memberId] } });
+}
+
 /** Quem emitiu a venda (membros da Equipe). Com mais de um, as métricas dividem o resultado em partes iguais. */
 export async function setSaleIssuers(userId: string, saleId: string, memberIds: string[]) {
   const sale = await prisma.sale.findFirst({ where: { id: saleId, userId }, select: { id: true } });

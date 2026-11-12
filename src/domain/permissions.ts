@@ -6,7 +6,7 @@
 export type Level = "view" | "edit";
 export type AreaKey =
   | "painel" | "milhas" | "senhas" | "vendas" | "financeiro" | "crm" | "crmMilhas" | "chat" | "buscador"
-  | "marketing" | "contatos" | "tarefas" | "equipe" | "configuracoes";
+  | "marketing" | "contatos" | "tarefas" | "metas" | "equipe" | "configuracoes";
 
 /** Uma área do sistema: o que ela cobre e se tem o nível "editar" (algumas são só de leitura). */
 export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }[] = [
@@ -21,7 +21,8 @@ export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }
   { key: "buscador", label: "Buscador de passagens", hint: "Pesquisa de voos em milhas", edit: true },
   { key: "marketing", label: "Marketing", hint: "Vitrine, site, criativos e tráfego", edit: true },
   { key: "contatos", label: "Contatos", hint: "Clientes, passageiros, fornecedores e interesses de viagem", edit: true },
-  { key: "tarefas", label: "Tarefas, metas e processos", hint: "Quadros de tarefas, metas e processos da equipe", edit: true },
+  { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e processos da equipe", edit: true },
+  { key: "metas", label: "Metas e comissões", hint: "Metas da equipe, regras de comissão, extrato e pagamentos (mostra quanto cada um ganha)", edit: true },
   { key: "equipe", label: "Equipe", hint: "Ver a equipe; editar = convidar, mudar funções e tirar acessos", edit: true },
   { key: "configuracoes", label: "Configurações", hint: "Configurações da agência e as contas do Telegram", edit: true },
 ];
@@ -45,7 +46,7 @@ export const ROLES = {
   FINANCEIRO: {
     label: "Financeiro",
     hint: "Financeiro completo; vendas, milhas e relatórios para consulta",
-    perms: ["painel:view", "financeiro:edit", "vendas:view", "milhas:view", "contatos:view", "tarefas:edit", "equipe:view"] as Permission[],
+    perms: ["painel:view", "financeiro:edit", "vendas:view", "milhas:view", "contatos:view", "tarefas:edit", "metas:edit", "equipe:view"] as Permission[],
   },
   CONTADOR: {
     label: "Contador",
@@ -107,7 +108,8 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/flight-searches", "buscador"],
   ["/api/showcase", "marketing"], ["/api/site", "marketing"], ["/api/sales-profile", "marketing"],
   ["/api/customers", "contatos"], ["/api/passengers", "contatos"], ["/api/interests", "contatos"],
-  ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"], ["/api/goals", "tarefas"], ["/api/key-results", "tarefas"],
+  ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"],
+  ["/api/goals", "metas"], ["/api/key-results", "metas"], ["/api/commissions", "metas"],
 ];
 
 /** Páginas do app (/app/...). */
@@ -123,7 +125,7 @@ const PAGE_RULES: [prefix: string, area: AreaKey | "any" | "owner"][] = [
   ["/app/buscador", "buscador"],
   ["/app/marketing", "marketing"],
   ["/app/contatos", "contatos"],
-  ["/app/equipe/", "tarefas"], ["/app/equipe", "equipe"],
+  ["/app/equipe/metas", "metas"], ["/app/equipe/", "tarefas"], ["/app/equipe", "equipe"],
   ["/app/settings", "any"], // as abas da página seguem a função (perfil e preferências pessoais são de todos)
   ["/preview/central", "marketing"],
 ];
@@ -167,7 +169,7 @@ export function homeFor(perms: readonly string[] | "ALL") {
   const order: [AreaKey, string][] = [
     ["painel", "/app"], ["crm", "/app/crm"], ["crmMilhas", "/app/crm-milhas"], ["chat", "/app/chat-balcoes"], ["vendas", "/app/sales"],
     ["milhas", "/app/programs"], ["financeiro", "/app/financeiro"], ["contatos", "/app/contatos/passageiros"], ["buscador", "/app/buscador"],
-    ["marketing", "/app/marketing/vitrine"], ["tarefas", "/app/equipe/tarefas"], ["equipe", "/app/equipe"], ["configuracoes", "/app/settings"],
+    ["marketing", "/app/marketing/vitrine"], ["tarefas", "/app/equipe/tarefas"], ["metas", "/app/equipe/metas"], ["equipe", "/app/equipe"], ["configuracoes", "/app/settings"],
   ];
   return order.find(([a]) => can(perms, a))?.[1] ?? "/app/sem-acesso";
 }
