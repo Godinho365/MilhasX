@@ -150,8 +150,10 @@ export const transferSchema = z.object({
 });
 const iata = z.string().trim().regex(/^[A-Z]{3}$/, "Aeroporto inválido").optional().nullable().or(z.literal("").transform(() => null));
 const optDay = dateStr.optional().nullable().or(z.literal("").transform(() => null));
+const optTime = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Horário inválido").optional().nullable().or(z.literal("").transform(() => null));
+const optProvider = z.string().trim().max(80).optional().nullable().or(z.literal("").transform(() => null));
 export const saleItemSchema = z.object({
-  kind: z.enum(["FLIGHT", "BAGGAGE", "SEAT", "HOTEL", "CAR", "OTHER"]),
+  kind: z.enum(["FLIGHT", "BAGGAGE", "SEAT", "HOTEL", "CAR", "TRANSFER", "CRUISE", "INSURANCE", "OTHER"]),
   issuedWith: z.enum(["POINTS", "CASH"]).default("POINTS"),
   points: z.number().int().min(0).max(1_000_000_000).default(0),
   salePriceCents: cents,
@@ -165,8 +167,25 @@ export const saleItemSchema = z.object({
   destination: iata,
   departureDate: optDay,
   returnDate: optDay,
+  departureTime: optTime,
+  returnTime: optTime,
+  provider: optProvider,
   description: z.string().trim().max(200).optional().nullable(),
   observation: z.string().trim().max(2000).optional().nullable(),
+});
+/** Acompanhamentos: marcar o trecho (check-in feito, confirmado) e completar companhia e horários sem abrir a venda. */
+export const trackingPatchSchema = z.object({
+  doneOut: z.boolean().optional(),
+  doneRet: z.boolean().optional(),
+  provider: optProvider,
+  departureTime: optTime,
+  returnTime: optTime,
+}).refine((b) => Object.keys(b).length > 0, "Nada para alterar");
+export const trackingQuerySchema = z.object({
+  tipo: z.enum(["voos", "hospedagens", "transportes", "cruzeiros", "seguros", "adicionais"]).default("voos"),
+  periodo: z.enum(["proximos", "7", "30", "todos", "custom"]).default("proximos"),
+  de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida").optional(),
+  ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida").optional(),
 });
 export const saleSchema = z.object({
   origin: z.enum(["OWN", "SUPPLIER"]).default("OWN"),

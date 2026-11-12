@@ -9,6 +9,8 @@ import { prisma, DomainError, audit } from "../db";
 import { sha256 } from "../auth";
 import { can, type Permission } from "@/domain/permissions";
 import { brDay } from "@/domain/brasilia";
+import { placeName } from "@/domain/geo";
+import { SALE_ITEM_LABELS, isSaleItemKind } from "@/domain/sale-items";
 import {
   EVENT_KINDS, MANUAL_KINDS, CHECKIN_DAYS_BEFORE, addDays, birthdays, byStart, dayOf, diffDays, isDay, isTime, occurrences, parseIcs, toIcs,
   type CalEvent, type EventKind, type Recurrence,
@@ -56,16 +58,17 @@ async function manualEvents(userId: string, r: Range): Promise<CalEvent[]> {
 
 const route = (o: string | null, d: string | null) => `${o?.trim() || "?"} → ${d?.trim() || "?"}`;
 
-/** Embarque, volta e check-in dos voos; hospedagem, carro e passeios (das vendas não reembolsadas). */
+/** Embarque, volta e check-in dos voos; hospedagem, carro, transfer, cruzeiro e passeios (das vendas não reembolsadas). */
 async function saleEvents(userId: string, r: Range): Promise<CalEvent[]> {
   const from = utc(r.from), toCheckin = utc(addDays(r.to, CHECKIN_DAYS_BEFORE));
   const items = await prisma.saleItem.findMany({
     where: {
-      sale: { userId, refundedAt: null }, kind: { in: ["FLIGHT", "HOTEL", "CAR", "OTHER"] }, departureDate: { lte: toCheckin },
+      sale: { userId, refundedAt: null }, kind: { in: ["FLIGHT", "HOTEL", "CAR", "TRANSFER", "CRUISE", "OTHER"] }, departureDate: { lte: toCheckin },
       OR: [{ departureDate: { gte: from } }, { returnDate: { gte: from } }],
     },
     select: {
       id: true, kind: true, origin: true, destination: true, departureDate: true, returnDate: true, reservation: true, description: true, passengers: true,
+      departureTime: true, returnTime: true, provider: true, doneOutAt: true, doneRetAt: true,
       customers: { select: { id: true, name: true } }, sale: { select: { id: true, issuerIds: true, customer: { select: { id: true, name: true } } } },
     },
   });
@@ -76,19 +79,26 @@ async function saleEvents(userId: string, r: Range): Promise<CalEvent[]> {
     const people = i.customers.length ? i.customers.map((c) => c.name).join(", ") : i.sale.customer?.name ?? null;
     const customer = i.customers[0] ?? i.sale.customer ?? null;
     const common = { source: "SALE" as const, href: `/app/sales?edit=${encodeURIComponent(i.sale.id)}`, memberIds: i.sale.issuerIds, customer };
-    const detail = [people, i.reservation ? `Localizador ${i.reservation}` : null].filter(Boolean).join(" · ") || null;
+    const detail = [people, i.provider, i.reservation ? `Localizador ${i.reservation}` : null].filter(Boolean).join(" · ") || null;
     if (i.kind === "FLIGHT") {
-      const legs: [string, string, string][] = [[dep, "Embarque", route(i.origin, i.destination)]];
-      if (ret) legs.push([ret, "Volta", route(i.destination, i.origin)]);
-      for (const [d, label, path] of legs) {
+      const legs: [string, "Embarque" | "Volta", string, string | null, boolean][] = [[dep, "Embarque", route(i.origin, i.destination), i.departureTime, !!i.doneOutAt]];
+      if (ret) legs.push([ret, "Volta", route(i.destination, i.origin), i.returnTime, !!i.doneRetAt]);
+      for (const [d, label, path, time, checked] of legs) {
         const tag = label === "Volta" ? "ret" : "dep";
-        out.push(base({ ...common, id: `sale:${i.id}:${tag}`, kind: "BOARDING", title: `${label} · ${path}`, date: d, detail }));
-        out.push(base({ ...common, id: `sale:${i.id}:${tag}-checkin`, kind: "CHECKIN", title: `Check-in · ${path}`, date: addDays(d, -CHECKIN_DAYS_BEFORE), detail: `Embarque em ${d.slice(8, 10)}/${d.slice(5, 7)}${detail ? ` · ${detail}` : ""}` }));
+        out.push(base({ ...common, id: `sale:${i.id}:${tag}`, kind: "BOARDING", title: `${label} · ${path}`, date: d, time: isTime(time) ? time : null, detail }));
+        out.push(base({
+          ...common, id: `sale:${i.id}:${tag}-checkin`, kind: "CHECKIN", title: `Check-in · ${path}`, date: addDays(d, -CHECKIN_DAYS_BEFORE), done: checked,
+          detail: `${checked ? "Feito · " : ""}Embarque em ${d.slice(8, 10)}/${d.slice(5, 7)}${time ? ` às ${time}` : ""}${detail ? ` · ${detail}` : ""}`,
+        }));
       }
     } else {
       const kind: EventKind = i.kind === "HOTEL" ? "HOTEL" : i.kind === "CAR" ? "CAR" : "TOUR";
-      const what = i.description?.trim() || i.destination?.trim() || EVENT_KINDS[kind].label;
-      out.push(base({ ...common, id: `sale:${i.id}`, kind, title: `${EVENT_KINDS[kind].label} · ${what}`, date: dep, endDate: ret && ret > dep ? ret : null, detail }));
+      const label = i.kind === "TRANSFER" || i.kind === "CRUISE" ? SALE_ITEM_LABELS[i.kind] : EVENT_KINDS[kind].label;
+      const what = i.description?.trim() || i.provider?.trim() || placeName(i.destination?.trim()) || (isSaleItemKind(i.kind) ? SALE_ITEM_LABELS[i.kind] : label);
+      out.push(base({
+        ...common, id: `sale:${i.id}`, kind, title: `${label} · ${what}`, date: dep, endDate: ret && ret > dep ? ret : null,
+        time: isTime(i.departureTime) ? i.departureTime : null, endTime: ret && isTime(i.returnTime) ? i.returnTime : null, detail,
+      }));
     }
   }
   return out;

@@ -111,7 +111,7 @@ export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-muted">O push só é entregue quando o app estiver instalado no celular com notificações permitidas.</p>
+        <p className="mt-3 text-xs text-muted">Avisos de segurança (código de verificação, senha alterada, conta Google conectada) sempre vão por e-mail. O push só é entregue quando o app estiver instalado no celular com notificações permitidas.</p>
       </Section>
 
       <Section title="Segurança">

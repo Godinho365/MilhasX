@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { signupReferral } from "./services/settings";
 import { createHash, randomBytes } from "node:crypto";
 import { prisma, DomainError, audit, log } from "./db";
+import { notifyGoogleLinked, notifyPasswordChanged, notifyWelcome } from "./emails/notify";
 
 export const SESSION_COOKIE = "mm_session";
 const SESSION_DAYS = 30;
@@ -40,6 +41,7 @@ export async function registerUser(input: { name: string; email: string; passwor
     },
   });
   await audit(prisma, user.id, "user.register", "User", user.id);
+  notifyWelcome(user);
   return user;
 }
 
@@ -64,6 +66,7 @@ export async function loginWithGoogle(p: GoogleProfile, opts: { ref?: string; al
     if (!user.googleId) {
       user = await prisma.user.update({ where: { id: user.id }, data: { googleId: p.sub } });
       await audit(prisma, user.id, "user.google_linked", "User", user.id);
+      notifyGoogleLinked(user);
     }
   } else {
     if (!opts.allowCreate) throw new DomainError(403, "Cadastro temporariamente fechado");
@@ -80,6 +83,7 @@ export async function loginWithGoogle(p: GoogleProfile, opts: { ref?: string; al
       },
     });
     await audit(prisma, user.id, "user.register", "User", user.id, { via: "google" });
+    notifyWelcome(user);
   }
   return { user, ...(await createSession(user.id)) };
 }
@@ -145,17 +149,19 @@ export async function resetPassword(token: string, newPassword: string) {
   validatePassword(newPassword);
   const rec = await prisma.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) } });
   if (!rec || rec.usedAt || rec.expiresAt < new Date()) throw new DomainError(400, "Link inválido ou expirado");
-  await prisma.$transaction(async (tx) => {
+  const user = await prisma.$transaction(async (tx) => {
     // updateMany com usedAt null evita uso duplo concorrente do mesmo token
     const used = await tx.passwordResetToken.updateMany({
       where: { id: rec.id, usedAt: null },
       data: { usedAt: new Date() },
     });
     if (used.count !== 1) throw new DomainError(400, "Link inválido ou expirado");
-    await tx.user.update({ where: { id: rec.userId }, data: { passwordHash: await hashPassword(newPassword) } });
+    const u = await tx.user.update({ where: { id: rec.userId }, data: { passwordHash: await hashPassword(newPassword) }, select: { email: true, name: true } });
     await tx.session.deleteMany({ where: { userId: rec.userId } });
     await audit(tx, rec.userId, "user.password_reset", "User", rec.userId);
+    return u;
   });
+  notifyPasswordChanged(user, true);
 }
 
 export async function changePassword(userId: string, current: string, next: string) {
@@ -164,4 +170,5 @@ export async function changePassword(userId: string, current: string, next: stri
   if (!(await verifyPassword(current, user.passwordHash))) throw new DomainError(400, "Senha atual incorreta");
   await prisma.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(next) } });
   await audit(prisma, userId, "user.password_changed", "User", userId);
+  notifyPasswordChanged(user, false);
 }

@@ -6,7 +6,9 @@
 import { randomBytes } from "node:crypto";
 import { prisma, DomainError, audit } from "../db";
 import { sha256, hashPassword, validatePassword, createSession } from "../auth";
-import { sendMail } from "../mailer";
+import { sendEmail } from "../mailer";
+import { brandFromEnv } from "../emails/layout";
+import { teamInviteEmail } from "../emails/templates";
 import { rolePermissions, ROLES, ROLE_LABEL, type RoleKey } from "@/domain/permissions";
 
 /** Quantos membros com acesso (login ou convite pendente) uma conta pode ter. */
@@ -58,7 +60,7 @@ export async function inviteMember(ownerId: string, memberId: string, input: Acc
   await prisma.teamMember.update({ where: { id: m.id }, data: { email, ...access, inviteTokenHash: sha256(token), inviteExpiresAt: expiresAt, invitedAt: new Date() } });
   await audit(prisma, ctx.actorId, "team.invite", "TeamMember", m.id, { workspace: ownerId, role: access.accessRole });
   const link = inviteLink(ctx.appUrl, token);
-  await sendMail(email, `Convite para a equipe ${ctx.agencyName}`, `Olá, ${m.name}!\n\nVocê foi convidado para entrar na equipe ${ctx.agencyName} no MilhasX como ${ROLE_LABEL[access.accessRole as RoleKey]}.\nCrie sua senha por este link (vale ${INVITE_DAYS} dias):\n\n${link}\n`).catch(() => {});
+  await sendEmail(email, teamInviteEmail({ appName: brandFromEnv().appName, name: m.name, agencyName: ctx.agencyName, roleLabel: ROLE_LABEL[access.accessRole as RoleKey], link, days: INVITE_DAYS })).catch(() => {});
   return { link, expiresAt: expiresAt.toISOString() };
 }
 

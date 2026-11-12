@@ -20,7 +20,8 @@
     "db:restore": "node scripts/restore.mjs",
     "test:e2e": "playwright test",
     "start:next": "next start -p 3100",
-    "mail:test": "tsx scripts/test-email.ts"
+    "mail:test": "tsx scripts/test-email.ts",
+    "mail:preview": "tsx scripts/email-preview.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

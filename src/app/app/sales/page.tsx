@@ -35,7 +35,8 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
     // contas do Financeiro em que o pagamento do cliente pode entrar (a primeira é a padrão)
     prisma.finAccount.findMany({ where: { userId: user.id, archived: false }, select: { id: true, name: true }, orderBy: { createdAt: "asc" } }),
   ]);
-  const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, groupId: sp.edit }, select: { id: true } }) : null;
+  // ?edit= abre a venda: pelo id (calendário, acompanhamentos) ou pelo grupo (CRM Milhas)
+  const toEdit = sp.edit ? await prisma.sale.findFirst({ where: { userId: user.id, OR: [{ id: sp.edit }, { groupId: sp.edit }] }, select: { id: true } }) : null;
   const editSale = toEdit ? await getSale(user.id, toEdit.id) : null;
   const total = sales.reduce((s, x) => s + x.totalCents, 0);
   const result = sales.reduce((s, x) => s + x.resultCents, 0);

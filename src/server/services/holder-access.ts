@@ -1,6 +1,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { prisma, DomainError, audit, log } from "../db";
-import { sendMail } from "../mailer";
+import { sendEmail } from "../mailer";
+import { holderAccessEmail } from "../emails/templates";
 import { assertFeature } from "./plan-limits";
 import { ENTRY_LABELS } from "@/domain/ledger";
 
@@ -32,11 +33,7 @@ export async function sendHolderAccess(userId: string, holderId: string, appName
     await tx.holderAccess.create({ data: { holderId, email: holder.accessEmail!, tokenHash: sha(t), expiresAt: new Date(Date.now() + LINK_HOURS * 3600_000) } });
     await audit(tx, userId, "holder.access_sent", "Holder", holderId);
   });
-  await sendMail(
-    holder.accessEmail,
-    `Seus pontos no ${appName}`,
-    `Olá, ${holder.name.split(" ")[0]}!\n\nVocê recebeu acesso para acompanhar os saldos das suas contas de pontos.\nAbra o link abaixo (vale por ${LINK_HOURS} horas e só pode ser usado uma vez):\n${new URL(base).origin}/api/holder-access/${t}\n\nSe você não esperava este e-mail, pode ignorá-lo.`,
-  );
+  await sendEmail(holder.accessEmail, holderAccessEmail({ appName, name: holder.name, link: `${new URL(base).origin}/api/holder-access/${t}`, hours: LINK_HOURS }));
   return { email: holder.accessEmail };
 }
 

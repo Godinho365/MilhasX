@@ -1,7 +1,10 @@
 // Testa o envio de e-mail pelo SMTP configurado no .env.
-// Uso: npm run mail:test -- destino@exemplo.com
+// Uso: npm run mail:test -- destino@exemplo.com          (uma mensagem de teste)
+//      npm run mail:test -- destino@exemplo.com todos    (um exemplo de cada modelo de e-mail)
 import { existsSync } from "node:fs";
-import { sendMail, verifySmtp } from "../src/server/mailer";
+import { sendEmail, sendMail, verifySmtp } from "../src/server/mailer";
+import { brandFromEnv } from "../src/server/emails/layout";
+import { sampleEmails } from "../src/server/emails/samples";
 
 async function main() {
   if (existsSync(".env") && !process.env.SMTP_HOST) process.loadEnvFile(".env");
@@ -12,6 +15,12 @@ async function main() {
   }
   const smtp = await verifySmtp();
   console.log(`Login no SMTP ${smtp.host}:${smtp.port} como ${smtp.user}: ok`);
+  if (process.argv[3] === "todos") {
+    let n = 0;
+    for (const c of sampleEmails(brandFromEnv())) if (await sendEmail(to, { ...c, subject: `[Exemplo] ${c.subject}` })) n++;
+    console.log(`${n} exemplos enviados para ${to}`);
+    process.exit(0);
+  }
   const ok = await sendMail(to, "Teste de e-mail", "Este é um e-mail de teste do envio pelo SMTP.\n\nSe você recebeu, o envio está funcionando.");
   console.log(ok ? `E-mail de teste enviado para ${to}` : "Falha no envio (veja o log acima)");
   process.exit(ok ? 0 : 1);
