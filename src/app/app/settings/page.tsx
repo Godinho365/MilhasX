@@ -7,6 +7,7 @@ import { GeneralTab, ProfileTab } from "./client";
 import { BillingTab, ReferralsTab, SalesProfileTab } from "./tabs";
 import { TelegramTab } from "./telegram";
 import { telegramStatus } from "@/server/services/telegram";
+import { siteStatus } from "@/server/services/site";
 import { can, type AreaKey } from "@/domain/permissions";
 import { pushPublicKey } from "@/server/push";
 
@@ -58,7 +59,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         {tab === "profile" && <ProfileTab name={me.name} email={me.email} avatarVersion={me.avatarUpdatedAt?.getTime().toString() ?? null} deletionRequestedAt={me.isOwner ? user.deletionRequestedAt?.toISOString() ?? null : null} canDelete={me.isOwner} />}
         {tab === "billing" && <BillingTab state={await billingState(user.id)} checkout={checkout} />}
         {tab === "referrals" && <ReferralsTab state={await referralState(user.id)} />}
-        {tab === "sales-profile" && <SalesProfileTab profile={await getSalesProfile(user.id)} defaultName={user.name} brand={publicBrand()} />}
+        {tab === "sales-profile" && <SalesProfileTab profile={await getSalesProfile(user.id)} site={await siteStatus(user.id)} defaultName={user.name} brand={publicBrand()} />}
         {tab === "telegram" && <TelegramTab initial={await telegramStatus(user.id)} />}
       </div>
     </>
