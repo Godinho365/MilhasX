@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Alert, Field } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
+import { AuthTitle } from "../parts";
 
 export default function ForgotPage() {
   const ready = useHydrated();
@@ -21,7 +22,7 @@ export default function ForgotPage() {
   }
   return (
     <form onSubmit={submit} method="post" className="space-y-4">
-      <h1 className="text-lg font-semibold">Recuperar senha</h1>
+      <AuthTitle title="Recuperar senha" subtitle="Enviaremos um link para criar uma nova senha" />
       {msg && <Alert kind="ok">{msg}</Alert>}
       {erro && <Alert>{erro}</Alert>}
       <Field label="E-mail"><input className="input" name="email" type="email" required /></Field>

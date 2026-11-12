@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { Alert, Field } from "@/components/ui";
+import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
+import { AuthTitle, GoogleButton, OrDivider } from "../parts";
 
-export function LoginForm() {
+export function LoginForm({ google, initialError }: { google: boolean; initialError: string }) {
   const ready = useHydrated();
-  const [erro, setErro] = useState("");
+  const [erro, setErro] = useState(initialError);
   const [busy, setBusy] = useState(false);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -20,16 +21,38 @@ export function LoginForm() {
     window.location.href = "/app";
   }
   return (
-    <form onSubmit={submit} method="post" className="space-y-4">
-      <h1 className="text-lg font-semibold">Entrar</h1>
-      {erro && <Alert>{erro}</Alert>}
-      <Field label="E-mail"><input className="input" name="email" type="email" autoComplete="email" required /></Field>
-      <Field label="Senha"><input className="input" name="password" type="password" autoComplete="current-password" required /></Field>
-      <button className="btn-primary w-full" disabled={busy || !ready}>{busy ? "Entrando…" : "Entrar"}</button>
-      <div className="flex justify-between text-sm text-muted">
-        <Link href="/forgot-password" className="hover:text-white">Esqueci a senha</Link>
-        <Link href="/register" className="hover:text-white">Criar conta</Link>
-      </div>
-    </form>
+    <div>
+      <AuthTitle title="Entrar" subtitle="Faça login na sua conta" />
+      <form onSubmit={submit} method="post" className="space-y-4">
+        {erro && <Alert>{erro}</Alert>}
+        <label className="block">
+          <span className="label">E-mail</span>
+          <input className="input" name="email" type="email" autoComplete="email" placeholder="Digite seu e-mail" required />
+        </label>
+        <div>
+          <label className="block">
+            <span className="label">Senha</span>
+            <input className="input" name="password" type="password" autoComplete="current-password" placeholder="Digite sua senha" required />
+          </label>
+          <div className="mt-2 text-right text-sm">
+            <Link href="/forgot-password" className="text-muted hover:text-accent-light">Esqueceu sua senha?</Link>
+          </div>
+        </div>
+        <button className="btn-primary h-10 w-full" disabled={busy || !ready}>{busy ? "Entrando…" : "Entrar com e-mail"}</button>
+      </form>
+      {google && (
+        <div className="mt-4 space-y-4">
+          <OrDivider />
+          <GoogleButton label="Continuar com Google" disabled={!ready} onClick={() => (window.location.href = "/api/auth/google?mode=signin")} />
+          <p className="text-center text-xs text-muted">
+            Ao continuar com Google, você concorda com os <Link href="/termos" target="_blank" className="underline hover:text-accent-light">Termos de Serviço</Link> e a{" "}
+            <Link href="/privacidade" target="_blank" className="underline hover:text-accent-light">Política de Privacidade</Link>.
+          </p>
+        </div>
+      )}
+      <p className="mt-5 text-center text-sm text-muted">
+        Ainda não tem uma conta? <Link href="/register" className="font-medium text-accent-light underline-offset-2 hover:underline">Cadastre-se</Link>
+      </p>
+    </div>
   );
 }

@@ -21,6 +21,16 @@ export const registerSchema = z.object({
   email: z.string().trim().email("E-mail inválido").max(200),
   password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres").max(128),
   ref: z.string().trim().max(20).optional(),
+  // Telefone com DDD (só os dígitos são guardados; aceita +55 na frente)
+  phone: z
+    .string()
+    .trim()
+    .max(30)
+    .transform((v) => v.replace(/\D/g, ""))
+    .refine((v) => v === "" || (v.length >= 10 && v.length <= 13), "Telefone inválido: informe DDD e número")
+    .optional(),
+  acceptTerms: z.boolean().optional(),
+  captcha: z.string().max(4096).optional(),
 });
 export const loginSchema = z.object({ email: z.string().trim().min(1).max(200), password: z.string().min(1).max(128) });
 export const forgotSchema = z.object({ email: z.string().trim().email("E-mail inválido").max(200) });
