@@ -200,6 +200,10 @@ export function cardBills(charges: Tx[], today: string, edits = new Map<string, 
     .sort((a, b) => a.effectiveDue.localeCompare(b.effectiveDue));
 }
 
+/** O que falta pagar da fatura sem a parte dos gastos pessoais (no cartão com os outros gastos pessoais). */
+export const billBusinessOpen = (b: Bill) =>
+  b.personal && b.adjustCents > 0 && b.totalCents > 0 ? b.openCents - Math.round((b.openCents * b.adjustCents) / b.totalCents) : b.openCents;
+
 /** Divide um valor na proporção dos pesos; o último fica com o arredondamento. */
 function splitByWeights<K>(cents: number, weights: { key: K; w: number }[]): { key: K; cents: number }[] {
   const total = weights.reduce((t, x) => t + x.w, 0);

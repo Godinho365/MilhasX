@@ -18,7 +18,7 @@ import * as billEdit from "@/app/api/finance/card-bills/edit/route";
 import * as billPayments from "@/app/api/finance/card-bills/payments/route";
 import * as billPayment from "@/app/api/finance/card-bills/payments/[id]/route";
 import * as billItems from "@/app/api/finance/card-bills/items/route";
-import { accountBalance, billAdjustTxs, billCashTxs, billKey, cardBills, cardDueDay, cashflow, periodTotals, purchaseTxs, saleTxs, categoryOptions, type Tx } from "@/domain/finance";
+import { accountBalance, billAdjustTxs, billBusinessOpen, billCashTxs, billKey, cardBills, cardDueDay, cashflow, periodTotals, purchaseTxs, saleTxs, categoryOptions, type Tx } from "@/domain/finance";
 import { financeCashflow, financeOverview, listFinAccounts } from "@/server/services/finance";
 import { prisma } from "@/server/db";
 import { brDay } from "@/domain/brasilia";
@@ -144,6 +144,8 @@ describe("contas do financeiro (domínio)", () => {
     expect(mineCash.filter((t) => t.paidAt).map((t) => [t.source, t.amountCents])).toEqual([["purchases", 3_333], ["saleCosts", 666]]);
     expect(mineCash.filter((t) => !t.paidAt).reduce((s, t) => s + t.amountCents, 0)).toBe(7_999); // 80% de 10.000 (o arredondamento fica com a parte pessoal)
     expect(billAdjustTxs([mine[0]!])).toEqual([]);
+    expect(billBusinessOpen(mine[0]!)).toBe(8_000); // contas a pagar: só a parte do negócio
+    expect(billBusinessOpen(bills[0]!)).toBe(10_000);
     // estorno continua entrando, mesmo no cartão pessoal
     expect(billAdjustTxs(cardBills(charges.slice(0, 1), today, new Map([[k, { realCents: 9_000, dueOverride: null }]]), undefined, new Set(["c1"])))).toMatchObject([{ type: "INCOME", amountCents: 1_000 }]);
   });
