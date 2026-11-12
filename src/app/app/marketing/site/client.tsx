@@ -113,7 +113,16 @@ function ThemeGallery({ current, onPick, onClose }: { current: string | null; on
 
 // ---------------- Campos ----------------
 
-function ImageField({ label, id, onChange }: { label: string; id: string | null; onChange: (id: string | null) => void }) {
+/** Sugestões de tamanho de cada foto do site (como o tema mostra). */
+const PHOTO_HINTS = {
+  capa: "Sugestão: foto horizontal de 1920 × 1080 px (16:9), JPG ou WebP, até 3 MB. Deixe o principal no centro: no celular as laterais são cortadas, e o título fica por cima da foto.",
+  foto: "Sugestão: 1200 × 900 px (4:3), JPG ou WebP, até 3 MB.",
+  galeria: "Sugestão: fotos de 1200 × 900 px (4:3), JPG ou WebP, até 3 MB cada (até 8).",
+  logo: "Sugestão: PNG com fundo transparente, uns 600 × 200 px. No topo ela aparece com 40 px de altura.",
+  icone: "Sugestão: imagem quadrada de 512 × 512 px, PNG (de preferência com fundo transparente). Aparece na aba do navegador e quando alguém salva o site na tela do celular. Sem ícone, fica o padrão.",
+} as const;
+
+function ImageField({ label, id, onChange, hint, square }: { label: string; id: string | null; onChange: (id: string | null) => void; hint?: string; square?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   async function upload(f: File | undefined) {
@@ -129,11 +138,12 @@ function ImageField({ label, id, onChange }: { label: string; id: string | null;
     <div>
       <p className="label">{label}</p>
       <div className="flex items-center gap-2">
-        <div className="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-line bg-panel2">{id && <img src={ownImg(id)} alt="" className="h-full w-full object-cover" />}</div>
+        <div className={`${square ? "h-14 w-14" : "h-14 w-20"} shrink-0 overflow-hidden rounded-lg border border-line bg-panel2`}>{id && <img src={ownImg(id)} alt="" className={`h-full w-full ${square ? "object-contain p-1" : "object-cover"}`} />}</div>
         <button type="button" className="btn-ghost h-9 border border-line text-xs" disabled={busy} onClick={() => ref.current?.click()}><ImagePlus className="h-4 w-4" />{busy ? "Enviando…" : id ? "Trocar" : "Enviar foto"}</button>
         {id && <button type="button" className="btn-subtle h-9 w-9 px-0" onClick={() => onChange(null)} aria-label="Tirar foto"><Trash2 className="h-4 w-4" /></button>}
-        <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} />
+        <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} aria-label={label} />
       </div>
+      {hint && <p className="mt-1.5 text-xs text-muted">{hint}</p>}
     </div>
   );
 }
@@ -166,7 +176,7 @@ function SectionFields({ s, onChange }: { s: Section; onChange: (s: Section) => 
       : <input className="input h-9 text-sm" value={(s as Record<string, unknown>)[k] as string} onChange={(e) => set({ [k]: e.target.value } as Partial<Section>)} />}</Field>
   );
   switch (s.type) {
-    case "hero": return <div className="space-y-3">{text("eyebrow", "Linha de cima (opcional)")}{text("title", "Título: a promessa principal")}{text("text", "Frase de apoio", true)}{text("button", "Botão principal (leva ao pedido de cotação)")}{text("button2", "Botão do WhatsApp (vazio: sem botão)")}{text("note", "Frase de garantia embaixo dos botões")}<ImageField label="Foto da capa" id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
+    case "hero": return <div className="space-y-3">{text("eyebrow", "Linha de cima (opcional)")}{text("title", "Título: a promessa principal")}{text("text", "Frase de apoio", true)}{text("button", "Botão principal (leva ao pedido de cotação)")}{text("button2", "Botão do WhatsApp (vazio: sem botão)")}{text("note", "Frase de garantia embaixo dos botões")}<ImageField label="Foto da capa" hint={PHOTO_HINTS.capa} id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
     case "selos": return <div className="space-y-3"><p className="text-xs text-muted">Cadastur, CNPJ e tempo de resposta da aba Marca entram sozinhos aqui. Abaixo, garantias extras.</p><ListField items={s.items} max={6} blank={{ title: "", text: "" }} fields={[{ key: "title", label: "Selo (ex.: Atendimento humano)" }, { key: "text", label: "Detalhe" }]} onChange={(items) => set({ items })} addLabel="Adicionar selo" /></div>;
     case "cotacao": return <div className="space-y-3">{text("title", "Título")}{text("text", "Frase de apoio", true)}{text("button", "Texto do botão de enviar")}<p className="text-xs text-muted">Cada envio vira um pedido em CRM Passagens, com origem “Página pública”, e você recebe uma notificação.</p></div>;
     case "milhas": return <div className="space-y-3">{text("title", "Título")}{text("text", "Frase de apoio", true)}{text("button", "Texto do botão de enviar")}<p className="text-xs text-muted">Cada envio vira um interessado em CRM › Lista › Interessados.</p></div>;
@@ -175,11 +185,11 @@ function SectionFields({ s, onChange }: { s: Section; onChange: (s: Section) => 
     case "diferenciais":
     case "passos": return <div className="space-y-3">{text("title", "Título")}<ListField items={s.items} max={s.type === "passos" ? 5 : 6} blank={{ title: "", text: "" }} fields={[{ key: "title", label: "Título do item" }, { key: "text", label: "Texto", area: true }]} onChange={(items) => set({ items })} addLabel="Adicionar item" /></div>;
     case "depoimentos": return <div className="space-y-3">{text("title", "Título")}<ListField items={s.items} max={6} blank={{ text: "", author: "", place: "" }} fields={[{ key: "text", label: "Depoimento", area: true }, { key: "author", label: "Nome" }, { key: "place", label: "Cidade ou viagem" }]} onChange={(items) => set({ items })} addLabel="Adicionar depoimento" /><p className="text-xs text-muted">Use só depoimentos reais, com autorização do cliente.</p></div>;
-    case "texto": return <div className="space-y-3">{text("title", "Título")}{text("text", "Texto (deixe uma linha em branco entre parágrafos)", true)}<ImageField label="Foto" id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
+    case "texto": return <div className="space-y-3">{text("title", "Título")}{text("text", "Texto (deixe uma linha em branco entre parágrafos)", true)}<ImageField label="Foto" hint={PHOTO_HINTS.foto} id={s.imageId} onChange={(imageId) => set({ imageId })} /></div>;
     case "galeria": return (
       <div className="space-y-3">{text("title", "Título")}
         <div className="grid grid-cols-3 gap-2">{s.imageIds.map((id, i) => <div key={id} className="relative h-16 overflow-hidden rounded-lg border border-line"><img src={ownImg(id)} alt="" className="h-full w-full object-cover" /><button type="button" className="absolute right-1 top-1 rounded bg-black/60 p-0.5" style={{ color: "#fff" }} onClick={() => set({ imageIds: s.imageIds.filter((_, j) => j !== i) })} aria-label="Tirar foto"><X className="h-3 w-3" /></button></div>)}</div>
-        {s.imageIds.length < 8 && <ImageField label="Adicionar foto" id={null} onChange={(id) => id && set({ imageIds: [...s.imageIds, id] })} />}
+        {s.imageIds.length < 8 && <ImageField label="Adicionar foto" hint={PHOTO_HINTS.galeria} id={null} onChange={(id) => id && set({ imageIds: [...s.imageIds, id] })} />}
       </div>
     );
     case "faq": return <div className="space-y-3">{text("title", "Título")}<ListField items={s.items} max={8} blank={{ q: "", a: "" }} fields={[{ key: "q", label: "Pergunta" }, { key: "a", label: "Resposta", area: true }]} onChange={(items) => set({ items })} addLabel="Adicionar pergunta" /></div>;
@@ -278,7 +288,8 @@ export function SiteBuilder({ initial, packages, onLook }: { initial: Site; pack
               {initial.slug && <Field label="Endereço do site"><span className="flex gap-2"><input className="input font-mono text-xs" readOnly value={`${typeof window === "undefined" ? "" : window.location.origin}/s/${initial.slug}`} /><button type="button" className="btn-ghost h-10 border border-line" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/s/${initial.slug}`).then(() => toast("Endereço copiado"))} aria-label="Copiar endereço"><Copy className="h-4 w-4" /></button></span></Field>}
               <Field label="Nome da agência (opcional)" hint="Aparece no topo e no rodapé. Vazio: só a logo, se houver"><input className="input h-9 text-sm" value={b.name} onChange={(e) => setBrand({ name: e.target.value })} maxLength={60} /></Field>
               <Field label="Frase curta (opcional)"><input className="input h-9 text-sm" value={b.tagline} onChange={(e) => setBrand({ tagline: e.target.value })} maxLength={100} placeholder="Viagens planejadas do seu jeito" /></Field>
-              <ImageField label="Logo (opcional)" id={b.logoId} onChange={(logoId) => setBrand({ logoId })} />
+              <ImageField label="Logo (opcional)" hint={PHOTO_HINTS.logo} id={b.logoId} onChange={(logoId) => setBrand({ logoId })} />
+              <ImageField label="Ícone do site (opcional)" hint={PHOTO_HINTS.icone} square id={b.iconId} onChange={(iconId) => setBrand({ iconId })} />
               <div className="space-y-2" role="group" aria-label="Contato e redes sociais">
                 <p className="label">Contato e redes</p>
                 {([

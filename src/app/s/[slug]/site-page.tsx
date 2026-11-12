@@ -13,7 +13,9 @@ export async function siteMetadata(slug: string, page: SitePage) {
   const title = page === "inicio" ? `${name}${b.tagline ? ` · ${b.tagline}` : ""}` : `${PAGE_LABELS[page]} · ${name}`;
   const hero = s.content.pages[page].sections.find((x) => x.type === "hero" && x.on);
   const description = hero && hero.type === "hero" ? hero.text || hero.title : b.tagline;
-  return { title, description, openGraph: { title, description, type: "website" } };
+  // ícone do site (favicon e atalho na tela do celular); sem ele, fica o padrão do app
+  const icon = b.iconId ? `/api/public/site/${encodeURIComponent(s.slug)}/image/${encodeURIComponent(b.iconId)}` : null;
+  return { title, description, openGraph: { title, description, type: "website" }, ...(icon ? { icons: { icon: [{ url: icon }], apple: [{ url: icon }] } } : {}) };
 }
 
 export async function SitePageView({ slug, page }: { slug: string; page: string }) {
