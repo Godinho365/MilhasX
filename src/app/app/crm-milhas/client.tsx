@@ -769,10 +769,10 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
           {!fc.url ? (
             <div className="space-y-2">
               <label className="block text-xs">
-                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app)</span>
+                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app ou id.unico.io)</span>
                 <input className="input h-9 text-sm" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://cadastro.unico.app/flow/intro?collect-data=true&id=…" aria-label="Link da validação facial" />
               </label>
-              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser do cadastro.unico.app e ter o id.</p>)}
+              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser da Unico (cadastro.unico.app ou id.unico.io) e ter o id.</p>)}
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={generateAndSend} title="Gera o link e abre o WhatsApp do titular com a mensagem pronta"><Send className="h-3.5 w-3.5" />Gerar e enviar ao titular</button>
                 <button type="button" className="btn-ghost h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Só gerar</button>
@@ -796,7 +796,7 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
           <details className="text-xs text-muted">
             <summary className="cursor-pointer select-none hover:text-zinc-100">Como funciona a validação facial</summary>
             <ol className="mt-1 list-decimal space-y-1 pl-4">
-              <li>Na emissão, a LATAM mostra um link de validação (cadastro.unico.app). Cole ele no campo acima.</li>
+              <li>Na emissão, a LATAM mostra um link de validação da Unico (cadastro.unico.app ou id.unico.io). Cole ele no campo acima.</li>
               <li>O app monta o link certo (…/process/…) e, em <b>Gerar e enviar ao titular</b>, abre o WhatsApp dele com a mensagem pronta.</li>
               <li>O titular abre no celular e faz a validação facial — é ele mesmo que valida (leva ~1 min).</li>
               <li>Quando ele avisar que terminou, clique em <b>Titular concluiu a validação</b>.</li>

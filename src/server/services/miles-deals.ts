@@ -417,7 +417,7 @@ export async function setFaceCheck(userId: string, id: string, input: { link?: s
     if (input.link === null || !input.link.trim()) url = null;
     else {
       const parsed = unicoProcessLink(input.link);
-      if (!parsed) throw new DomainError(400, "Link inválido: cole o link do cadastro.unico.app que a LATAM enviou (com o id)");
+      if (!parsed) throw new DomainError(400, "Link inválido: cole o link da Unico (cadastro.unico.app ou id.unico.io) que a LATAM mostrou, com o id");
       url = parsed.url;
     }
   }
