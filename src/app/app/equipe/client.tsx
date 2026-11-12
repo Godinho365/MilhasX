@@ -62,7 +62,7 @@ export function MembersClient({ members, partners, owner, manage = true, me = nu
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1"><h2 className="text-xl font-semibold">Gerenciar equipe</h2><p className="text-sm text-muted">Cadastre as pessoas e o que cada uma faz</p></div>
-        <Link href="/app/equipe/metas" className="btn-ghost"><Trophy className="h-4 w-4" />Metas</Link>
+        <Link href="/app/equipe/metas" className="btn-ghost"><Trophy className="h-4 w-4" />Metas e comissões</Link>
         {manage && <button className="btn-primary" onClick={() => setEditing("new")}><Plus className="h-4 w-4" />Novo membro</button>}
       </div>
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">

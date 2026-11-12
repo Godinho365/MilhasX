@@ -1,5 +1,6 @@
 import { route, json, requireUser, readBodyLimited } from "@/server/http";
 import { DomainError } from "@/server/db";
+import { creditIssuer } from "@/server/services/sales";
 import { addDealReceipt, deleteDealReceipt, getDealReceipt, TICKET_MAX } from "@/server/services/miles-deals";
 
 export const GET = route(async (req, { params }) => {
@@ -25,6 +26,7 @@ export const POST = route(async (req, { params }) => {
     name = decodeURIComponent(req.headers.get("x-file-name") || "comprovante");
   } catch {}
   const r = await addDealReceipt(u.id, (await params).id!, name, await readBodyLimited(req, TICKET_MAX, "Arquivo maior que 10 MB"));
+  await creditIssuer(u.id, r.item.saleId, u.actor.memberId); // venda lançada por um membro fica em nome dele
   return json({ ok: true, ...r }, 201);
 });
 

@@ -141,6 +141,8 @@ model User {
   cardBillPayments    CardBillPayment[]
   cardBills           CardBill[]
   teamMembers         TeamMember[]        @relation("TeamOwner")
+  commissionRules     CommissionRule[]
+  commissionEntries   CommissionEntry[]
   taskBoards          TaskBoard[]
   partners            Partner[]
   tasks               Task[]
@@ -1454,7 +1456,53 @@ model TeamMember {
   joinedAt        DateTime? // aceitou o convite
   lastSeenAt      DateTime? // última atividade (no máximo a cada 5 min)
 
+  commissionRules   CommissionRule[]
+  commissionEntries CommissionEntry[]
+
   @@index([userId])
+}
+
+/// Metas e comissões: como um membro da equipe ganha comissão (src/domain/commissions.ts). A comissão de cada
+/// período é calculada das vendas (não fica gravada); o que fica gravado é o extrato (bônus, ajustes e pagamentos).
+model CommissionRule {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    TeamMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  kind      String // SALE_PCT (% do faturamento) | PROFIT_PCT (% do lucro) | FIXED (R$ por venda) | PER_K_MILES (R$ por mil milhas)
+  value     Int // % × 100 (10% = 1000) ou centavos
+  base      String     @default("INDIVIDUAL") // INDIVIDUAL (vendas que ele emitiu, rateadas) | TEAM (vendas da agência toda)
+  tiers     Json       @default("[]") // faixas [{ min, value }]: a maior atingida no período vale para a base toda
+  period    String     @default("MONTH") // MONTH | QUARTER
+  startsAt  DateTime // vale a partir deste período
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  @@index([userId])
+}
+
+/// Extrato de comissões de um membro ou de um parceiro: bônus e ajustes (lançados à mão) e pagamentos. O pagamento
+/// pode ter virado uma despesa paga no Financeiro (finTransactionId).
+model CommissionEntry {
+  id               String      @id @default(cuid())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberId         String?
+  member           TeamMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  partnerId        String?
+  partner          Partner?    @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  kind             String // BONUS | ADJUST | PAYMENT
+  amountCents      Int // bônus: positivo; ajuste: + ou -; pagamento: o valor pago
+  date             DateTime
+  note             String?
+  finTransactionId String? // despesa no Financeiro (pagamento)
+  createdById      String? // quem lançou (o dono ou um membro)
+  createdAt        DateTime    @default(now())
+
+  @@index([userId, date])
+  @@index([memberId])
+  @@index([partnerId])
 }
 
 // Tarefas em quadro (A fazer, Fazendo, Feito)
@@ -1619,6 +1667,8 @@ model Partner {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   sales     Sale[]
+
+  commissionEntries CommissionEntry[]
 
   @@index([userId])
 }
