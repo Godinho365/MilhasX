@@ -74,7 +74,8 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
   const router = useRouter();
   const initial = useMemo(() => ({
     slug: profile?.slug ?? slugify(defaultName),
-    displayName: profile?.displayName ?? defaultName,
+    // Nome escondido na Bio: o campo fica vazio (o salvo é só o nome da conta)
+    displayName: profile ? (resolveDesign(profile.design).hideName ? "" : profile.displayName) : defaultName,
     bio: profile?.bio ?? "",
     whatsapp: profile?.whatsapp ?? "",
     instagram: profile?.instagram ?? "",
@@ -140,7 +141,7 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
       view: page,
       bannerSrc: canBrand ? bannerSrc : null,
       look: f.design.siteTheme ? siteLook : null,
-      draft: { slug: f.slug, displayName: f.displayName || defaultName, headline: f.headline || null, bio: f.bio || null, whatsapp: f.whatsapp.replace(/\D/g, "") || null, instagram: f.instagram.replace(/^@/, "") || null, email: f.email || null, acceptsOrders: f.acceptsOrders, acceptsLeads: f.acceptsLeads, programIds: f.programIds, design: canBrand ? f.design : { ...f.design, bgColor: null } },
+      draft: { slug: f.slug, displayName: f.displayName.trim() || defaultName, headline: f.headline || null, bio: f.bio || null, whatsapp: f.whatsapp.replace(/\D/g, "") || null, instagram: f.instagram.replace(/^@/, "") || null, email: f.email || null, acceptsOrders: f.acceptsOrders, acceptsLeads: f.acceptsLeads, programIds: f.programIds, design: { ...(canBrand ? f.design : { ...f.design, bgColor: null }), hideName: !f.displayName.trim() } },
     };
     frame.current?.contentWindow?.postMessage(msg, window.location.origin);
   }, [f, page, ready, bannerSrc, canBrand, defaultName, siteLook]);
@@ -341,7 +342,7 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
               <>
                 <Panel title="Introdução">
                   <div className="space-y-4">
-                    <Field label="Nome de exibição" required><input className="input" value={f.displayName} onChange={(e) => set("displayName", e.target.value)} required minLength={2} maxLength={80} /></Field>
+                    <Field label="Nome de exibição" hint="Opcional. Vazio: a página mostra só o logo e a frase, sem nome"><input className="input" value={f.displayName} onChange={(e) => set("displayName", e.target.value)} maxLength={80} placeholder="Ex.: Raphael Viagens" /></Field>
                     <Field label="Frase de abertura" hint="Aparece abaixo do seu nome. Padrão: “Sua viagem começa aqui”"><input className="input" value={f.headline} onChange={(e) => set("headline", e.target.value)} maxLength={120} placeholder="Sua viagem começa aqui" /></Field>
                     <Field label="Sobre você" hint="Até 500 caracteres"><textarea className="input min-h-24" value={f.bio} onChange={(e) => set("bio", e.target.value)} maxLength={500} placeholder="Ex.: Emito passagens com milhas há 5 anos, atendimento pelo WhatsApp." /></Field>
                     <Field label="Programas com que você trabalha">
@@ -415,7 +416,7 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
 
                 <Panel title="Prévia do link ao compartilhar" pro locked={!canBrand}>
                   <div className="space-y-4">
-                    <Field label="Título" hint="Vazio: seu nome · Central de Atendimento"><input className="input" value={f.design.share.title} onChange={(e) => setD({ share: { ...f.design.share, title: e.target.value } })} maxLength={80} placeholder={`${f.displayName} · Central de Atendimento`} /></Field>
+                    <Field label="Título" hint="Vazio: seu nome · Central de Atendimento"><input className="input" value={f.design.share.title} onChange={(e) => setD({ share: { ...f.design.share, title: e.target.value } })} maxLength={80} placeholder={`${f.displayName || defaultName} · Central de Atendimento`} /></Field>
                     <Field label="Descrição" hint="Vazio: usa a frase que aparece abaixo do seu nome"><textarea className="input min-h-16" value={f.design.share.description} onChange={(e) => setD({ share: { ...f.design.share, description: e.target.value } })} maxLength={200} placeholder={f.headline || "Sua viagem começa aqui"} /></Field>
                     <div className="overflow-hidden rounded-xl border border-line bg-panel2" aria-label="Como aparece no WhatsApp">
                       {bannerSrc && (
@@ -423,7 +424,7 @@ export function PageEditor({ profile, defaultName, programs, brand, appName, can
                         <img src={bannerSrc} alt="" className="aspect-[1.91/1] w-full object-cover" />
                       )}
                       <div className="p-3">
-                        <p className="truncate text-sm font-semibold">{f.design.share.title || `${f.displayName} · Central de Atendimento — ${brand}`}</p>
+                        <p className="truncate text-sm font-semibold">{f.design.share.title || `${f.displayName || defaultName} · Central de Atendimento — ${brand}`}</p>
                         <p className="line-clamp-2 text-xs text-muted">{f.design.share.description || f.headline || "Sua viagem começa aqui"}</p>
                         <p className="mt-1 truncate text-[11px] text-muted">{origin.replace(/^https?:\/\//, "")}</p>
                       </div>

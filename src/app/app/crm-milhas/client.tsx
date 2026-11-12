@@ -24,7 +24,7 @@ import { brDay } from "@/domain/brasilia";
 type Customer = { id: string; name: string; phone: string | null };
 // "2026-11-30" → "30/11/2026" sem passar por fuso (a data da tela não tem horário)
 const ymdBR = (v: string) => v.split("-").reverse().join("/");
-type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null };
+type AccountOpt = { id: string; label: string; balance: number; cpmCents: number | null; cpf?: string | null };
 type CardOpt = { id: string; name: string; last4: string | null; closingDay: number; dueDay: number };
 
 const STAGE_COLOR: Record<DealStageKey, string> = { NEW: "#60a5fa", NEGOTIATION: "#f59e0b", AWAITING: "#a78bfa", ISSUED: "#22c55e", PAID: "#94a3b8" };
@@ -270,6 +270,21 @@ function DealDialog({ deal, customers, accounts, cards, balcoes, onClose, onMove
             <option value="">Escolher depois</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.label} · {pts(a.balance)} pts{a.cpmCents ? ` · CPM ${fmtBRL(a.cpmCents)}` : ""}</option>)}
           </select>
+          {acc && (
+            <div className="mt-2 flex items-center gap-2 text-sm">
+              <span className="text-muted">CPF da conta:</span>
+              {acc.cpf ? (
+                <>
+                  <span className="font-mono font-medium tabular-nums">{fmtCpf(acc.cpf)}</span>
+                  <button type="button" className="btn-ghost h-7 px-2 text-xs" onClick={() => navigator.clipboard.writeText(acc.cpf!).then(() => toast("CPF copiado"), () => toast("Não foi possível copiar", "error"))} aria-label={`Copiar CPF ${fmtCpf(acc.cpf)}`}>
+                    <Copy className="h-3.5 w-3.5" />Copiar
+                  </button>
+                </>
+              ) : (
+                <span className="text-xs text-muted">não cadastrado no titular (Milhas › Titulares)</span>
+              )}
+            </div>
+          )}
         </Field>
         <Field label="Colar pedido do comprador">
           <textarea className="input min-h-14 text-sm" value={paste} onChange={(e) => onPaste(e.target.value)} onPaste={pasteImage} disabled={ocr != null} placeholder="Link, texto ou print (Ctrl+V) da tela da LATAM. Ex.: 8.673K, 1CPF, Taxas: R$35,75" />
@@ -754,10 +769,10 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
           {!fc.url ? (
             <div className="space-y-2">
               <label className="block text-xs">
-                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app)</span>
+                <span className="mb-1 block text-muted">Cole o link de validação que a LATAM mostrou (cadastro.unico.app ou id.unico.io)</span>
                 <input className="input h-9 text-sm" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://cadastro.unico.app/flow/intro?collect-data=true&id=…" aria-label="Link da validação facial" />
               </label>
-              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser do cadastro.unico.app e ter o id.</p>)}
+              {link.trim() && (preview ? <p className="break-all text-xs text-muted">Link novo: <span className="font-mono">{preview.url}</span></p> : <p className="text-xs text-red-300">Link inválido: precisa ser da Unico (cadastro.unico.app ou id.unico.io) e ter o id.</p>)}
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn-primary h-8 text-xs" disabled={busy || !preview} onClick={generateAndSend} title="Gera o link e abre o WhatsApp do titular com a mensagem pronta"><Send className="h-3.5 w-3.5" />Gerar e enviar ao titular</button>
                 <button type="button" className="btn-ghost h-8 text-xs" disabled={busy || !preview} onClick={() => save({ link, status: "PENDING" }, "Link de validação gerado")}>Só gerar</button>
@@ -781,7 +796,7 @@ function FaceCheck({ deal, onChanged }: { deal: DealView; onChanged: (d: DealVie
           <details className="text-xs text-muted">
             <summary className="cursor-pointer select-none hover:text-zinc-100">Como funciona a validação facial</summary>
             <ol className="mt-1 list-decimal space-y-1 pl-4">
-              <li>Na emissão, a LATAM mostra um link de validação (cadastro.unico.app). Cole ele no campo acima.</li>
+              <li>Na emissão, a LATAM mostra um link de validação da Unico (cadastro.unico.app ou id.unico.io). Cole ele no campo acima.</li>
               <li>O app monta o link certo (…/process/…) e, em <b>Gerar e enviar ao titular</b>, abre o WhatsApp dele com a mensagem pronta.</li>
               <li>O titular abre no celular e faz a validação facial — é ele mesmo que valida (leva ~1 min).</li>
               <li>Quando ele avisar que terminou, clique em <b>Titular concluiu a validação</b>.</li>

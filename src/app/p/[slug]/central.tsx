@@ -29,14 +29,11 @@ export const waLink = (phone: string | null, text?: string) => {
 /** Moldura das páginas do cliente: cor de fundo (ou o tema do site, em `look`), selo da marca, banner e rodapé. */
 export function PageShell({ brand, appName, bgColor, banner, children, wide = false, look = null }: { brand: string; appName: string; bgColor: string | null; banner: string | null; children: React.ReactNode; wide?: boolean; look?: CentralLook | null }) {
   const frame = look
-    ? { "data-theme": look.base, "data-look": "", style: look.vars as React.CSSProperties }
+    ? { "data-theme": look.base, "data-look": "", "data-cards": look.cards, style: look.vars as React.CSSProperties }
     : { "data-theme": themeForBg(bgColor), style: bgColor ? { backgroundColor: bgColor } : undefined };
   return (
     <div {...frame} className="min-h-screen bg-bg text-zinc-100">
       <main className={`mx-auto px-4 pb-28 pt-6 ${wide ? "max-w-2xl" : "max-w-xl"}`}>
-        <div className="mb-5 flex justify-center">
-          <span className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-bold tracking-tight shadow-sm">{brand}</span>
-        </div>
         {banner && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={banner} alt="" className="mb-5 block aspect-[3/1] w-full rounded-2xl object-cover" />
@@ -52,20 +49,25 @@ export function PageShell({ brand, appName, bgColor, banner, children, wide = fa
 export function CentralPage({ data, brand, appName, preview = false, bannerSrc }: { data: CentralData; brand: string; appName: string; preview?: boolean; bannerSrc?: string | null }) {
   return (
     <PageShell brand={brand} appName={appName} bgColor={data.design.bgColor} banner={bannerUrl(data.slug, data.bannerVersion, bannerSrc)} look={data.look}>
-      <section className="card px-6 py-7 text-center" aria-label="Apresentação">
-        <h1 className="text-2xl font-bold">{data.displayName}</h1>
-        <p className="mt-1.5 text-muted">{data.headline || "Sua viagem começa aqui"}</p>
-        {data.bio && <p className="mt-3 whitespace-pre-line text-sm text-muted">{data.bio}</p>}
-        {data.programs.length > 0 && (
-          <ul className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Programas">
-            {data.programs.map((pr) => (
-              <li key={pr.id} className="flex items-center gap-1.5 rounded-full border border-line bg-panel2 px-2.5 py-1 text-xs font-medium">
-                <ProgramLogo programId={pr.id} name={pr.name} color={pr.color} size={16} />
-                {pr.name}
-              </li>
-            ))}
-          </ul>
-        )}
+      <section className="card overflow-hidden text-center" aria-label="Apresentação">
+        {/* Com o tema do site, o topo do cartão usa a faixa colorida do site (a mesma das seções de destaque) */}
+        <div className={data.look ? "look-band px-6 pb-6 pt-7" : "px-6 pt-7"}>
+          {!data.design.hideName && <h1 className="text-2xl font-bold">{data.displayName}</h1>}
+          <p className={`${data.design.hideName ? "text-lg font-semibold" : "mt-1.5"} ${data.look ? "look-band-muted" : "text-muted"}`}>{data.headline || "Sua viagem começa aqui"}</p>
+        </div>
+        <div className={`px-6 ${data.bio || data.programs.length ? "pb-7" : data.look ? "" : "pb-7"}`}>
+          {data.bio && <p className="mt-4 whitespace-pre-line text-sm text-muted">{data.bio}</p>}
+          {data.programs.length > 0 && (
+            <ul className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Programas">
+              {data.programs.map((pr) => (
+                <li key={pr.id} className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${data.look ? "border-transparent bg-accent-soft" : "border-line bg-panel2"}`}>
+                  <ProgramLogo programId={pr.id} name={pr.name} color={pr.color} size={16} />
+                  {pr.name}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
       <div className="mt-5">
         <CentralActions data={data} preview={preview} />
@@ -97,19 +99,19 @@ function CentralActions({ data, preview }: { data: CentralData; preview: boolean
     <div className="space-y-3">
       {data.design.buttons.filter(visible).map((b, i) => {
         const { Icon, tone: own } = ICONS[b.kind];
-        // Com o tema do site, os ícones usam a cor de destaque dele (o do WhatsApp segue verde)
-        const tone = data.look && b.kind !== "whatsapp" ? "bg-accent-soft text-accent-light" : own;
+        // Com o tema do site, os ícones ficam na cor de destaque dele, como os botões do site (o do WhatsApp segue verde)
+        const tone = data.look ? (b.kind === "whatsapp" ? "bg-[#25d366] text-white" : "look-chip") : own;
         return (
           <a
             key={`${b.kind}-${i}`}
             // Na prévia do editor os cartões não navegam (o rascunho ainda não foi salvo)
             href={preview ? undefined : target(b)}
             {...(external(b) && !preview ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-            className="card flex w-full cursor-pointer items-center gap-4 p-4 text-left transition-colors hover:border-zinc-600"
+            className="card look-action flex w-full cursor-pointer items-center gap-4 p-4 text-left transition hover:border-zinc-600"
           >
             <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${tone}`}><Icon className="h-5 w-5" /></span>
             <span className="min-w-0 flex-1"><span className="block font-semibold">{b.label}</span>{b.description && <span className="block text-sm text-muted">{b.description}</span>}</span>
-            <ChevronRight className="h-5 w-5 text-muted" />
+            <ChevronRight className={`h-5 w-5 ${data.look ? "text-accent-light" : "text-muted"}`} />
           </a>
         );
       })}

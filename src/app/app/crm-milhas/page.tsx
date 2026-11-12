@@ -9,6 +9,7 @@ import { Segmented } from "@/components/ui";
 import { fmtBRL, fmtPts } from "@/lib/format";
 import { BUYER_LABELS, DEAL_STAGE_LABELS } from "@/domain/miles-deals";
 import { DealsKanban, DealsList } from "./client";
+import { holderCpf } from "@/domain/beneficiaries";
 
 const PERIODS = [["7", "Últimos 7 dias"], ["30", "Últimos 30 dias"], ["90", "Últimos 90 dias"], ["365", "Últimos 12 meses"], ["all", "Tudo"]] as const;
 
@@ -18,11 +19,11 @@ export default async function CrmMilhasPage({ searchParams }: { searchParams: Pr
   const view = sp.view === "lista" ? "lista" : sp.view === "dashboard" ? "dashboard" : "kanban";
   const [customers, accounts, avg, cards] = await Promise.all([
     prisma.customer.findMany({ where: { userId: user.id }, select: { id: true, name: true, phone: true }, orderBy: { name: "asc" } }),
-    prisma.account.findMany({ where: { userId: user.id, archived: false }, select: { id: true, nickname: true, balance: true, costCents: true, program: { select: { name: true } }, holder: { select: { name: true } } }, orderBy: [{ program: { name: "asc" } }, { holder: { name: "asc" } }] }),
+    prisma.account.findMany({ where: { userId: user.id, archived: false }, select: { id: true, nickname: true, balance: true, costCents: true, program: { select: { name: true } }, holder: { select: { name: true, documents: true } } }, orderBy: [{ program: { name: "asc" } }, { holder: { name: "asc" } }] }),
     emissionAverage(user.id),
     listCardOptions(user.id),
   ]);
-  const accountOpts = accounts.map((a) => ({ id: a.id, label: a.nickname || `${a.program.name} · ${a.holder.name}`, balance: a.balance, cpmCents: a.balance > 0 ? Math.round((a.costCents * 1000) / a.balance) : null }));
+  const accountOpts = accounts.map((a) => ({ id: a.id, label: a.nickname || `${a.program.name} · ${a.holder.name}`, balance: a.balance, cpmCents: a.balance > 0 ? Math.round((a.costCents * 1000) / a.balance) : null, cpf: holderCpf(a.holder.documents) }));
   const subtitle = {
     kanban: "Negociações de venda de milhas. Com o bilhete a negociação fica Emitida e a venda entra em Vendas como a receber; com o comprovante vai para Pago e a venda fica paga.",
     lista: "Todas as negociações em formato de lista, ativas e arquivadas.",

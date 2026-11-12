@@ -1,27 +1,45 @@
-// Verificação antes da emissão (CRM Milhas): a LATAM pede validação facial do titular da conta por um link
-// do cadastro.unico.app. O link recebido (…/flow/intro?collect-data=true&id=<ID>) é trocado pelo formato
-// novo …/process/<ID>?collect-data=true, que o titular abre para fazer a validação.
+// Verificação antes da emissão (CRM Milhas): a LATAM pede validação facial do titular da conta por um link da
+// Unico. O link vem do cadastro.unico.app (…/flow/intro?collect-data=true&id=<ID>) ou do id.unico.io
+// (…/flow/intro?collect-data=true&dynamic-wrapper=true&id=<ID>&prewarm=true); dos dois, o ID vira o formato
+// …cadastro.unico.app/process/<ID>?collect-data=true, que o titular abre para fazer a validação.
 
 export const FACE_CHECK_STATUS = ["PENDING", "DONE", "NOT_NEEDED"] as const;
 export type FaceCheckStatus = (typeof FACE_CHECK_STATUS)[number];
 export const FACE_CHECK_LABELS: Record<FaceCheckStatus, string> = { PENDING: "Aguardando o titular", DONE: "Validação concluída", NOT_NEEDED: "Não foi pedida" };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Endereços da Unico de onde a LATAM manda o link. */
+export const UNICO_HOSTS = ["cadastro.unico.app", "id.unico.io"] as const;
 
-/** Link da validação no formato novo. Aceita o link recebido, o já convertido ou só o ID; só do cadastro.unico.app. */
+/** O ID de um link da Unico (no ?id= ou no /process/<ID>), ou nulo se o link não é da Unico. */
+function idFromUrl(raw: string) {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || !(UNICO_HOSTS as readonly string[]).includes(u.hostname)) return null;
+  return u.searchParams.get("id") ?? u.pathname.match(/^\/process\/([^/]+)\/?$/)?.[1] ?? null;
+}
+
+/**
+ * Link da validação no formato do cadastro.unico.app. Aceita o link do cadastro.unico.app ou do id.unico.io, o já
+ * convertido, só o ID, ou o link no meio de um texto colado (mensagem com o link, pontuação no fim).
+ */
 export function unicoProcessLink(input: string): { id: string; url: string } | null {
   const text = input.trim();
   let id: string | null = null;
   if (UUID.test(text)) id = text;
   else {
-    let u: URL;
-    try {
-      u = new URL(text);
-    } catch {
-      return null;
+    id = idFromUrl(text);
+    // colado com texto em volta: o primeiro link https da Unico no meio do texto
+    if (!id) {
+      for (const m of text.matchAll(/https:\/\/[^\s<>"']+/g)) {
+        id = idFromUrl(m[0].replace(/[.,;:!?)\]}]+$/, ""));
+        if (id) break;
+      }
     }
-    if (u.protocol !== "https:" || u.hostname !== "cadastro.unico.app") return null;
-    id = u.searchParams.get("id") ?? u.pathname.match(/^\/process\/([^/]+)\/?$/)?.[1] ?? null;
   }
   if (!id || !UUID.test(id)) return null;
   const clean = id.toLowerCase();

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pickUtm } from "@/domain/traffic";
 import { Prisma } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment, MAX_BYTES, MAX_FILES } from "./holder-files";
@@ -276,7 +277,7 @@ export async function ordersDashboard(userId: string, days: number | null) {
 const PUBLIC_LIMIT_PER_HOUR = 5;
 
 /** Pedido enviado pelo formulário da página pública (/p/<nome>). Sem login; limitado por IP. */
-export async function createPublicOrder(slug: string, input: OrderInput, ip: string) {
+export async function createPublicOrder(slug: string, input: OrderInput & { utm?: Record<string, string> | null }, ip: string) {
   const p = await prisma.salesProfile.findUnique({ where: { slug: slug.toLowerCase() }, select: { userId: true, published: true, acceptsOrders: true, user: { select: { status: true } } } });
   // vale com a Central de atendimento publicada ou com o site da agência no ar
   if (!p || !p.acceptsOrders || p.user.status !== "ACTIVE" || !(p.published || (await sitePublished(p.userId)))) throw new DomainError(404, "Página não encontrada");
@@ -284,8 +285,12 @@ export async function createPublicOrder(slug: string, input: OrderInput, ip: str
   const recent = await prisma.orderEvent.count({ where: { type: "created", note: `public:${ipHash}`, createdAt: { gte: new Date(Date.now() - 3600_000) } } });
   if (recent >= PUBLIC_LIMIT_PER_HOUR) throw new DomainError(429, "Muitos pedidos enviados. Tente de novo mais tarde.");
   if (!input.customerPhone && !input.customerEmail) throw new DomainError(400, "Informe um telefone ou e-mail para contato");
-  const o = await createOrder(p.userId, { ...input, customerId: null, priority: "MEDIUM", budgetCents: input.budgetCents ?? null }, "PUBLIC");
+  const { utm: rawUtm, ...fields } = input;
+  const o = await createOrder(p.userId, { ...fields, customerId: null, priority: "MEDIUM", budgetCents: fields.budgetCents ?? null }, "PUBLIC");
   await prisma.orderEvent.updateMany({ where: { orderId: o.id, type: "created" }, data: { note: `public:${ipHash}` } });
+  // de onde veio (anúncio, campanha): só as chaves conhecidas, para o Tráfego ligar o pedido ao anúncio
+  const utm = pickUtm(rawUtm ?? null);
+  if (utm) await prisma.travelOrder.update({ where: { id: o.id }, data: { utm } });
   await prisma.notification.create({ data: { userId: p.userId, title: "Novo pedido pela sua página", body: `${o.customerName} pediu ${o.route}.` } });
   return { number: o.number };
 }

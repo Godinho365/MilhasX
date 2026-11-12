@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Prisma, type MilesDealStage } from "@prisma/client";
 import { prisma, DomainError } from "../db";
 import { detectAttachment } from "./holder-files";
-import { createSale, defaultFinAccountId, type SaleCost } from "./sales";
+import { createSale, defaultFinAccountId, getSale, updateSale, type SaleCost, type SaleItemKind } from "./sales";
 import { brDay } from "@/domain/brasilia";
 import { DEAL_STAGES, dealChargeCents, dealCpfs, dealProfitCents, dealTotalCents, type BuyerType, type Passenger } from "@/domain/miles-deals";
 import { ANONYMOUS } from "@/domain/beneficiaries";
@@ -417,7 +417,7 @@ export async function setFaceCheck(userId: string, id: string, input: { link?: s
     if (input.link === null || !input.link.trim()) url = null;
     else {
       const parsed = unicoProcessLink(input.link);
-      if (!parsed) throw new DomainError(400, "Link inválido: cole o link do cadastro.unico.app que a LATAM enviou (com o id)");
+      if (!parsed) throw new DomainError(400, "Link inválido: cole o link da Unico (cadastro.unico.app ou id.unico.io) que a LATAM mostrou, com o id");
       url = parsed.url;
     }
   }
@@ -433,19 +433,65 @@ export const TICKET_MAX = 10 * 1024 * 1024;
 const fmtPtsBR = (n: number) => n.toLocaleString("pt-BR");
 const brlBR = (c: number) => (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/[  ]/g, " ");
 
-/** Bilhete da LATAM (PDF): preenche os campos vazios da negociação (localizador, pontos, taxa, passageiros nome/CPF)
- *  e avisa quando milhas ou taxa do bilhete divergem do que já estava. Devolve o aviso (ou null se não for LATAM). */
-async function applyLatamTicket(d: { id: string; locator: string | null; points: number | null; taxesCents: number | null; passengersData: unknown; passengersAt: Date | null }, buf: Buffer): Promise<string | null> {
+/**
+ * Venda já lançada pela negociação: os pontos e a taxa corrigidos pelo bilhete vão para a venda (pontos, valor dos
+ * pontos pelo milheiro e o custo "taxa de embarque"). Só a venda com um item em milhas (a que a negociação criou);
+ * reembolsada ou editada em Vendas com mais itens, não mexe. Devolve o motivo quando não deu para corrigir.
+ */
+async function syncSaleAmounts(userId: string, saleId: string, points: number, cpmCents: number, taxesCents: number | null, cardId: string | null): Promise<string | null> {
+  const s = await getSale(userId, saleId);
+  if (s.refund) return "a venda foi reembolsada";
+  if (s.items.length !== 1 || s.items[0]!.issuedWith !== "POINTS") return "a venda foi editada em Vendas";
+  const it = s.items[0]!;
+  const taxCard = it.costs.find((c) => c.type === "TAXA_EMBARQUE")?.cardId ?? cardId;
+  const costs: SaleCost[] = [...it.costs.filter((c) => c.type !== "TAXA_EMBARQUE"), ...(taxesCents ? [{ type: "TAXA_EMBARQUE" as const, amountCents: taxesCents, cardId: taxCard ?? null }] : [])];
+  try {
+    await updateSale(userId, saleId, {
+      origin: s.origin as "OWN" | "SUPPLIER", accountId: s.accountId, supplierAccountId: s.supplierAccountId, occurredAt: new Date(s.date),
+      items: [{
+        kind: it.kind as SaleItemKind, issuedWith: "POINTS", points, salePriceCents: dealTotalCents(points, cpmCents)!, cashCostCents: 0, costs,
+        clientType: it.clientType as "FINAL" | "AGENCY", customerIds: it.customerIds, passengers: it.passengers, reservation: it.reservation,
+        origin: it.origin, destination: it.destination, departureDate: it.departureDate ? new Date(it.departureDate) : null, returnDate: it.returnDate ? new Date(it.returnDate) : null,
+        departureTime: it.departureTime, returnTime: it.returnTime, provider: it.provider, description: it.description, observation: it.observation,
+      }],
+    });
+    return null;
+  } catch (e) {
+    if (e instanceof DomainError) return e.message.charAt(0).toLowerCase() + e.message.slice(1);
+    throw e;
+  }
+}
+
+/**
+ * Bilhete da LATAM (PDF): preenche o que estava vazio (localizador, passageiros nome/CPF) e as milhas e a taxa de
+ * embarque valem o que está no bilhete — o que foi emitido de fato. Diferentes da negociação, são corrigidas (e a
+ * venda já lançada por ela acompanha). Devolve o aviso (ou null se não for bilhete da LATAM).
+ */
+async function applyLatamTicket(userId: string, d: Awaited<ReturnType<typeof own>>, buf: Buffer): Promise<string | null> {
   const parsed = parseLatamTicket(await extractPdfText(buf));
   if (!parsed) return null;
   const data: Prisma.MilesDealUpdateInput = {};
   const fills: string[] = [];
+  const fixes: string[] = [];
   const warns: string[] = [];
   if (!d.locator && parsed.locator) { data.locator = parsed.locator; fills.push(`localizador ${parsed.locator}`); }
-  if (d.points == null && parsed.milesPoints) { data.points = parsed.milesPoints; fills.push(`${fmtPtsBR(parsed.milesPoints)} milhas`); }
-  else if (d.points != null && parsed.milesPoints != null && d.points !== parsed.milesPoints) warns.push(`milhas — bilhete ${fmtPtsBR(parsed.milesPoints)} × negociação ${fmtPtsBR(d.points)}`);
-  if (d.taxesCents == null && parsed.taxesCents != null) { data.taxesCents = parsed.taxesCents; fills.push(`taxa ${brlBR(parsed.taxesCents)}`); }
-  else if (d.taxesCents != null && parsed.taxesCents != null && d.taxesCents !== parsed.taxesCents) warns.push(`taxa — bilhete ${brlBR(parsed.taxesCents)} × negociação ${brlBR(d.taxesCents)}`);
+  const points = parsed.milesPoints ?? d.points;
+  const taxes = parsed.taxesCents ?? d.taxesCents;
+  if (parsed.milesPoints && d.points == null) fills.push(`${fmtPtsBR(parsed.milesPoints)} milhas`);
+  else if (parsed.milesPoints && d.points !== parsed.milesPoints) fixes.push(`milhas ${fmtPtsBR(d.points!)} → ${fmtPtsBR(parsed.milesPoints)}`);
+  if (parsed.taxesCents != null && d.taxesCents == null) fills.push(`taxa ${brlBR(parsed.taxesCents)}`);
+  else if (parsed.taxesCents != null && d.taxesCents !== parsed.taxesCents) fixes.push(`taxa de embarque ${brlBR(d.taxesCents!)} → ${brlBR(parsed.taxesCents)}`);
+  let amounts = points !== d.points || taxes !== d.taxesCents;
+  if (amounts && d.saleId) {
+    // venda já lançada: corrige ela também; sem conseguir, deixa como está e avisa
+    const err = points && d.saleCpmCents ? await syncSaleAmounts(userId, d.saleId, points, d.saleCpmCents, taxes, d.taxesCardId) : "faltam os pontos ou o milheiro";
+    if (err) {
+      warns.push(`o bilhete tem ${points ? `${fmtPtsBR(points)} milhas` : "outras milhas"} e taxa ${taxes != null ? brlBR(taxes) : "?"}, mas não corrigi porque ${err}; corrija em Vendas`);
+      fixes.length = 0;
+      amounts = false;
+    } else fixes.push("a venda foi atualizada");
+  }
+  if (amounts) { data.points = points; data.taxesCents = taxes; }
   const merged = mergeTicketPassengers(d.passengersData, parsed.passengers);
   if (merged.changed) {
     data.passengersData = merged.list as unknown as Prisma.InputJsonValue;
@@ -455,14 +501,15 @@ async function applyLatamTicket(d: { id: string; locator: string | null; points:
   if (Object.keys(data).length) await prisma.milesDeal.update({ where: { id: d.id }, data });
   const parts = [`📄 Bilhete ${parsed.orderNumber} lido.`];
   if (fills.length) parts.push(`Preenchi: ${fills.join(", ")}.`);
-  if (warns.length) parts.push(`⚠️ Confira: ${warns.join("; ")}.`);
-  else if (!fills.length) parts.push("Nada a preencher (já estava tudo).");
+  if (fixes.length) parts.push(`Corrigi pelo bilhete: ${fixes.join("; ")}.`);
+  if (warns.length) parts.push(`⚠️ ${warns.join("; ")}.`);
+  else if (!fills.length && !fixes.length) parts.push("Nada a preencher (já estava tudo).");
   return parts.join(" ");
 }
 
 /** Anexa (ou troca) o bilhete. Com ele a negociação passa a "Emitida" (e vira venda a receber) se ainda estava
  *  antes disso; se faltar algo para lançar a venda (conta, pontos, saldo), o bilhete fica salvo e o aviso diz o
- *  que falta. Bilhete da LATAM em PDF preenche os campos vazios e valida milhas/taxa. */
+ *  que falta. Bilhete da LATAM em PDF preenche o que estava vazio e corrige milhas e taxa de embarque pelo bilhete. */
 export async function addDealTicket(userId: string, id: string, name: string, buf: Buffer) {
   let d = await own(userId, id);
   if (d.faceCheckStatus !== "DONE" && d.faceCheckStatus !== "NOT_NEEDED") {
@@ -475,8 +522,8 @@ export async function addDealTicket(userId: string, id: string, name: string, bu
   const clean = name.replace(/[\\/]/g, "_").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120) || "bilhete";
   const data = { name: clean, mime, size: buf.length, data: new Uint8Array(buf) };
   await prisma.milesDealTicket.upsert({ where: { dealId: d.id }, update: { ...data, createdAt: new Date() }, create: { dealId: d.id, userId, ...data } });
-  // bilhete da LATAM em PDF: preenche os campos vazios e valida milhas/taxa; relê para refletir o que foi preenchido
-  const ticketAviso = mime === "application/pdf" ? await applyLatamTicket(d, buf) : null;
+  // bilhete da LATAM em PDF: preenche o que estava vazio e corrige milhas/taxa pelo bilhete; relê para refletir
+  const ticketAviso = mime === "application/pdf" ? await applyLatamTicket(userId, d, buf) : null;
   if (ticketAviso) d = await own(userId, id);
   const join = (...a: (string | null)[]) => a.filter(Boolean).join(" · ") || null;
   if (d.saleId) {

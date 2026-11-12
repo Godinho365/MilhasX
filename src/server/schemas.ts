@@ -257,7 +257,8 @@ export const planRequestSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GES
 export const adminPlanSchema = z.object({ plan: z.enum(["PESSOAL", "PRO", "GESTOR"]), interval: z.enum(["MENSAL", "ANUAL"]).nullable().default(null) });
 export const salesProfileSchema = z.object({
   slug: z.string().trim().toLowerCase().min(3, "Mínimo de 3 caracteres").max(40).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "Use letras minúsculas, números e hífen"),
-  displayName: z.string().trim().min(2, "Informe o nome de exibição").max(80),
+  // Opcional: vazio esconde o nome na Bio (o servidor guarda o nome da conta para os textos)
+  displayName: z.string().trim().max(80).refine((v) => v.length === 0 || v.length >= 2, "Nome de exibição com pelo menos 2 letras").default(""),
   bio: z.string().trim().max(500).nullable().optional(),
   whatsapp: z.string().trim().max(20).regex(/^[\d\s()+-]*$/, "WhatsApp inválido").nullable().optional(),
   instagram: z.string().trim().max(31).regex(/^@?[A-Za-z0-9._]*$/, "Instagram inválido").nullable().optional(),
@@ -448,7 +449,19 @@ export const orderSchema = z.object({
   stageId: z.string().max(40).nullable().optional(), // coluna onde o pedido novo entra
 });
 // "website" é um campo-armadilha: pessoas não veem, robôs preenchem
-export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, stageId: true }).extend({ website: z.string().max(0).optional() });
+// de onde o cliente veio (parâmetros do link do anúncio); o serviço só guarda as chaves conhecidas
+const utmSchema = z.record(z.string().max(200)).refine((o) => Object.keys(o).length <= 10, "Parâmetros demais").nullable().optional();
+export const publicOrderSchema = orderSchema.omit({ customerId: true, priority: true, stageId: true }).extend({ website: z.string().max(0).optional(), utm: utmSchema });
+// Tráfego (anúncios do Meta)
+const trafficDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida");
+export const trafficQuerySchema = z.object({
+  periodo: z.enum(["hoje", "ontem", "7", "30", "custom"]).default("30"),
+  de: trafficDay.optional(), ate: trafficDay.optional(),
+  nivel: z.enum(["campaign", "adset", "ad"]).default("campaign"),
+  conta: z.string().regex(/^act_\d{1,30}$/, "Conta inválida").optional(),
+  atualizar: z.enum(["1"]).optional(),
+});
+export const trafficAccountsSchema = z.object({ selected: z.array(z.string().regex(/^act_\d{1,30}$/, "Conta inválida")).max(3, "Escolha no máximo 3 contas") });
 export const orderMoveSchema = z.object({ stageId: z.string().min(1).max(40), position: z.number().int().min(0).max(10_000).optional() });
 // Funis e colunas do CRM Passagens
 const pipelineName = z.string().trim().min(1, "Dê um nome").max(40, "Nome com mais de 40 letras");

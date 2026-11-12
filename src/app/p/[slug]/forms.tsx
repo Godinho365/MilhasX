@@ -6,6 +6,7 @@ import { AIRPORTS, airportCodeOf } from "@/domain/airports";
 import { parseBRLToCents } from "@/lib/format";
 import type { PageDesign } from "@/domain/page-design";
 import { waLink } from "./central";
+import { readUtm } from "@/components/utm-keeper";
 
 // Formulários públicos da Central: "Captação de Viagens" (pedido de cotação em etapas) e
 // "Interesse em Gestão". Em `preview` (editor) nada é enviado: só mostra a confirmação.
@@ -110,7 +111,7 @@ export function CaptacaoForm({ slug, agency, design, whatsapp, preview = false }
     const r = await fetch(`/api/public/orders/${encodeURIComponent(slug)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ customerName: name, customerPhone: phone, customerEmail: email || null, tripType, cabin, segments, adults, children, infants, flexibleDates: flexible, checkedBag: bag, budgetCents: design.askBudget ? parseBRLToCents(budget) : null, notes: extra || null, website }),
+      body: JSON.stringify({ customerName: name, customerPhone: phone, customerEmail: email || null, tripType, cabin, segments, adults, children, infants, flexibleDates: flexible, checkedBag: bag, budgetCents: design.askBudget ? parseBRLToCents(budget) : null, notes: extra || null, website, utm: readUtm() }),
     });
     const j = await r.json().catch(() => ({}));
     setBusy(false);
