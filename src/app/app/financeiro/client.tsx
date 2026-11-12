@@ -310,7 +310,7 @@ export function CardBillsClient({ cards, accounts }: { cards: CardBills[]; accou
                 <span className="tabular-nums">{fmtBRL(i.amountCents)}</span>
               </li>
             ))}
-            {b.adjustCents !== 0 && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? (b.personal ? "Gastos pessoais (valor real − compras lançadas; fora do Financeiro)" : "Outros gastos no cartão (valor real − compras lançadas)") : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
+            {b.adjustCents !== 0 && !(b.personal && b.adjustCents > 0) && <li className="flex gap-3"><span className="w-20 shrink-0" /><span className="min-w-0 flex-1 truncate text-muted">{b.adjustCents > 0 ? "Outros gastos no cartão (valor real − compras lançadas)" : "Créditos/estornos (valor real menor que as compras)"}</span><span className="tabular-nums">{b.adjustCents > 0 ? "" : "−"}{fmtBRL(Math.abs(b.adjustCents))}</span></li>}
             {b.payments.map((p) => <li key={p.id} className="flex gap-3 text-emerald-300"><span className="w-20 shrink-0 tabular-nums">{fmtDate(p.paidAt)}</span><span className="min-w-0 flex-1 truncate">Pagamento{p.accountId ? ` · ${accounts.find((a) => a.id === p.accountId)?.name ?? "conta"}` : ""}</span><span className="tabular-nums">−{fmtBRL(p.amountCents)}</span></li>)}
             <li><button type="button" className="text-xs text-accent-light hover:underline" onClick={() => setAdding({ card: c, bill: b })}>+ Adicionar compra nesta fatura</button></li>
           </ul>
