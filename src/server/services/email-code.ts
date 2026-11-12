@@ -1,6 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { prisma, DomainError, log } from "../db";
-import { sendMail, smtpConfig } from "../mailer";
+import { sendEmail, smtpConfig } from "../mailer";
+import { signupCodeEmail } from "../emails/templates";
 
 /**
  * Código de 6 dígitos para confirmar o e-mail antes de criar a conta. A conta só nasce depois do
@@ -51,11 +52,7 @@ export async function createSignupCode(emailRaw: string, ip: string) {
 /** Gera o código e manda por e-mail. */
 export async function requestSignupCode(email: string, ip: string, appName: string) {
   const code = await createSignupCode(email, ip);
-  const sent = await sendMail(
-    normalize(email),
-    `${code} é o seu código de verificação do ${appName}`,
-    `Seu código para confirmar o e-mail e criar a conta no ${appName} é:\n\n${code}\n\nEle vale por ${CODE_MINUTES} minutos. Se você não pediu este código, pode ignorar este e-mail.`,
-  );
+  const sent = await sendEmail(normalize(email), signupCodeEmail({ appName, code, minutes: CODE_MINUTES }));
   if (!sent) throw new DomainError(503, "Não foi possível enviar o e-mail agora. Tente de novo em instantes.");
 }
 

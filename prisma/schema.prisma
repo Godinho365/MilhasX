@@ -417,6 +417,17 @@ model EmailCode {
   @@index([ip, createdAt])
 }
 
+/// E-mails automáticos já enviados (ex.: aviso de fim do teste). A chave única impede mandar o mesmo aviso duas vezes.
+model EmailDispatch {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  key       String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind])
+}
+
 model LoginAttempt {
   id        String   @id @default(cuid())
   email     String
