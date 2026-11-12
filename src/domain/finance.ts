@@ -147,6 +147,7 @@ export type Bill = {
   itemsCents: number; // soma das compras lançadas
   realCents: number | null; // valor real informado
   adjustCents: number; // real − compras: outros gastos (positivo) ou créditos/estornos (negativo) no cartão
+  personal: boolean; // os outros gastos (adjustCents positivo) são pessoais: ficam na fatura, mas fora do Financeiro
   totalCents: number; // o que é para pagar
   paidCents: number;
   openCents: number; // falta pagar
@@ -160,7 +161,7 @@ export type Bill = {
 /** Faturas: as compras no cartão (Extrato, custos das vendas e despesas do Financeiro) agrupadas por cartão e
  *  vencimento, com o valor real, o vencimento alterado e os pagamentos (pode ser parcial). Uma fatura sem compras
  *  existe quando tem valor real ou pagamento. */
-export function cardBills(charges: Tx[], today: string, edits = new Map<string, BillEdit>(), payments = new Map<string, BillPayment[]>()): Bill[] {
+export function cardBills(charges: Tx[], today: string, edits = new Map<string, BillEdit>(), payments = new Map<string, BillPayment[]>(), personalCards = new Set<string>()): Bill[] {
   const groups = new Map<string, { cardId: string; dueDate: string; items: BillItem[] }>();
   const group = (cardId: string, dueDate: string) => {
     const key = billKey(cardId, dueDate);
@@ -190,7 +191,7 @@ export function cardBills(charges: Tx[], today: string, edits = new Map<string, 
       const status = openCents === 0 ? "paid" : paidCents > 0 ? "partial" : "open";
       const effectiveDue = edit?.dueOverride ?? g.dueDate;
       return {
-        cardId: g.cardId, dueDate: g.dueDate, effectiveDue, itemsCents, realCents, adjustCents: realCents == null ? 0 : realCents - itemsCents, totalCents,
+        cardId: g.cardId, dueDate: g.dueDate, effectiveDue, itemsCents, realCents, adjustCents: realCents == null ? 0 : realCents - itemsCents, personal: personalCards.has(g.cardId), totalCents,
         paidCents, openCents, status, overdue: status !== "paid" && effectiveDue < today, paidAt: status === "paid" ? pays.at(-1)?.paidAt ?? null : null,
         payments: pays, items: g.items.sort((x, y) => x.day.localeCompare(y.day)),
       };
@@ -198,6 +199,10 @@ export function cardBills(charges: Tx[], today: string, edits = new Map<string, 
     .filter((b) => b.items.length > 0 || b.realCents != null || b.payments.length > 0)
     .sort((a, b) => a.effectiveDue.localeCompare(b.effectiveDue));
 }
+
+/** O que falta pagar da fatura sem a parte dos gastos pessoais (no cartão com os outros gastos pessoais). */
+export const billBusinessOpen = (b: Bill) =>
+  b.personal && b.adjustCents > 0 && b.totalCents > 0 ? b.openCents - Math.round((b.openCents * b.adjustCents) / b.totalCents) : b.openCents;
 
 /** Divide um valor na proporção dos pesos; o último fica com o arredondamento. */
 function splitByWeights<K>(cents: number, weights: { key: K; w: number }[]): { key: K; cents: number }[] {
@@ -211,7 +216,8 @@ function splitByWeights<K>(cents: number, weights: { key: K; w: number }[]): { k
 }
 
 /** Saída de caixa das faturas: cada pagamento na data em que foi feito (e da conta de onde saiu) e o que falta pagar
- *  no vencimento. Dividida pela origem e categoria das compras da fatura (outros gastos entram em "Outras despesas"). */
+ *  no vencimento. Dividida pela origem e categoria das compras da fatura (outros gastos entram em "Outras despesas").
+ *  Com os outros gastos marcados como pessoais, a parte de cada pagamento que cobre eles fica fora. */
 export function billCashTxs(bills: Bill[]): Tx[] {
   return bills.flatMap((b) => {
     const byKey = new Map<string, { source: TxSource; category: string | null; w: number }>();
@@ -225,7 +231,7 @@ export function billCashTxs(bills: Bill[]): Tx[] {
     const weights = [...byKey.values()].filter((x) => x.w > 0).map((x) => ({ key: x, w: x.w }));
     const parts = (cents: number) => (weights.length ? splitByWeights(cents, weights) : [{ key: { source: "cardOther" as TxSource, category: AUTO_CATEGORY.cardOther }, cents }]);
     const tx = (cents: number, paidAt: string | null, accountId: string | null): Tx[] =>
-      parts(cents).filter((p) => p.cents !== 0).map((p) => ({
+      parts(cents).filter((p) => p.cents !== 0 && !(b.personal && p.key.source === "cardOther")).map((p) => ({
         type: "EXPENSE", accountId: accountId ?? "", toAccountId: null, amountCents: p.cents, category: p.key.category, competence: b.effectiveDue,
         dueDate: b.effectiveDue, paidAt, source: p.key.source, description: "Fatura do cartão",
       }));
@@ -236,7 +242,7 @@ export function billCashTxs(bills: Bill[]): Tx[] {
 /** Diferença entre o valor real da fatura e as compras lançadas, no regime de competência: a mais, "Outras despesas";
  *  a menos (estorno, crédito), "Outras receitas". */
 export function billAdjustTxs(bills: Bill[]): Tx[] {
-  return bills.filter((b) => b.adjustCents !== 0).map((b) => ({
+  return bills.filter((b) => b.adjustCents < 0 || (b.adjustCents > 0 && !b.personal)).map((b) => ({
     type: b.adjustCents > 0 ? "EXPENSE" : "INCOME", accountId: "", toAccountId: null, amountCents: Math.abs(b.adjustCents),
     category: b.adjustCents > 0 ? AUTO_CATEGORY.cardOther : "Outras receitas", competence: b.effectiveDue, dueDate: b.effectiveDue,
     paidAt: b.paidAt, source: "cardOther", description: b.adjustCents > 0 ? "Outros gastos no cartão" : "Créditos na fatura do cartão",

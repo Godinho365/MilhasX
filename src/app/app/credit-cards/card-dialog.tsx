@@ -53,6 +53,7 @@ export function CardDialog({ card, accounts, onClose }: { card: CardView | null;
     closing: card ? String(card.closingDay) : "", due: card ? String(card.dueDay) : "", fee: money(card?.annualFeeCents), waiver: money(card?.feeWaiverCents),
     balance: card?.balancePoints ? fmtPts(card.balancePoints) : "", balanceDate: card?.balanceDate ?? today(),
     benefits: card?.benefits ?? [], benefitsUrl: card?.benefitsUrl ?? "", tags: (card?.tags ?? []).join(", "), notes: card?.notes ?? "",
+    otherIsPersonal: card?.otherIsPersonal ?? false,
   });
   const [spend, setSpend] = useState(card?.invoices[0] ? money(card.invoices[0].amountCents) : "5.000,00");
   const [erro, setErro] = useState("");
@@ -80,6 +81,7 @@ export function CardDialog({ card, accounts, onClose }: { card: CardView | null;
       modality: f.modality || null, cardType: f.cardType || null, status: f.status,
       expMonth: f.expMonth ? Number(f.expMonth) : null, expYear: f.expYear ? Number(f.expYear) : null, limitCents: limit, annualFeeMonth: f.annualFeeMonth ? Number(f.annualFeeMonth) : null,
       color: f.color || null, benefits: f.benefits, benefitsUrl: f.benefitsUrl || null, tags: f.tags.split(",").map((t) => t.trim()).filter(Boolean), notes: f.notes || null,
+      otherIsPersonal: f.otherIsPersonal,
     };
     if (!body.closingDay || !body.dueDay) { setTab("dados"); return setErro("Informe os dias de fechamento e vencimento"); }
     setBusy(true);
@@ -149,6 +151,7 @@ export function CardDialog({ card, accounts, onClose }: { card: CardView | null;
           <Field label="Anuidade (R$ por ano)" hint="Em 12 parcelas; cada uma vira custo dos pontos da fatura"><input className="input" inputMode="decimal" value={f.fee} onChange={(e) => set({ fee: e.target.value })} placeholder="0,00" /></Field>
           <Field label="Mês da anuidade"><select className="input" value={f.annualFeeMonth} onChange={(e) => set({ annualFeeMonth: e.target.value })}><option value="">—</option>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></Field>
           <Field label="Isenta gastando (R$ por mês)" hint="Vazio: sem isenção"><input className="input" inputMode="decimal" value={f.waiver} onChange={(e) => set({ waiver: e.target.value })} placeholder="8.000,00" /></Field>
+          <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" className="mt-0.5" checked={f.otherIsPersonal} onChange={(e) => set({ otherIsPersonal: e.target.checked })} /><span>Outros gastos da fatura são pessoais<span className="block text-xs text-muted">O que passa das compras lançadas (valor real da fatura − lançados) fica na fatura, mas fora do Fluxo de Caixa e dos relatórios do Financeiro</span></span></label>
           <Field label="Pontos já acumulados no cartão" hint="Entram como “Saldo inicial” na conta"><input className="input" inputMode="numeric" value={f.balance} onChange={(e) => set({ balance: e.target.value })} placeholder="0" /></Field>
           <Field label="Data do saldo"><input className="input" type="date" value={f.balanceDate} onChange={(e) => set({ balanceDate: e.target.value })} /></Field>
           <div className="flex flex-wrap items-end gap-3 sm:col-span-2" aria-label="Simulação do mês">

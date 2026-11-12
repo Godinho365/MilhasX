@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { prisma, DomainError } from "../db";
 import { brDay } from "@/domain/brasilia";
 import {
-  accountBalance, addMonths, billAdjustTxs, billCashTxs, billDueIn, billKey, cardBills, cardDueDay, cashflow, monthOf, periodTotals, purchaseTxs, saleTxs,
+  accountBalance, addMonths, billAdjustTxs, billBusinessOpen, billCashTxs, billDueIn, billKey, cardBills, cardDueDay, cashflow, monthOf, periodTotals, purchaseTxs, saleTxs,
   type Bill, type BillEdit, type BillPayment, type CardDays, type Regime, type Tx,
 } from "@/domain/finance";
 import { listSales } from "./sales";
@@ -25,7 +25,7 @@ const isCharge = (t: Tx) => !!t.cardId && t.type === "EXPENSE";
 /** Cartões do usuário, ajustes das faturas (valor real, vencimento) e pagamentos. */
 async function cardContext(userId: string) {
   const [cards, edits, payments] = await Promise.all([
-    prisma.creditCard.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, last4: true, color: true, closingDay: true, dueDay: true, active: true } }),
+    prisma.creditCard.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, select: { id: true, name: true, last4: true, color: true, closingDay: true, dueDay: true, active: true, otherIsPersonal: true } }),
     prisma.cardBill.findMany({ where: { userId }, select: { cardId: true, dueDate: true, realCents: true, dueOverride: true } }),
     prisma.cardBillPayment.findMany({ where: { userId }, select: { id: true, cardId: true, dueDate: true, paidAt: true, amountCents: true, accountId: true } }),
   ]);
@@ -38,6 +38,7 @@ async function cardContext(userId: string) {
     cards: new Map(cards.map((c) => [c.id, c])),
     edits: new Map<string, BillEdit>(edits.map((e) => [billKey(e.cardId, day(e.dueDate)), { realCents: e.realCents, dueOverride: e.dueOverride ? day(e.dueOverride) : null }])),
     payments: pays,
+    personalCards: new Set(cards.filter((c) => c.otherIsPersonal).map((c) => c.id)),
   };
 }
 type CardCtx = Awaited<ReturnType<typeof cardContext>>;
@@ -65,7 +66,7 @@ async function financeBook(userId: string) {
   const all = [...manual, ...automatic];
   const charges = all.filter(isCharge);
   const plain = all.filter((t) => !isCharge(t));
-  const bills = cardBills(charges, brDay(), ctx.edits, ctx.payments);
+  const bills = cardBills(charges, brDay(), ctx.edits, ctx.payments, ctx.personalCards);
   const billOf = new Map(bills.map((b) => [billKey(b.cardId, b.dueDate), b]));
   const billCash = billCashTxs(bills);
   // a compra no cartão fica paga quando a fatura dela é quitada
@@ -435,7 +436,7 @@ export async function financeOverview(userId: string, month: string, regime: Reg
   const receivable = pendingIn.reduce((t, x) => t + x.amountCents, 0) + toReceiveSales;
   // tudo que ainda vai sair: despesas pendentes, o que falta pagar das faturas e parcelas a vencer fora do cartão
   const payable = sumCents(book.cash.filter((t) => t.type === "EXPENSE" && !t.paidAt));
-  const toPayBills = book.bills.reduce((t, b) => t + b.openCents, 0);
+  const toPayBills = book.bills.reduce((t, b) => t + billBusinessOpen(b), 0); // sem os gastos pessoais
   const toPayPurchases = sumCents(book.autoPlain.filter((t) => t.type === "EXPENSE" && !t.paidAt));
   const today = brDay();
   const upcoming = async (type: "INCOME" | "EXPENSE") =>
@@ -443,9 +444,9 @@ export async function financeOverview(userId: string, month: string, regime: Reg
       .map((t) => ({ ...t, dueDate: day(t.dueDate), overdue: day(t.dueDate) < today }));
   const [manualToPay, toReceive] = await Promise.all([upcoming("EXPENSE"), upcoming("INCOME")]);
   // faturas em aberto entram em Contas a pagar como uma linha por fatura
-  const bills = book.bills.filter((b) => b.openCents > 0).map((b) => ({
-    id: `fatura:${b.cardId}:${b.dueDate}`, description: `Fatura ${ctx.cards.get(b.cardId)?.name ?? "do cartão"}`, category: null, amountCents: b.openCents,
-    dueDate: b.effectiveDue, counterpart: b.status === "partial" ? `falta pagar de ${(b.totalCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : `${b.items.length} ${b.items.length === 1 ? "compra" : "compras"}`, overdue: b.overdue,
+  const bills = book.bills.filter((b) => billBusinessOpen(b) > 0).map((b) => ({
+    id: `fatura:${b.cardId}:${b.dueDate}`, description: `Fatura ${ctx.cards.get(b.cardId)?.name ?? "do cartão"}`, category: null, amountCents: billBusinessOpen(b),
+    dueDate: b.effectiveDue, counterpart: b.status === "partial" ? `falta pagar de ${((b.totalCents - (b.personal && b.adjustCents > 0 ? b.adjustCents : 0)) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : `${b.items.length} ${b.items.length === 1 ? "compra" : "compras"}`, overdue: b.overdue,
   }));
   const toPay = [...manualToPay, ...bills].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 8);
   return {
