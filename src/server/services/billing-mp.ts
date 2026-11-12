@@ -94,13 +94,13 @@ export async function syncSubscription(externalId: string, userId?: string) {
         where: { id: sub.userId },
         data: { plan: sub.plan as Plan, planInterval: sub.interval, planRequest: null, planRequestInterval: null, planRequestedAt: null },
       });
-      await tx.notification.create({ data: { userId: sub.userId, title: "Assinatura ativa", body: `Seu plano agora é ${PLANS[sub.plan as PlanCode].name}.` } });
+      await tx.notification.create({ data: { userId: sub.userId, category: "billing", title: "Assinatura ativa", body: `Seu plano agora é ${PLANS[sub.plan as PlanCode].name}.` } });
     } else if (status === "CANCELLED" || status === "PAUSED") {
       // Só volta ao Pessoal se não houver outra assinatura ativa
       const other = await tx.subscription.count({ where: { userId: sub.userId, status: "AUTHORIZED", NOT: { id: sub.id } } });
       if (!other && sub.status === "AUTHORIZED") {
         await tx.user.update({ where: { id: sub.userId }, data: { plan: "PESSOAL", planInterval: null } });
-        await tx.notification.create({ data: { userId: sub.userId, title: "Assinatura encerrada", body: "Sua conta voltou ao plano Pessoal." } });
+        await tx.notification.create({ data: { userId: sub.userId, category: "billing", title: "Assinatura encerrada", body: "Sua conta voltou ao plano Pessoal." } });
       }
     }
     await audit(tx, null, "billing.sync", "Subscription", sub.id, { status });

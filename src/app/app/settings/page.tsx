@@ -8,6 +8,7 @@ import { BillingTab, ReferralsTab, SalesProfileTab } from "./tabs";
 import { TelegramTab } from "./telegram";
 import { telegramStatus } from "@/server/services/telegram";
 import { can, type AreaKey } from "@/domain/permissions";
+import { pushPublicKey } from "@/server/push";
 
 // Abas e quem vê: as pessoais (geral, perfil) todo mundo; assinatura e indicações só o dono; as da agência pela
 // função do membro da equipe
@@ -53,7 +54,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         ))}
       </nav>
       <div className="mx-auto w-full max-w-2xl">
-        {tab === "" && <GeneralTab prefs={prefs} />}
+        {tab === "" && <GeneralTab prefs={prefs} vapidKey={pushPublicKey()} />}
         {tab === "profile" && <ProfileTab name={me.name} email={me.email} avatarVersion={me.avatarUpdatedAt?.getTime().toString() ?? null} deletionRequestedAt={me.isOwner ? user.deletionRequestedAt?.toISOString() ?? null : null} canDelete={me.isOwner} />}
         {tab === "billing" && <BillingTab state={await billingState(user.id)} checkout={checkout} />}
         {tab === "referrals" && <ReferralsTab state={await referralState(user.id)} />}

@@ -17,6 +17,8 @@ const config: NextConfig = {
       // A prévia do editor da página pública roda num iframe do próprio app; o resto nunca é emoldurado
       { source: "/((?!preview/).*)", headers: [...securityHeaders, { key: "X-Frame-Options", value: "DENY" }] },
       { source: "/preview/:path*", headers: [...securityHeaders, { key: "X-Frame-Options", value: "SAMEORIGIN" }] },
+      // O service worker precisa ser relido a cada visita para as atualizações chegarem
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }, { key: "Content-Type", value: "application/javascript; charset=utf-8" }] },
     ];
   },
 };

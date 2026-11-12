@@ -4,8 +4,10 @@ import { sendEmail } from "../mailer";
 import { brandFromEnv } from "./layout";
 import { trialEndingEmail } from "./templates";
 import { notifyPrefs } from "@/domain/plans";
+import { pushIfWanted } from "../push";
 
 const HOUR = 3_600_000;
+const TRIAL_BODY = "Escolha um plano em Configurações › Assinatura para continuar com todos os recursos.";
 
 /**
  * Avisos do fim do teste grátis: um quando faltam até 3 dias e outro nas últimas 24 horas.
@@ -43,9 +45,10 @@ export async function sendTrialReminders(now = new Date()) {
     // Aviso no sino do app sempre; o e-mail só se a pessoa deixou "Assinatura" ligada em Notificações
     await prisma.notification.upsert({
       where: { userId_key: { userId: u.id, key } },
-      create: { userId: u.id, key, title: content.heading, body: "Escolha um plano em Configurações › Assinatura para continuar com todos os recursos." },
+      create: { userId: u.id, key, category: "billing", title: content.heading, body: TRIAL_BODY },
       update: {},
     });
+    await pushIfWanted(u.id, "billing", { title: content.heading, body: TRIAL_BODY, url: "/app/settings?tab=billing", tag: "trial" }).catch(() => 0);
     if (!notifyPrefs(u.preference?.notifications).billing.email) continue;
     const ok = await sendEmail(u.email, content);
     if (ok) sent++;

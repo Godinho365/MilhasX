@@ -89,7 +89,7 @@ export type Requirement = { area: AreaKey; level: Level } | "any" | "owner" | "d
 const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level][] = [
   // de todo mundo logado: a própria sessão, perfil, preferências, avisos, novidades, guias, assistente
   ["/api/me/deletion", "owner"], // fechar a conta é só do dono
-  ["/api/auth/", "any"], ["/api/me", "any"], ["/api/preferences", "any"], ["/api/notifications", "any"],
+  ["/api/auth/", "any"], ["/api/me", "any"], ["/api/preferences", "any"], ["/api/notifications", "any"], ["/api/push", "any"],
   ["/api/news", "any"], ["/api/guides", "any"], ["/api/assistant", "any"],
   // só o dono da conta: plano, assinatura e indicações
   ["/api/billing", "owner"], ["/api/referrals", "owner"],

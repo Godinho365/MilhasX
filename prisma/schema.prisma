@@ -95,20 +95,21 @@ model User {
   workspaceMembers User[]      @relation("Workspace")
   teamLogin        TeamMember? @relation("TeamLogin")
 
-  sessions         Session[]
-  resetTokens      PasswordResetToken[]
-  holders          Holder[]
-  accounts         Account[]
-  entries          Entry[]
-  customers        Customer[]
-  sales            Sale[]
-  alerts           Alert[]
-  notifications    Notification[]
-  preference       UserPreference?
-  auditLogs        AuditLog[]
-  suppliers        Supplier[]
-  supplierAccounts SupplierAccount[]
-  cards            CreditCard[]
+  sessions          Session[]
+  resetTokens       PasswordResetToken[]
+  holders           Holder[]
+  accounts          Account[]
+  entries           Entry[]
+  customers         Customer[]
+  sales             Sale[]
+  alerts            Alert[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+  preference        UserPreference?
+  auditLogs         AuditLog[]
+  suppliers         Supplier[]
+  supplierAccounts  SupplierAccount[]
+  cards             CreditCard[]
 
   recurrences     Recurrence[]
   avatar          Bytes?
@@ -428,6 +429,21 @@ model EmailDispatch {
   @@index([userId, kind])
 }
 
+/// Aparelho que aceitou receber push (Web Push). Um por navegador/celular.
+model PushSubscription {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
+}
+
 model LoginAttempt {
   id        String   @id @default(cuid())
   email     String
@@ -708,6 +724,7 @@ model Notification {
   body      String
   readAt    DateTime?
   createdAt DateTime  @default(now())
+  category  String    @default("system") // points | entries | marketing | system | billing (preferências de Notificações)
   key       String? // aviso que só pode sair uma vez (ex.: bônus do mês); único por usuário
   clearedAt DateTime? // limpa da lista; a linha fica para o aviso com key não sair de novo
 

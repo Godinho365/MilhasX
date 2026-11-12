@@ -12,6 +12,18 @@ export function isConnectionError(e: unknown) {
 
 const RETRY_DELAYS_MS = [300, 1000, 2500];
 
+type NotifyRow = { userId: string; title: string; body: string; category?: string | null; key?: string | null };
+/** Envios de push ainda em andamento (os testes esperam por eles com flushPushes). */
+const pendingPushes = new Set<Promise<unknown>>();
+function afterNotify(rows: NotifyRow[]) {
+  const p = import("./push").then((m) => m.pushForNotifications(rows)).catch(() => {});
+  pendingPushes.add(p);
+  void p.finally(() => pendingPushes.delete(p));
+}
+export async function flushPushes() {
+  while (pendingPushes.size) await Promise.all([...pendingPushes]);
+}
+
 /** Repete a consulta quando a conexão falha (no Windows a porta do Docker às vezes some por alguns segundos). */
 function createClient() {
   return new PrismaClient({ log: ["error"] }).$extends({
@@ -26,6 +38,19 @@ function createClient() {
             await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
           }
         }
+      },
+      // Aviso novo no sino também vira push no celular (para quem ligou aquela categoria)
+      notification: {
+        async create({ args, query }) {
+          const row = await query(args);
+          afterNotify([row as unknown as NotifyRow]);
+          return row;
+        },
+        async createMany({ args, query }) {
+          const res = await query(args);
+          afterNotify((Array.isArray(args.data) ? args.data : [args.data]) as NotifyRow[]);
+          return res;
+        },
       },
     },
   }) as unknown as PrismaClient;

@@ -134,7 +134,7 @@ export async function processDueRecurrences(userId: string, today = new Date()) 
           created++;
           if (r.notify) {
             await prisma.notification.create({
-              data: { userId, title: "Lançamento recorrente", body: `${r.description}: +${r.points.toLocaleString("pt-BR")} pontos em ${r.account.program.name}.` },
+              data: { category: "entries", userId, title: "Lançamento recorrente", body: `${r.description}: +${r.points.toLocaleString("pt-BR")} pontos em ${r.account.program.name}.` },
             });
           }
         }
