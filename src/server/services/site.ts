@@ -19,6 +19,12 @@ async function agencyDefaults(userId: string) {
   return { profile: p, base: defaultContent({ name: p?.displayName || u?.name || "Minha agência", whatsapp: p?.whatsapp, email: p?.email, instagram: p?.instagram }) };
 }
 
+/** Se o site da agência já foi montado e se está publicado (para a aba "Sua MilhasX"). */
+export async function siteStatus(userId: string) {
+  const s = await prisma.agencySite.findUnique({ where: { userId }, select: { published: true } });
+  return { exists: !!s, published: s?.published ?? false };
+}
+
 export async function getSite(userId: string) {
   const [{ profile, base }, site] = await Promise.all([agencyDefaults(userId), prisma.agencySite.findUnique({ where: { userId } })]);
   return {

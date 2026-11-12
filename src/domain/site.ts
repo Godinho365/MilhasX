@@ -48,6 +48,8 @@ export const SECTION_LABELS: Record<SectionType, { label: string; help: string }
 
 export type SiteBrand = {
   name: string; tagline: string; logoId: string | null; city: string; accent: string | null;
+  /** ícone do site (favicon): aba do navegador e atalho na tela do celular */
+  iconId: string | null;
   whatsapp: string; email: string; instagram: string; facebook: string; tiktok: string;
   /** confiança: aparecem no rodapé e nos selos */
   cnpj: string; cadastur: string; hours: string; responseTime: string;
@@ -94,7 +96,7 @@ export function defaultPages(): Record<SitePage, SitePageContent> {
 
 export function defaultContent(agency: { name: string; whatsapp?: string | null; email?: string | null; instagram?: string | null }): SiteContent {
   return {
-    brand: { name: agency.name, tagline: "", logoId: null, city: "", accent: null, whatsapp: agency.whatsapp ?? "", email: agency.email ?? "", instagram: agency.instagram ?? "", facebook: "", tiktok: "", cnpj: "", cadastur: "", hours: "", responseTime: "" },
+    brand: { name: agency.name, tagline: "", logoId: null, iconId: null, city: "", accent: null, whatsapp: agency.whatsapp ?? "", email: agency.email ?? "", instagram: agency.instagram ?? "", facebook: "", tiktok: "", cnpj: "", cadastur: "", hours: "", responseTime: "" },
     pages: defaultPages(),
   };
 }
@@ -147,7 +149,7 @@ export function normalizeContent(raw: unknown, fallback: SiteContent): SiteConte
   return {
     brand: {
       // nome e frase são opcionais: vazio fica vazio (o site mostra a logo, se houver)
-      name: typeof b.name === "string" ? str(b.name, 60) : fallback.brand.name, tagline: str(b.tagline, 100), logoId: img(b.logoId), city: str(b.city, 60),
+      name: typeof b.name === "string" ? str(b.name, 60) : fallback.brand.name, tagline: str(b.tagline, 100), logoId: img(b.logoId), iconId: img(b.iconId), city: str(b.city, 60),
       whatsapp: str(b.whatsapp, 30), email: str(b.email, 120), instagram: handle(b.instagram), facebook: handle(b.facebook), tiktok: handle(b.tiktok), accent: color(b.accent),
       cnpj: str(b.cnpj, 20), cadastur: str(b.cadastur, 30), hours: str(b.hours, 80), responseTime: str(b.responseTime, 60),
     },
@@ -159,6 +161,7 @@ export function normalizeContent(raw: unknown, fallback: SiteContent): SiteConte
 export function imageIdsOf(c: SiteContent) {
   const ids = new Set<string>();
   if (c.brand.logoId) ids.add(c.brand.logoId);
+  if (c.brand.iconId) ids.add(c.brand.iconId);
   for (const p of SITE_PAGES) for (const s of c.pages[p].sections) {
     if ((s.type === "hero" || s.type === "texto") && s.imageId) ids.add(s.imageId);
     if (s.type === "galeria") s.imageIds.forEach((i) => ids.add(i));

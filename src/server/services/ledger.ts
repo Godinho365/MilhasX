@@ -62,6 +62,7 @@ async function checkBalanceAlerts(tx: Tx, userId: string) {
       await tx.notification.create({
         data: {
           userId,
+          category: "points",
           title: "Saldo abaixo do mínimo",
           body: `${acc.program.name} de ${acc.holder.name} está com ${acc.balance} pontos (mínimo ${al.threshold}).`,
         },

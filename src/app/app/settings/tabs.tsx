@@ -143,8 +143,12 @@ export function ReferralsTab({ state }: { state: { code: string; referred: { nam
 const slugify = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
-/** Só a ativação da página e o endereço; textos, cores e botões ficam em Marketing › Site, aba Central de atendimento. */
-export function SalesProfileTab({ profile, defaultName, brand }: { profile: { slug: string; published: boolean } | null; defaultName: string; brand: string }) {
+/**
+ * Os dois endereços públicos da agência, com o mesmo nome: o site (/s/, para divulgar; montado em Marketing › Site)
+ * e a Central de Atendimento (/p/, onde o cliente pede cotação, mostra interesse em gestão de milhas e fala no
+ * WhatsApp; os botões de cotação do site abrem ela). Aqui: o endereço, ligar a Central e os links dos dois.
+ */
+export function SalesProfileTab({ profile, site, defaultName, brand }: { profile: { slug: string; published: boolean } | null; site: { exists: boolean; published: boolean }; defaultName: string; brand: string }) {
   const router = useRouter();
   const [slug, setSlug] = useState(profile?.slug ?? slugify(defaultName));
   const [published, setPublished] = useState(profile?.published ?? false);
@@ -152,7 +156,7 @@ export function SalesProfileTab({ profile, defaultName, brand }: { profile: { sl
   const [busy, setBusy] = useState(false);
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
-  const link = `${origin}/p/${profile?.slug ?? slug}`;
+  const saved = profile?.slug ?? slug;
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -165,25 +169,43 @@ export function SalesProfileTab({ profile, defaultName, brand }: { profile: { sl
   }
   return (
     <form onSubmit={save}>
-      <p className="mb-6 text-sm text-muted">Sua página na {brand}: a Central de Atendimento onde clientes pedem cotação, mostram interesse em gestão de milhas e falam com você no WhatsApp. Textos, visual, botões e as páginas de cotação, reserva, saldo e contrato você edita em Marketing › Site, na aba Central de atendimento.</p>
+      <p className="mb-6 text-sm text-muted">Sua agência na {brand} tem dois endereços públicos com o mesmo nome: o <strong className="text-zinc-200">site</strong>, para divulgar, e a <strong className="text-zinc-200">Central de Atendimento</strong>, onde o cliente pede cotação, mostra interesse em gestão de milhas e fala com você no WhatsApp. Os botões de cotação do site abrem a Central.</p>
       {erro && <div className="mb-4"><Alert>{erro}</Alert></div>}
-      <Section title="Página">
-        <div className="space-y-4">
-          <Switch label="Página pública ativa" hint="Desligada, ninguém consegue abrir o endereço" checked={published} onChange={setPublished} />
-          <Field label="Endereço da página" required hint={`/p/${slug || "seu-nome"}`}><input className="input" value={slug} onChange={(e) => setSlug(slugify(e.target.value))} required minLength={3} maxLength={40} /></Field>
-          {profile && (
-            <div className="flex gap-2">
-              <input className="input min-w-0 flex-1 text-sm" readOnly value={link} aria-label="Link da sua página" onFocus={(e) => e.target.select()} />
-              <button type="button" className="btn-ghost h-10" onClick={() => navigator.clipboard.writeText(link).then(() => toast("Link copiado"), () => null)}><Copy className="h-4 w-4" />Copiar</button>
-              {profile.published && <a href={`/p/${profile.slug}`} target="_blank" rel="noopener" className="btn-ghost h-10"><ExternalLink className="h-4 w-4" />Abrir</a>}
-            </div>
-          )}
+      <Section title="Endereço">
+        <Field label="Nome no endereço" required hint={`Vale para os dois: /s/${slug || "seu-nome"} (site) e /p/${slug || "seu-nome"} (Central)`}>
+          <input className="input" value={slug} onChange={(e) => setSlug(slugify(e.target.value))} required minLength={3} maxLength={40} aria-label="Nome no endereço" />
+        </Field>
+      </Section>
+      <Section title="Site da agência">
+        <div className="space-y-3">
+          <p className="text-sm text-muted">O site completo, com capa, destinos, pacotes da Vitrine, sobre e contato. É o endereço para divulgar.</p>
+          {profile ? (
+            <>
+              <PublicLink label="Link do site" url={`${origin}/s/${saved}`} path={`/s/${saved}`} open={site.published} />
+              <p className="text-xs text-muted">{site.published ? "Publicado." : site.exists ? "O site ainda não está publicado: ninguém consegue abrir o link." : "O site ainda não foi montado."}</p>
+            </>
+          ) : <p className="text-xs text-muted">Salve o endereço para ver o link do site.</p>}
+          <Link href="/app/marketing/site" className="btn-ghost w-fit"><Palette className="h-4 w-4" />{site.exists ? "Editar o site" : "Montar o site"}</Link>
         </div>
       </Section>
-      <div className="flex flex-wrap gap-3">
-        <button className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</button>
-        <Link href="/app/marketing/site?aba=central" className="btn-ghost"><Palette className="h-4 w-4" />Personalizar página</Link>
-      </div>
+      <Section title="Central de Atendimento">
+        <div className="space-y-4">
+          <Switch label="Central de Atendimento ativa" hint="Desligada, ninguém consegue abrir o endereço, e os botões de cotação do site abrem o WhatsApp" checked={published} onChange={setPublished} />
+          {profile && <PublicLink label="Link da Central de Atendimento" url={`${origin}/p/${saved}`} path={`/p/${saved}`} open={profile.published} />}
+          <Link href="/app/marketing/site?aba=central" className="btn-ghost w-fit"><Palette className="h-4 w-4" />Personalizar a Central</Link>
+        </div>
+      </Section>
+      <button className="btn-primary" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</button>
     </form>
+  );
+}
+
+function PublicLink({ label, url, path, open }: { label: string; url: string; path: string; open: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <input className="input min-w-0 flex-1 text-sm" readOnly value={url} aria-label={label} onFocus={(e) => e.target.select()} />
+      <button type="button" className="btn-ghost h-10" onClick={() => navigator.clipboard.writeText(url).then(() => toast("Link copiado"), () => null)}><Copy className="h-4 w-4" />Copiar</button>
+      {open && <a href={path} target="_blank" rel="noopener" className="btn-ghost h-10"><ExternalLink className="h-4 w-4" />Abrir</a>}
+    </div>
   );
 }

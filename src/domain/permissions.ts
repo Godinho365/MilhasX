@@ -21,7 +21,7 @@ export const AREAS: { key: AreaKey; label: string; hint: string; edit: boolean }
   { key: "buscador", label: "Buscador de passagens", hint: "Pesquisa de voos em milhas", edit: true },
   { key: "marketing", label: "Marketing", hint: "Vitrine, site, criativos e tráfego", edit: true },
   { key: "contatos", label: "Contatos", hint: "Clientes, passageiros, fornecedores e interesses de viagem", edit: true },
-  { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e processos da equipe", edit: true },
+  { key: "tarefas", label: "Tarefas e processos", hint: "Quadros de tarefas e os fluxogramas dos processos; ver = consultar e perguntar à IA, editar = desenhar, gerar com IA e usar", edit: true },
   { key: "calendario", label: "Calendário", hint: "Eventos da agência (criar, importar). Embarques, tarefas, aniversários e vencimentos aparecem conforme as outras áreas que a função vê", edit: true },
   { key: "metas", label: "Metas e comissões", hint: "Metas da equipe, regras de comissão, extrato e pagamentos (mostra quanto cada um ganha)", edit: true },
   { key: "equipe", label: "Equipe", hint: "Ver a equipe; editar = convidar, mudar funções e tirar acessos", edit: true },
@@ -54,8 +54,40 @@ export const ROLES = {
     hint: "Só consulta: financeiro, vendas e relatórios",
     perms: ["painel:view", "financeiro:view", "vendas:view"] as Permission[],
   },
+  COMERCIAL: {
+    label: "Comercial",
+    hint: "Propostas, negociação e acompanhamento: CRMs, cotações, buscador e contatos (vendas para consulta)",
+    perms: ["painel:view", "crm:edit", "crmMilhas:edit", "buscador:edit", "contatos:edit", "vendas:view", "chat:view", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  OPORTUNIDADES: {
+    label: "Oportunidades",
+    hint: "Compra e venda de milhas: Chat Balcões, CRM Milhas e buscador (saldos para consulta)",
+    perms: ["painel:view", "chat:edit", "crmMilhas:edit", "buscador:edit", "milhas:view", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  CONTAS: {
+    label: "Contas",
+    hint: "Saldos, contas e movimentações: milhas, titulares, transferências e as senhas das contas",
+    perms: ["painel:view", "milhas:edit", "senhas:edit", "vendas:view", "contatos:view", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
+  COMPLIANCE: {
+    label: "Compliance",
+    hint: "Regras e riscos: consulta milhas, vendas, financeiro, CRMs e contatos; cuida dos processos",
+    perms: ["painel:view", "milhas:view", "vendas:view", "financeiro:view", "crm:view", "crmMilhas:view", "contatos:view", "tarefas:edit", "calendario:view", "equipe:view"] as Permission[],
+  },
+  INTELIGENCIA: {
+    label: "Inteligência",
+    hint: "Indicadores e análises: painel e relatórios, com milhas, vendas, financeiro, CRMs e metas para consulta",
+    perms: ["painel:view", "milhas:view", "vendas:view", "financeiro:view", "crm:view", "crmMilhas:view", "metas:view", "tarefas:edit", "calendario:view", "equipe:view"] as Permission[],
+  },
+  MARKETING: {
+    label: "Marketing",
+    hint: "Vitrine, site, criativos e tráfego; leads do CRM e contatos",
+    perms: ["painel:view", "marketing:edit", "crm:view", "contatos:edit", "tarefas:edit", "calendario:edit", "equipe:view"] as Permission[],
+  },
 } satisfies Record<string, { label: string; hint: string; perms: Permission[] }>;
 export type RoleKey = keyof typeof ROLES | "CUSTOM";
+/** Todas as funções, para validar o que chega pela API. */
+export const ROLE_KEYS = ["CUSTOM", ...(Object.keys(ROLES) as (keyof typeof ROLES)[])] as [RoleKey, ...RoleKey[]];
 export const ROLE_LABEL: Record<RoleKey, string> = { ...Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, r.label])), CUSTOM: "Personalizada" } as Record<RoleKey, string>;
 
 const AREA_KEYS = new Set(AREAS.map((a) => a.key));
@@ -89,7 +121,7 @@ export type Requirement = { area: AreaKey; level: Level } | "any" | "owner" | "d
 const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level][] = [
   // de todo mundo logado: a própria sessão, perfil, preferências, avisos, novidades, guias, assistente
   ["/api/me/deletion", "owner"], // fechar a conta é só do dono
-  ["/api/auth/", "any"], ["/api/me", "any"], ["/api/preferences", "any"], ["/api/notifications", "any"],
+  ["/api/auth/", "any"], ["/api/me", "any"], ["/api/preferences", "any"], ["/api/notifications", "any"], ["/api/push", "any"],
   ["/api/news", "any"], ["/api/guides", "any"], ["/api/assistant", "any"],
   // só o dono da conta: plano, assinatura e indicações
   ["/api/billing", "owner"], ["/api/referrals", "owner"],
@@ -109,6 +141,7 @@ const API_RULES: [prefix: string, area: AreaKey | "any" | "owner", force?: Level
   ["/api/flight-searches", "buscador"],
   ["/api/showcase", "marketing"], ["/api/site", "marketing"], ["/api/sales-profile", "marketing"],
   ["/api/customers", "contatos"], ["/api/passengers", "contatos"], ["/api/interests", "contatos"],
+  ["/api/processes/ask", "tarefas", "view"], // perguntar à IA só lê os processos
   ["/api/tasks", "tarefas"], ["/api/task-boards", "tarefas"], ["/api/processes", "tarefas"],
   ["/api/goals", "metas"], ["/api/key-results", "metas"], ["/api/commissions", "metas"],
   ["/api/calendar/feed", "owner"], // o link do Google Agenda mostra tudo: só o dono gera

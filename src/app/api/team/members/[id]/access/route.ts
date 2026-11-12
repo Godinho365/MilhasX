@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { route, json, parseBody, requireUser } from "@/server/http";
 import { revokeAccess, updateAccess } from "@/server/services/team-access";
+import { ROLE_KEYS } from "@/domain/permissions";
 
 const schema = z.object({
-  role: z.enum(["ADMIN", "EMISSOR", "ATENDIMENTO", "FINANCEIRO", "CONTADOR", "CUSTOM"]),
+  role: z.enum(ROLE_KEYS),
   permissions: z.array(z.string().max(40)).max(60).optional(),
 });
 

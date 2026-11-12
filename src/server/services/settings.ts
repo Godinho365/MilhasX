@@ -133,7 +133,7 @@ export async function adminSetPlan(actorId: string, userId: string, plan: Plan, 
       where: { id: userId },
       data: { plan, planInterval: plan === "PESSOAL" ? null : interval ?? "MENSAL", planRequest: null, planRequestInterval: null, planRequestedAt: null },
     });
-    await tx.notification.create({ data: { userId, title: "Plano atualizado", body: `Seu plano agora é ${PLANS[plan].name}.` } });
+    await tx.notification.create({ data: { userId, category: "billing", title: "Plano atualizado", body: `Seu plano agora é ${PLANS[plan].name}.` } });
     await audit(tx, actorId, "admin.user_plan", "User", userId, { plan, interval });
   });
 }

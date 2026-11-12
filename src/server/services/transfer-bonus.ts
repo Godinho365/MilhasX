@@ -44,7 +44,7 @@ export async function notifyMonthlyBonus(userId: string, now = new Date()) {
     .map((r) => `${r.label}: até ${pts(r.left)} milhas de bônus${r.transferable ? ` (${r.bonusPct}%: transfira até ${pts(r.transferable)} pontos)` : ""}`)
     .join(" · ");
   try {
-    await prisma.notification.create({ data: { userId, key, title: "Bônus de transferência renovado", body: `Novo mês, limite de bônus renovado. ${body}.` } });
+    await prisma.notification.create({ data: { userId, key, category: "points", title: "Bônus de transferência renovado", body: `Novo mês, limite de bônus renovado. ${body}.` } });
     return true;
   } catch (e) {
     // outra requisição já criou o aviso deste mês

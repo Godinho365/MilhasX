@@ -787,8 +787,15 @@ export const commissionPaySchema = z.object({
 export const processSchema = z.object({
   title: z.string().trim().min(1, "Dê um nome ao processo").max(120),
   description: z.string().trim().max(1000).nullable().optional(),
-  steps: z.array(z.object({ title: z.string().trim().max(200), detail: z.string().trim().max(1000).nullable().optional() })).min(1).max(50),
+  steps: z.array(z.object({ title: z.string().trim().max(200), detail: z.string().trim().max(1000).nullable().optional() })).min(1).max(50).optional(),
+  // fluxograma: conferido e limpo no serviço (cleanFlow)
+  flow: z.object({ nodes: z.array(z.unknown()).max(150, "No máximo 150 caixas por processo"), edges: z.array(z.unknown()).max(300, "No máximo 300 ligações por processo") }).nullable().optional(),
+}).refine((b) => b.flow || b.steps, "Inclua ao menos uma etapa");
+export const processAskSchema = z.object({
+  question: z.string().trim().min(2, "Escreva a pergunta").max(1000),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(8000) })).max(20).default([]),
 });
+export const processGenerateSchema = z.object({ description: z.string().trim().min(10, "Descreva o processo com um pouco mais de detalhe").max(3000) });
 export const processRunSchema = z.object({ label: z.string().trim().max(80).nullable().optional(), memberId: id.nullable().optional(), dueDate: dateStr.nullable().optional() });
 
 // Contatos: passageiros e interesses de viagem

@@ -10,6 +10,7 @@ import { ThemeSwitch } from "@/components/theme-switch";
 import { Switch } from "@/components/form-parts";
 import { NOTIFY_CATEGORIES, VALUES_MODES, VALUES_LABELS, type NotifyPrefs, type ValuesMode } from "@/domain/plans";
 import { AvatarUpload } from "./avatar";
+import { PushDevice } from "./push-device";
 
 type Prefs = {
   showValues: boolean;
@@ -36,7 +37,7 @@ const VALUES_HINT: Record<ValuesMode, string> = {
   HIDDEN: "Esconde reais e saldos de pontos",
 };
 
-export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
+export function GeneralTab({ prefs: initial, vapidKey = "" }: { prefs: Prefs; vapidKey?: string }) {
   const router = useRouter();
   const [prefs, setPrefs] = useState(initial);
   const [erro, setErro] = useState("");
@@ -55,6 +56,18 @@ export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
   const set = <K extends keyof Prefs>(k: K, v: Prefs[K]) => save({ [k]: v }, { ...prefs, [k]: v });
   const setChannel = (cat: keyof NotifyPrefs, ch: "email" | "push", v: boolean) =>
     save({ notifications: { [cat]: { [ch]: v } } }, { ...prefs, notifications: { ...prefs.notifications, [cat]: { ...prefs.notifications[cat], [ch]: v } } });
+  /** Ao ativar o push pela primeira vez, liga a coluna para tudo menos marketing (a pessoa ajusta depois). */
+  function pushOnFirstEnable() {
+    if (NOTIFY_CATEGORIES.some(([k]) => prefs.notifications[k].push)) return;
+    const notifications = { ...prefs.notifications };
+    const patch: Record<string, { push: boolean }> = {};
+    for (const [k] of NOTIFY_CATEGORIES) {
+      if (k === "marketing") continue;
+      notifications[k] = { ...notifications[k], push: true };
+      patch[k] = { push: true };
+    }
+    void save({ notifications: patch }, { ...prefs, notifications });
+  }
 
   async function changePw(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -95,6 +108,7 @@ export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
       </Section>
 
       <Section title="Notificações">
+        {vapidKey && <PushDevice vapidKey={vapidKey} onFirstEnable={pushOnFirstEnable} />}
         <div className="overflow-x-auto">
           <table className="w-full text-sm" aria-label="Canais de notificação">
             <thead>
@@ -111,7 +125,7 @@ export function GeneralTab({ prefs: initial }: { prefs: Prefs }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-muted">Avisos de segurança (código de verificação, senha alterada, conta Google conectada) sempre vão por e-mail. O push só é entregue quando o app estiver instalado no celular com notificações permitidas.</p>
+        <p className="mt-3 text-xs text-muted">Avisos de segurança (código de verificação, senha alterada, conta Google conectada) sempre vão por e-mail. O push chega nos aparelhos em que você tocou em "Ativar neste aparelho".</p>
       </Section>
 
       <Section title="Segurança">
