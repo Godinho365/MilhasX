@@ -307,6 +307,11 @@ describe("site pelo gateway (rede interna)", () => {
     const res = await fetch(`${url}/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkId, method: "messages", args: [GROUP, { limit: 1 }] }) });
     expect(res.status).toBe(401);
     expect(((await (await fetch(`${url}/health`)).json()) as { leader: boolean }).leader).toBe(true);
+    // gateway parado e grupo ainda não sincronizado (o já sincronizado lê do banco, sem gateway): a leitura vai ao
+    // gateway. Com o gateway rodando, ele podia sincronizar o grupo de novo antes da leitura (máquina mais lenta)
+    await gw!.stop();
+    gw = null;
+    await prisma.telegramGroup.update({ where: { id: groupId }, data: { syncedAt: null } });
     process.env.TG_GATEWAY_URL = "http://127.0.0.1:1";
     const e = await chatMessages(userId, groupId).catch((x) => x);
     expect(e).toBeInstanceOf(DomainError);
