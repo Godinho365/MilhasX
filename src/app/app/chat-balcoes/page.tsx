@@ -21,7 +21,8 @@ export default async function ChatBalcoesPage({ searchParams }: { searchParams: 
     .flatMap((a) => a.groups.map((g) => ({ id: g.id, title: g.title, account: a.accountName ?? a.phone, clearedUpTo: g.clearedUpTo })));
   return (
     <>
-      <PageHeader title="Chat Balcões" subtitle="As mensagens dos grupos dos balcões, com alertas" />
+      {/* com conversas, o título fica na lista de conversas (como num mensageiro) */}
+      {(!st.enabled || chats.length === 0) && <PageHeader title="Chat Balcões" subtitle="As mensagens dos grupos dos balcões, com alertas" />}
       {!st.enabled ? (
         <Alert kind="info">O servidor ainda não está pronto para o Telegram (faltam TELEGRAM_API_ID, TELEGRAM_API_HASH ou CREDENTIALS_KEY).</Alert>
       ) : chats.length === 0 ? (
