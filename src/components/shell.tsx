@@ -449,7 +449,7 @@ export function Shell(props: {
         </div>
       </header>
       {/* O Kanban do CRM usa a largura toda da tela; as outras páginas ficam centralizadas */}
-      <main className={`mx-auto ${path.startsWith("/app/crm") ? "max-w-[1800px]" : "max-w-[1560px]"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
+      <main className={`mx-auto ${path.startsWith("/app/crm") || path === "/app/chat-balcoes" ? "max-w-[1800px]" : "max-w-[1560px]"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
 
       {/* Barra inferior no celular */}
       <nav aria-label="Navegação rápida" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">

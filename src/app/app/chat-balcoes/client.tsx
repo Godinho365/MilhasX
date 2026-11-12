@@ -274,7 +274,9 @@ export function ChatBalcoesClient({ chats, initialAlerts, initialDms, accounts =
   };
 
   return (
-    <div className="card flex h-[calc(100dvh-8.5rem)] min-h-[520px] overflow-hidden">
+    // altura exata do espaço livre (barra do topo + margens da página + o espaço do botão flutuante "Novo lançamento"
+    // embaixo): a página não ganha uma segunda rolagem e o botão não cobre o campo de mensagem
+    <div className="card flex h-[calc(100dvh-13.75rem)] min-h-[460px] overflow-hidden sm:h-[calc(100dvh-14rem)] lg:h-[calc(100dvh-12rem)]">
       {/* lista de conversas */}
       <aside className={`${mobileChat ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line md:w-[300px] lg:w-[320px]`} aria-label="Conversas">
         <div className="space-y-3 border-b border-line p-3 sm:p-4">
@@ -947,7 +949,8 @@ function Bubble({ m, domId, chat, mediaBase, onOpen, onNegotiate, onDm, opening,
   const action = "flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium hover:bg-panel2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-light";
   return (
     <div id={domId} className={`group flex scroll-mt-4 gap-2 ${out ? "justify-end" : "justify-start"}`}>
-      {!out && <div className="mt-auto pb-6"><Avatar kind="dm" name={m.sender} size="sm" /></div>}
+      {/* avatar na altura do balão (o nome de quem mandou fica em cima, o fio de contrapropostas embaixo) */}
+      {!out && <div className={showSender || chat ? "pt-5" : ""}><Avatar kind="dm" name={m.sender} size="sm" /></div>}
       <div className={`flex min-w-0 max-w-[min(85%,600px)] flex-col ${out ? "items-end" : "items-start"}`}>
         {!out && (showSender || chat) && (
           <span className="mb-0.5 flex max-w-full items-baseline gap-2 px-3 text-xs">
