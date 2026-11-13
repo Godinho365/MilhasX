@@ -10,7 +10,7 @@ import {
   LayoutGrid, WalletCards, UserPlus, HandCoins, Eye, EyeOff, PlayCircle, KanbanSquare, FilePlus2, Coins, Plane, ChevronDown, Users, Gem, Landmark, Briefcase,
   Ticket, ArrowLeftRight, CalendarClock, Crown, Lightbulb, ShoppingCart, Luggage, FileSpreadsheet, ListChecks, Workflow, Target, UserRound,
   Truck, IdCard, MapPinned, Wallet, Sparkles, Store, Globe, TrendingUp, BarChart3, MessagesSquare, CalendarDays, Gauge,
-  Route, Earth, BedDouble, Car, Ship, PackagePlus,
+  Route, Earth, BedDouble, Car, Ship, PackagePlus, Handshake,
 } from "lucide-react";
 import { VALUES_MODES, VALUES_LABELS, type ValuesMode } from "@/domain/plans";
 import { api } from "@/lib/api";
@@ -58,6 +58,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     ] },
     { href: "/app/buscador", label: "Buscador", icon: Plane },
     { href: "/app/chat-balcoes", label: "Chat Balcões", icon: MessagesSquare },
+    { href: "/app/balcao-milhasx", label: "Balcão MilhasX", icon: Handshake },
     { key: "marketing", label: "Marketing", icon: Megaphone, children: [
       { href: "/app/marketing/criativos", label: "Criativos", icon: Sparkles },
       { href: "/app/marketing/vitrine", label: "Vitrine", icon: Store },
@@ -118,7 +119,7 @@ const TITLES: [string, string][] = [
   ["/app/metricas", "Métricas"], ["/app/reports", "Relatórios"], ["/app/entries", "Extrato"], ["/app/financeiro/notas", "Notas Fiscais"], ["/app/equipe/tarefas", "Tarefas"], ["/app/equipe/processos", "Processos"], ["/app/equipe/metas", "Metas e comissões"], ["/app/equipe", "Equipe"], ["/app/contatos/passageiros", "Passageiros"], ["/app/contatos/interesses", "Interesses de Viagem"], ["/app/financeiro", "Financeiro"], ["/app/milhas/calendario", "Calendário de clubes"], ["/app/milhas/clubes", "Clubes"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/milhas/sugestor-compra", "Sugestor de Compra"], ["/app/milhas/viaje-facil", "ViajeFácil"],
   ["/app/credit-cards", "Central de Cartões"], ["/app/marketing/criativos", "Criativos"], ["/app/marketing/vitrine", "Vitrine"], ["/app/marketing/site", "Site"], ["/app/marketing/trafego", "Tráfego"], ["/app/sales", "Vendas"],
   ["/app/management", "Fornecedores"], ["/app/programs", "Programas"], ["/app/notifications", "Notificações"],
-  ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/chat-balcoes", "Chat Balcões"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
+  ["/app/settings", "Configurações"], ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador de passagens"], ["/app/chat-balcoes", "Chat Balcões"], ["/app/balcao-milhasx", "Balcão MilhasX"], ["/app/tradutor", "Tradutor de milhas"], ["/app/upgrade", "Planos"], ["/app/guides", "Guias"], ["/app/news", "Novidades"],
 ];
 
 // Tag dos guias que explica cada página (botão "Tutorial" do cabeçalho)
@@ -488,7 +489,7 @@ export function Shell(props: {
         </div>
       </header>
       {/* O Kanban do CRM usa a largura toda da tela; as outras páginas ficam centralizadas */}
-      <main className={`mx-auto ${path.startsWith("/app/crm") || path === "/app/chat-balcoes" ? "max-w-[1800px]" : "max-w-[1560px]"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
+      <main className={`mx-auto ${path.startsWith("/app/crm") || path === "/app/chat-balcoes" || path === "/app/balcao-milhasx" ? "max-w-[1800px]" : "max-w-[1560px]"} px-3 py-5 pb-36 sm:px-5 sm:py-6 lg:pb-28`}>{props.children}</main>
 
       {/* Barra inferior no celular */}
       <nav aria-label="Navegação rápida" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
