@@ -83,6 +83,8 @@ model User {
 
   /// Telefone (WhatsApp) informado no cadastro
   phone           String?
+  /// De onde veio o cadastro (utm_* e fbclid do link do anúncio). Só com o consentimento de marketing.
+  signupUtm       Json?
   /// Quando aceitou os Termos de Serviço e a Política de Privacidade
   termsAcceptedAt DateTime?
   /// "sub" da conta Google vinculada (Continuar com Google)

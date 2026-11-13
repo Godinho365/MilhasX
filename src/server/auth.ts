@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { signupReferral } from "./services/settings";
+import { pickUtm } from "@/domain/traffic";
 import { createHash, randomBytes } from "node:crypto";
 import { prisma, DomainError, audit, log } from "./db";
 import { notifyGoogleLinked, notifyPasswordChanged, notifyWelcome } from "./emails/notify";
@@ -22,7 +23,7 @@ export function validatePassword(pw: string) {
   if (pw.length > 128) throw new DomainError(400, "Senha longa demais");
 }
 
-export async function registerUser(input: { name: string; email: string; password: string; ref?: string; phone?: string | null; acceptTerms?: boolean }) {
+export async function registerUser(input: { name: string; email: string; password: string; ref?: string; phone?: string | null; acceptTerms?: boolean; utm?: Record<string, string> | null }) {
   validatePassword(input.password);
   const email = input.email.trim().toLowerCase();
   const exists = await prisma.user.findUnique({ where: { email } });
@@ -35,6 +36,7 @@ export async function registerUser(input: { name: string; email: string; passwor
       passwordHash: await hashPassword(input.password),
       phone: input.phone || null,
       termsAcceptedAt: input.acceptTerms ? new Date() : null,
+      signupUtm: pickUtm(input.utm ?? null) ?? undefined,
       role: "USER",
       ...(await signupReferral(input.ref)),
       preference: { create: {} },
@@ -57,7 +59,7 @@ export interface GoogleProfile {
  * Google confirmou o e-mail); sem conta, cria uma nova (se o cadastro estiver aberto) com senha
  * aleatória: a pessoa pode criar uma senha depois pelo "Esqueceu sua senha?".
  */
-export async function loginWithGoogle(p: GoogleProfile, opts: { ref?: string; allowCreate: boolean }) {
+export async function loginWithGoogle(p: GoogleProfile, opts: { ref?: string; utm?: Record<string, string> | null; allowCreate: boolean }) {
   if (!p.emailVerified) throw new DomainError(400, "O e-mail da conta Google não está verificado");
   const email = p.email.trim().toLowerCase();
   let user = (await prisma.user.findUnique({ where: { googleId: p.sub } })) ?? (await prisma.user.findUnique({ where: { email } }));
@@ -77,6 +79,7 @@ export async function loginWithGoogle(p: GoogleProfile, opts: { ref?: string; al
         googleId: p.sub,
         passwordHash: await hashPassword(newToken()),
         termsAcceptedAt: new Date(),
+        signupUtm: pickUtm(opts.utm ?? null) ?? undefined,
         role: "USER",
         ...(await signupReferral(opts.ref)),
         preference: { create: {} },

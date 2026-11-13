@@ -3,9 +3,11 @@ import { prisma, DomainError, audit } from "../db";
 import { periodWindow, type PeriodKey } from "@/domain/admin-metrics";
 import { csvCell, exportCsv } from "./admin";
 import { conversionData, recoveryData } from "./admin-dashboard";
+import { leadsData } from "./admin-leads";
 
 export const REPORTS = [
   { kind: "users", label: "Usuários", detail: "Todos os cadastros com plano, teste e uso", period: false },
+  { kind: "leads", label: "Leads", detail: "Contas e cadastros não concluídos do período, com origem, campanha e situação", period: true },
   { kind: "signups", label: "Cadastros do período", detail: "Quem se cadastrou no período, com origem e plano atual", period: true },
   { kind: "subscriptions", label: "Assinaturas", detail: "Assinaturas do Mercado Pago atualizadas no período", period: true },
   { kind: "cohorts", label: "Coortes de conversão", detail: "Cadastros, ativação, pedidos e pagantes por semana/mês", period: true },
@@ -39,6 +41,12 @@ export async function reportCsv(actorId: string, kind: ReportKind, period: Perio
       const us = await prisma.user.findMany({ where: { createdAt: inPeriod, role: "USER" }, select: { id: true, name: true, email: true, plan: true, trialEndsAt: true, googleId: true, referredById: true, createdAt: true }, orderBy: { createdAt: "desc" } });
       rows = [["id", "nome", "email", "origem", "plano", "teste_ate", "criado_em"],
         ...us.map((u) => [u.id, u.name, u.email, u.referredById ? "indicacao" : u.googleId ? "google" : "email", u.plan, iso(u.trialEndsAt), iso(u.createdAt)])];
+      break;
+    }
+    case "leads": {
+      const d = await leadsData(period, null, now, Number.POSITIVE_INFINITY);
+      rows = [["email", "nome", "telefone", "situacao", "origem", "campanha", "metodo", "aceita_marketing", "usou", "chegou_em"],
+        ...d.list.map((l) => [l.email, l.name, l.phone ?? "", l.status, l.origin, l.campaign ?? "", l.userId ? l.method : "", l.marketing ? "sim" : "nao", l.used ? "sim" : "nao", iso(l.createdAt)])];
       break;
     }
     case "subscriptions": {

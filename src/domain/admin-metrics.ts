@@ -312,3 +312,40 @@ export function cohorts(
   const out = [...rows.values()].map((r) => ({ ...r, rate: r.signups ? Math.round((r.paid / r.signups) * 1000) / 10 : 0 }));
   return by === "bucket" ? out.reverse() : out.sort((a, b) => b.signups - a.signups);
 }
+
+// ---------- Leads ----------
+
+export type LeadStatus = "unfinished" | "trial" | "trial_over" | "asked" | "paid" | "free";
+export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
+  unfinished: "Não concluiu o cadastro", trial: "Em teste", trial_over: "Teste acabou", asked: "Pediu plano", paid: "Pagante", free: "Plano Pessoal",
+};
+
+/** De onde veio: a utm_source do anúncio, a indicação de um cliente ou "Direto / sem origem". */
+export function leadOrigin(u: { signupUtm?: unknown; referredById?: string | null }) {
+  const utm = (u.signupUtm && typeof u.signupUtm === "object" ? u.signupUtm : {}) as Record<string, unknown>;
+  const src = typeof utm.utm_source === "string" && utm.utm_source.trim() ? utm.utm_source.trim().toLowerCase() : null;
+  const campaign = typeof utm.utm_campaign === "string" ? utm.utm_campaign : null;
+  if (src) return { origin: src, campaign };
+  if (typeof utm.fbclid === "string") return { origin: "facebook (anúncio)", campaign };
+  if (u.referredById) return { origin: "Indicação de cliente", campaign: null };
+  return { origin: "Direto / sem origem", campaign: null };
+}
+
+export function leadStatus(u: AdminUser, paidUsers: Set<string>, asked: Set<string>, now = new Date()): LeadStatus {
+  if (isPaidPlan(u.plan) || paidUsers.has(u.id)) return "paid";
+  if (u.planRequest || asked.has(u.id)) return "asked";
+  if (u.trialEndsAt && u.trialEndsAt > now) return "trial";
+  if (u.trialEndsAt) return "trial_over";
+  return "free";
+}
+
+/** Funil do lead no período: começou o cadastro → criou a conta → usou → pediu plano → pagou. */
+export function leadFunnel(counts: { started: number; accounts: number; used: number; asked: number; paid: number }) {
+  return funnel([
+    { key: "started", label: "Começaram o cadastro", count: Math.max(counts.started, counts.accounts) },
+    { key: "accounts", label: "Criaram a conta", count: counts.accounts },
+    { key: "used", label: "Usaram (1º lançamento)", count: counts.used },
+    { key: "asked", label: "Pediram um plano", count: counts.asked },
+    { key: "paid", label: "Viraram pagantes", count: counts.paid },
+  ]);
+}
