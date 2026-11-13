@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { resetDb, Client, seedPrograms } from "./helpers";
 import { prisma } from "@/server/db";
+import { brDay } from "@/domain/brasilia";
 import * as register from "@/app/api/auth/register/route";
 import * as holders from "@/app/api/holders/route";
 import * as accounts from "@/app/api/accounts/route";
@@ -85,7 +86,7 @@ describe("bilhete corrige milhas e taxa", () => {
     expect(s.items[0]).toMatchObject({ points: 21500, salePriceCents: Math.round((21500 * 2550) / 1000), costs: [{ type: "TAXA_EMBARQUE", amountCents: 6230 }] });
     expect(await balance()).toBe(50000 - 21500);
 
-    expect((await c.call(refund.POST, "POST", "/x", { feeCents: 0, date: "2026-11-12" }, { id: first.item.saleId })).status).toBe(200);
+    expect((await c.call(refund.POST, "POST", "/x", { feeCents: 0, date: brDay() }, { id: first.item.saleId })).status).toBe(200);
     const w = await attach(id, "22.000", "70,00");
     expect(w.aviso).toContain("⚠️ o bilhete tem 22.000 milhas e taxa R$ 70,00, mas não corrigi porque a venda foi reembolsada; corrija em Vendas.");
     expect(w.item).toMatchObject({ points: 21500, taxesCents: 6230 });

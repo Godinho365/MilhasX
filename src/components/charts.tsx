@@ -330,3 +330,29 @@ export function DailyMoney({ data, empty, labels = { revenue: "Faturamento", pro
     </div>
   );
 }
+
+/** Contagens por dia, semana ou mês (Admin › Indicadores): uma área por série, eixo inteiro. */
+export function CountSeries({ data, series, bucket, label, empty }: { data: Record<string, number | string>[]; series: { key: string; name: string; color: string }[]; bucket: "day" | "week" | "month"; label: string; empty: string }) {
+  if (data.every((d) => series.every((s) => !Number(d[s.key])))) return <p className="py-16 text-center text-sm text-muted">{empty}</p>;
+  const tick = (d: string) => (bucket === "month" ? monthLabel(d) : ddmm(d));
+  const title = (d: string) => (bucket === "week" ? `Semana de ${ddmm(d)}` : tick(d));
+  return (
+    <div className="h-72 w-full" role="img" aria-label={label}>
+      <ResponsiveContainer>
+        <AreaChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
+          <defs>
+            {series.map((s) => (
+              <linearGradient key={s.key} id={`g-count-${s.key}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={s.color} stopOpacity={0.3} /><stop offset="100%" stopColor={s.color} stopOpacity={0} /></linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid stroke="rgb(var(--line))" vertical={false} />
+          <XAxis dataKey="day" tickFormatter={tick} tick={{ fill: "#a1a1aa", fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={16} />
+          <YAxis allowDecimals={false} tickFormatter={(v: number) => nf.format(v)} tick={{ fill: "#a1a1aa", fontSize: 11 }} width={40} tickLine={false} axisLine={false} />
+          <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => title(String(d))} formatter={(v: number, k) => [nf.format(v), series.find((s) => s.key === k)?.name ?? k]} />
+          <Legend formatter={(k: string) => <span className="text-xs text-zinc-300">{series.find((s) => s.key === k)?.name ?? k}</span>} iconType="circle" iconSize={8} />
+          {series.map((s) => <Area key={s.key} type="monotone" dataKey={s.key} stroke={s.color} fill={`url(#g-count-${s.key})`} strokeWidth={2} isAnimationActive={false} />)}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
