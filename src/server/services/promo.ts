@@ -1,4 +1,4 @@
-// Cupons de desconto (checkout do Mercado Pago) e convites com plano ou teste (link /convite/CODIGO).
+// Cupons de desconto (checkout do Mercado Pago) e convites com plano ou teste (link /presente/CODIGO).
 import { Prisma, type Plan } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import {

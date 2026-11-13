@@ -49,7 +49,7 @@ export function InviteForm({ initial }: { initial?: InviteDraft }) {
               <p className="text-xs text-muted sm:col-span-2">O plano fica ativo sem cobrança até a administração mudar. Não entra no MRR.</p>
             </div>
           )}
-          <Field label="Código do link" hint="Vira /convite/CODIGO" required>
+          <Field label="Código do link" hint="Vira /presente/CODIGO" required>
             <input className="input uppercase" value={d.code} onChange={(e) => set({ code: e.target.value.toUpperCase().replace(/\s/g, "") })} maxLength={30} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">

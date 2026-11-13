@@ -16,7 +16,7 @@ export interface GoogleState {
   state: string;
   mode: "signin" | "signup";
   ref?: string;
-  /** Convite com plano para usar depois de entrar (/convite/CODIGO) */
+  /** Convite com plano para usar depois de entrar (/presente/CODIGO) */
   invite?: string;
 }
 

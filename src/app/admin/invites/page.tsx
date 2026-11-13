@@ -29,7 +29,7 @@ export default async function AdminInvites() {
       </div>
       <TableCard colSpan={6} minW={900} empty={invites.length === 0 && "Nenhum convite ainda. Crie o primeiro em \"Novo convite\"."} head={<><th>Convite</th><th>Dá</th><th>Usos</th><th>Validade</th><th>Situação</th><th className="text-right">Compartilhar</th></>}>
         {invites.map((i) => {
-          const link = `${origin}/convite/${encodeURIComponent(i.code)}`;
+          const link = `${origin}/presente/${encodeURIComponent(i.code)}`;
           const wa = `https://wa.me/?text=${encodeURIComponent(`Você ganhou ${i.label.charAt(0).toLowerCase()}${i.label.slice(1)} no MilhasX! Ative aqui: ${link}`)}`;
           return (
             <tr key={i.id}>

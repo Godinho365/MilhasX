@@ -89,7 +89,7 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
       return setErro(r.erro);
     }
     const inv = invite();
-    window.location.href = inv ? `/convite/${encodeURIComponent(inv)}` : "/app";
+    window.location.href = inv ? `/presente/${encodeURIComponent(inv)}` : "/app";
   }
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {

@@ -19,7 +19,7 @@ export function LoginForm({ google, initialError }: { google: boolean; initialEr
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
     const inv = new URLSearchParams(window.location.search).get("convite");
-    window.location.href = inv ? `/convite/${encodeURIComponent(inv)}` : "/app";
+    window.location.href = inv ? `/presente/${encodeURIComponent(inv)}` : "/app";
   }
   return (
     <div>

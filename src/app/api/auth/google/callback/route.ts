@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     const { user, token, expiresAt } = await loginWithGoogle(profile, { ref: saved.ref, allowCreate: await isRegistrationOpen() });
     await prisma.loginAttempt.create({ data: { email: user.email, ip: clientIp(req), success: true } });
     headers.append("set-cookie", sessionCookie(token, expiresAt));
-    return go(saved.invite ? `/convite/${encodeURIComponent(saved.invite)}` : "/app");
+    return go(saved.invite ? `/presente/${encodeURIComponent(saved.invite)}` : "/app");
   } catch (e) {
     if (e instanceof DomainError) return fail(e.message);
     log("error", "auth.google.failed", { err: String(e) });

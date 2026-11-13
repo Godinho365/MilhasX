@@ -1095,7 +1095,7 @@ model Coupon {
   subscriptions Subscription[]
 }
 
-/// Convite com plano ou teste (Admin › Convites): o link /convite/CODIGO dá um plano de cortesia ou dias de teste do Gestor.
+/// Convite com plano ou teste (Admin › Convites): o link /presente/CODIGO dá um plano de cortesia ou dias de teste do Gestor.
 model PlanInvite {
   id          String    @id @default(cuid())
   code        String    @unique
