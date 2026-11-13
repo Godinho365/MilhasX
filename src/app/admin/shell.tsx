@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BadgeCheck, BarChart3, Bell, BookOpen, Calculator, Calendar, ChevronRight, Hourglass, LayoutDashboard,
-  LogOut, Menu, Newspaper, Plane, RotateCcw, ScrollText, Settings, Shield, Ticket, TicketPercent, TrendingUp, UserX, Users, X,
+  LogOut, Menu, Newspaper, Plane, RotateCcw, ScrollText, Settings, Shield, Target, Ticket, TicketPercent, TrendingUp, UserX, Users, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
@@ -18,6 +18,7 @@ export const ADMIN_NAV: { group: string; items: Item[] }[] = [
     { label: "Assinaturas", href: "/admin/subscriptions", icon: BadgeCheck },
   ] },
   { group: "Comercial", items: [
+    { label: "Leads", href: "/admin/leads", icon: Target },
     { label: "Conversão", href: "/admin/conversion", icon: TrendingUp },
     { label: "Recuperação", href: "/admin/recovery", icon: RotateCcw },
     { label: "Cupons", href: "/admin/coupons", icon: TicketPercent },
@@ -38,7 +39,7 @@ export const ADMIN_NAV: { group: string; items: Item[] }[] = [
 ];
 
 // Páginas que leem o período (?p=) mostram o seletor no topo
-const PERIOD_PAGES = ["/admin", "/admin/conversion", "/admin/reports", "/admin/subscriptions"];
+const PERIOD_PAGES = ["/admin", "/admin/leads", "/admin/conversion", "/admin/reports", "/admin/subscriptions"];
 const PERIODS = [["7d", "Últimos 7 dias"], ["30d", "Últimos 30 dias"], ["90d", "Últimos 90 dias"], ["12m", "Últimos 12 meses"]] as const;
 const PEND_ICONS: Record<string, Item["icon"]> = { "badge-check": BadgeCheck, "alert-triangle": AlertTriangle, "user-x": UserX, hourglass: Hourglass, "rotate-ccw": RotateCcw, shield: Shield };
 

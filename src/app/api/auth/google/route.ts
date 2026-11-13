@@ -1,6 +1,7 @@
 import { clientIp } from "@/server/http";
 import { verifyTurnstile } from "@/server/captcha";
 import { DomainError } from "@/server/db";
+import { pickUtm } from "@/domain/traffic";
 import { googleAuthUrl, googleEnabled, newState, stateCookie } from "@/server/google-oauth";
 
 /** Início do "Continuar com Google": guarda o state num cookie e manda para o Google. */
@@ -22,8 +23,10 @@ export async function GET(req: Request) {
   const ref = url.searchParams.get("ref")?.trim().slice(0, 20) || undefined;
   const inv = url.searchParams.get("convite")?.trim().toUpperCase();
   const invite = inv && /^[A-Z0-9_-]{3,30}$/.test(inv) ? inv : undefined;
+  // utm_* chegam só quando a pessoa aceitou cookies de marketing (o formulário só manda nesse caso)
+  const utm = pickUtm(url.searchParams) ?? undefined;
   return new Response(null, {
     status: 303,
-    headers: { location: googleAuthUrl(req, state), "set-cookie": stateCookie({ state, mode, ref, invite }) },
+    headers: { location: googleAuthUrl(req, state), "set-cookie": stateCookie({ state, mode, ref, invite, utm }) },
   });
 }

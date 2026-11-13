@@ -1,3 +1,4 @@
+import { pickUtm } from "@/domain/traffic";
 import { randomBytes } from "node:crypto";
 import type { GoogleProfile } from "./auth";
 
@@ -18,6 +19,8 @@ export interface GoogleState {
   ref?: string;
   /** Convite com plano para usar depois de entrar (/presente/CODIGO) */
   invite?: string;
+  /** Parâmetros do anúncio (só com consentimento de marketing) */
+  utm?: Record<string, string>;
 }
 
 export const newState = () => randomBytes(24).toString("base64url");
@@ -47,7 +50,7 @@ export function parseState(raw: string | null): GoogleState | null {
   try {
     const v = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
     if (typeof v?.state !== "string" || (v.mode !== "signin" && v.mode !== "signup")) return null;
-    return { state: v.state, mode: v.mode, ref: typeof v.ref === "string" ? v.ref.slice(0, 20) : undefined, invite: typeof v.invite === "string" && /^[A-Z0-9_-]{3,30}$/.test(v.invite) ? v.invite : undefined };
+    return { state: v.state, mode: v.mode, ref: typeof v.ref === "string" ? v.ref.slice(0, 20) : undefined, invite: typeof v.invite === "string" && /^[A-Z0-9_-]{3,30}$/.test(v.invite) ? v.invite : undefined, utm: pickUtm(v.utm && typeof v.utm === "object" ? v.utm : null) ?? undefined };
   } catch {
     return null;
   }

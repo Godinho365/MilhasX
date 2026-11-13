@@ -34,6 +34,8 @@ export const registerSchema = z.object({
   captcha: z.string().max(4096).optional(),
   // Código de 6 dígitos mandado ao e-mail (exigido quando o envio de e-mail está configurado)
   code: z.string().trim().max(20).optional(),
+  // Parâmetros do anúncio de onde a pessoa veio (só chegam com o consentimento de marketing)
+  utm: z.record(z.string().max(200)).refine((o) => Object.keys(o).length <= 10, "Parâmetros demais").nullable().optional(),
 });
 export const loginSchema = z.object({ email: z.string().trim().min(1).max(200), password: z.string().min(1).max(128) });
 export const forgotSchema = z.object({ email: z.string().trim().email("E-mail inválido").max(200) });
