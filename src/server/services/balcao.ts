@@ -98,24 +98,27 @@ const dealSelect = { id: true, number: true, stage: true, archivedAt: true, sale
  *  a minha proposta (se houver) e a negociação do CRM Milhas ligada a ela. */
 export async function balcaoOffers(userId: string, opts: { program?: string | null; page?: number | null } = {}) {
   return withLink(userId, async (token) => {
-    const [list, mine, accounts] = await Promise.all([
+    const [list, mine] = await Promise.all([
       balcaoApi.offers(token, { programa: opts.program, pagina: opts.page }),
       balcaoApi.proposals(token, "pending"),
-      emissionAccounts(userId),
     ]);
-    const proposalBy = new Map(mine.propostas.map((p) => [p.oferta_id, p]));
-    const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: list.ofertas.map((o) => balcaoRef(o.id)) } }, select: dealSelect });
-    const dealBy = new Map(deals.map((d) => [d.sourceRef, d]));
-    return {
-      page: list.pagina, more: list.mais,
-      offers: list.ofertas.map((o) => ({
-        ...o,
-        analysis: analysisFor(o, proposalBy.get(o.id)?.valor_centavos ?? o.milheiro_centavos, accounts),
-        myProposal: proposalBy.get(o.id) ?? null,
-        deal: dealView(dealBy.get(balcaoRef(o.id))),
-      })),
-    };
+    return { page: list.pagina, more: list.mais, offers: await enrichOffers(userId, list.ofertas, mine.propostas) };
   });
+}
+
+/** A oferta como a tela mostra: com a análise de emissão, a minha proposta e a negociação do CRM Milhas. */
+export async function enrichOffers(userId: string, offers: BalcaoOffer[], proposals: BalcaoProposal[]) {
+  if (!offers.length) return [];
+  const accounts = await emissionAccounts(userId);
+  const proposalBy = new Map(proposals.map((p) => [p.oferta_id, p]));
+  const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: offers.map((o) => balcaoRef(o.id)) } }, select: dealSelect });
+  const dealBy = new Map(deals.map((d) => [d.sourceRef, d]));
+  return offers.map((o) => ({
+    ...o,
+    analysis: analysisFor(o, proposalBy.get(o.id)?.valor_centavos ?? o.milheiro_centavos, accounts),
+    myProposal: proposalBy.get(o.id) ?? null,
+    deal: dealView(dealBy.get(balcaoRef(o.id))),
+  }));
 }
 
 function analysisFor(o: Pick<BalcaoOffer, "programa" | "milhas" | "cpfs">, cpmCents: number, accounts: Awaited<ReturnType<typeof emissionAccounts>>) {
@@ -200,7 +203,7 @@ export async function syncBalcao(userId: string) {
   });
 }
 
-async function applyChanges(userId: string, offers: BalcaoOffer[], proposals: BalcaoProposal[]) {
+export async function applyChanges(userId: string, offers: BalcaoOffer[], proposals: BalcaoProposal[]) {
   const refs = [...new Set([...offers.map((o) => o.id), ...proposals.map((p) => p.oferta_id)])].map(balcaoRef);
   if (!refs.length) return 0;
   const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs }, saleId: null }, select: dealSelect });

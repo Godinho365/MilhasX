@@ -17,6 +17,7 @@ import * as inviteRoute from "@/app/api/team/members/[id]/invite/route";
 import * as acceptRoute from "@/app/api/auth/invite/[token]/route";
 import { prisma } from "@/server/db";
 import type { BalcaoOffer, BalcaoProposal } from "@/server/balcao-api";
+import { BalcaoWatcher, type BalcaoEvent } from "@/server/realtime/balcao-watch";
 
 process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 const SECRET = "segredo-de-servico";
@@ -54,7 +55,8 @@ function fakeBalcao() {
   const res = (status: number, body?: unknown, headers: Record<string, string> = {}) =>
     new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
   const err = (status: number, codigo: string, mensagem: string, headers?: Record<string, string>) => res(status, { erro: { codigo, mensagem } }, headers);
-  const clean = ({ v: _v, ...x }: { v: number } & Record<string, unknown>) => x;
+  // como lá: cada mudança tem a sua hora (atualizada_em)
+  const clean = ({ v, ...x }: { v: number } & Record<string, unknown>) => ({ ...x, atualizada_em: `2026-11-13T12:00:00.${String(v).padStart(3, "0")}Z` });
 
   const fetch = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -318,5 +320,61 @@ describe("Balcão MilhasX", () => {
     expect((await bia.call(proposal.PUT, "PUT", "/api/balcao/offers/1/proposal", { cpmCents: 2500 }, { id: "1" })).status).toBe(403);
     expect((await bia.call(balcao.DELETE, "DELETE", "/api/balcao")).status).toBe(403);
     expect(await prisma.balcaoLink.count()).toBe(1);
+  });
+});
+
+describe("Balcão MilhasX em tempo real", () => {
+  it("o vigia manda só o que mudou, com a análise; repetido não sai de novo; anda com o CRM e para no vínculo desfeito", async () => {
+    await enable();
+    b.offer(1);
+    await link();
+    const sent: { userId: string; ev: BalcaoEvent }[] = [];
+    const w = new BalcaoWatcher(async (uid, ev) => { sent.push({ userId: uid, ev }); });
+    await w.tick(); // primeira volta: só pega o cursor
+    expect(sent).toHaveLength(0);
+
+    b.offer(2, { programa: "smiles", programa_nome: "Smiles" });
+    await w.tick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.userId).toBe(userId);
+    expect(sent[0]!.ev.offers.map((o) => o.id)).toEqual([2]);
+    expect(sent[0]!.ev.offers[0]).toHaveProperty("analysis");
+    await w.tick(); // nada novo
+    expect(sent).toHaveLength(1);
+
+    // o Balcão repete o que já mandou (cursor volta no tempo): não sai de novo
+    const calls = b.s.calls.length;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const u = new URL(url);
+      if (u.pathname.endsWith("/mudancas")) u.searchParams.set("desde", "1"); // volta até antes da oferta 2
+      return b.fetch(u.toString(), init);
+    }));
+    await w.tick();
+    expect(sent).toHaveLength(1);
+    vi.stubGlobal("fetch", vi.fn(b.fetch));
+    expect(b.s.calls.length).toBeGreaterThan(calls);
+
+    // proposta escolhida: a negociação anda na hora, sem a página aberta
+    expect((await c.call(proposal.PUT, "PUT", "/x", { cpmCents: 2500 }, { id: "1" })).status).toBe(200);
+    await w.tick(); // a própria proposta (pendente)
+    b.setProp(1, "chosen"); b.set(1, "matched");
+    await w.tick();
+    const last = sent.at(-1)!.ev;
+    expect(last.moved).toBe(1);
+    expect(last.offers.find((o) => o.id === 1)!.status).toBe("matched");
+    expect((await prisma.milesDeal.findFirstOrThrow({ where: { userId, sourceRef: "balcao:1" } })).stage).toBe("AWAITING");
+
+    // limite do Balcão: espera o que ele pediu, sem insistir
+    b.s.limited = true;
+    const before = b.s.calls.length;
+    await w.tick();
+    await w.tick();
+    expect(b.s.calls.length).toBe(before + 1);
+    b.s.limited = false;
+
+    // vínculo desfeito no bot: o vigia apaga o vínculo daqui
+    b.s.tokens.clear();
+    await w.tick(Date.now() + 60_000);
+    expect(await prisma.balcaoLink.count({ where: { userId } })).toBe(0);
   });
 });

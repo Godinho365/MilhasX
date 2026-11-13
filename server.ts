@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import { log } from "@/server/db";
 import { RealtimeHub } from "@/server/realtime/hub";
 import { realtimeEnabled, wsUpgradeHandler } from "@/server/realtime/upgrade";
+import { BalcaoWatcher } from "@/server/realtime/balcao-watch";
 
 const port = Number(process.env.PORT) || 3100;
 const dev = process.env.NODE_ENV !== "production";
@@ -19,6 +20,7 @@ async function main() {
 
   let hub: RealtimeHub | null = null;
   let redis: Redis | null = null;
+  let watcher: BalcaoWatcher | null = null;
   if (realtimeEnabled() && process.env.REDIS_URL) {
     const sub = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
     redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });
@@ -31,6 +33,12 @@ async function main() {
       return Object.fromEntries(ids.map((id, i) => [id, vals[i] ? JSON.parse(vals[i]!) : null]));
     });
     log("info", "rt.enabled", {});
+    // Balcão MilhasX: o que muda no Balcão vai na hora para as telas abertas (BALCAO_WATCH=off desliga)
+    if (process.env.BALCAO_WATCH !== "off") {
+      const pub = redis;
+      watcher = new BalcaoWatcher((userId, ev) => pub.publish(`tg:user:${userId}`, JSON.stringify(ev)));
+      watcher.start();
+    }
   }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
@@ -39,6 +47,7 @@ async function main() {
   server.listen(port, "0.0.0.0", () => log("info", "web.up", { port, realtime: !!hub }));
 
   const shutdown = () => {
+    watcher?.stop();
     hub?.close();
     redis?.disconnect();
     server.close(() => process.exit(0));
