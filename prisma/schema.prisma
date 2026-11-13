@@ -169,6 +169,7 @@ model User {
   trafficConnection   TrafficConnection?
   trafficReports      TrafficReport[]
   planInviteRedemptions PlanInviteRedemption[]
+  balcaoLink          BalcaoLink?
 
   @@index([workspaceOwnerId])
 }
@@ -318,6 +319,24 @@ model TelegramAlert {
   createdAt            DateTime @default(now())
 
   @@index([userId])
+}
+
+/// Balcão MilhasX: a conta vinculada a um membro do Balcão pela API de parceiro dele (ler ofertas e mandar propostas).
+/// Um vínculo por conta da agência (a equipe usa o do dono). O token é do Balcão e fica criptografado.
+model BalcaoLink {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenEnc       String // token do vínculo, criptografado com a CREDENTIALS_KEY
+  memberName     String? // como o membro aparece no Balcão (só para mostrar "vinculado como")
+  memberUsername String?
+  memberRole     String? // viajante | agente | milheiro
+  canView        Boolean   @default(false) // plano ativo no Balcão
+  canSell        Boolean   @default(false) // Módulo Milheiro: pode mandar proposta
+  cursor         String? // "o que mudou desde" da última sincronização
+  syncedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 enum Plan {

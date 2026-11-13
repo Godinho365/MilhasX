@@ -213,7 +213,7 @@ export function flowText(p: { title: string; description: string | null; flow: F
 
 /** Páginas do app que uma etapa pode indicar ("onde fazer"). */
 export const APP_PAGES: [path: string, label: string][] = [
-  ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador"], ["/app/chat-balcoes", "Chat Balcões"],
+  ["/app/crm", "CRM Passagens"], ["/app/crm-milhas", "CRM Milhas"], ["/app/buscador", "Buscador"], ["/app/chat-balcoes", "Chat Balcões"], ["/app/balcao-milhasx", "Balcão MilhasX"],
   ["/app/sales", "Vendas"], ["/app/acompanhamentos/voos", "Acompanhamentos › Voos"], ["/app/acompanhamentos/hospedagens", "Acompanhamentos › Hospedagens"],
   ["/app/acompanhamentos/mapa", "Mapa de viagens"], ["/app/financeiro", "Financeiro"], ["/app/calendario", "Calendário"], ["/app/equipe/tarefas", "Tarefas"],
   ["/app/contatos/passageiros", "Passageiros"], ["/app/milhas/sugerir", "Sugerir Conta"], ["/app/programs", "Programas e contas"],

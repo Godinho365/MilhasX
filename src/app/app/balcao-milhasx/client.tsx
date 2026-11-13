@@ -1,0 +1,282 @@
+"use client";
+// Balcão MilhasX: vincular com o código do bot (/milhasx), ver as ofertas abertas (com a análise de emissão das suas
+// contas) e mandar proposta: aceitar o valor do comprador ou contrapropor. A página sincroniza com o Balcão ao abrir
+// e a cada minuto enquanto está visível; a negociação do CRM Milhas anda sozinha (escolhido → Aguardando; recusado,
+// expirado ou cancelado → arquivada).
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Handshake, Link2, RefreshCw, Unlink, ExternalLink, ShieldCheck, Zap, BadgeCheck, Star } from "lucide-react";
+import { api } from "@/lib/api";
+import { fmtBRL, fmtPts, fmtDateTime, parseBRLToCents } from "@/lib/format";
+import { Alert, Empty, SegmentedButtons } from "@/components/ui";
+import { toast, confirmDialog } from "@/components/feedback";
+import { DEAL_STAGE_LABELS } from "@/domain/miles-deals";
+
+type Status = {
+  enabled: boolean; linked: boolean; linkedAt: string | null; syncedAt: string | null;
+  member: { name: string | null; username: string | null; role: string | null; canView: boolean; canSell: boolean } | null;
+};
+type Deal = { id: string; number: number; stage: keyof typeof DEAL_STAGE_LABELS; archived: boolean } | null;
+type Proposal = { id: number; oferta_id: number; valor_centavos: number; contraproposta: boolean; status: "pending" | "chosen" | "rejected"; atualizada_em: string | null };
+type Analysis = { account: string; covers: boolean; profitCents: number | null; missingMiles: number; cpfShort: boolean } | null;
+type Offer = {
+  id: number; status: string; programa: string; programa_nome: string; milhas: number; cpfs: number; milheiro_centavos: number;
+  total_centavos: number; urgente: boolean; intermediada: boolean; observacao: string | null; valida_ate: string; sua_oferta: boolean;
+  comprador: { perfil: string | null; verificado: boolean; negociacoes: number; nota: number | null; avaliacoes: number };
+  link_bot: string | null; analysis: Analysis; myProposal: Proposal | null; deal: Deal;
+};
+type MyProposal = Proposal & { oferta: Omit<Offer, "analysis" | "myProposal" | "deal">; deal: Deal };
+
+const PROGRAMS: [string, string][] = [
+  ["", "Todos os programas"], ["latam", "Latam Pass"], ["smiles", "Smiles"], ["azul", "Azul Fidelidade"], ["azul_mundo", "Azul pelo Mundo"],
+  ["iberia", "Iberia Plus"], ["tap", "TAP Miles&Go"], ["aadvantage", "AAdvantage"], ["flyingblue", "Flying Blue"],
+];
+const ROLE: Record<string, string> = { viajante: "Viajante", agente: "Agência", milheiro: "Milheiro" };
+const PROPOSAL: Record<Proposal["status"], [string, string]> = {
+  pending: ["Aguardando o comprador", "text-amber-300"], chosen: ["Escolhida: continue no bot", "text-green-300"], rejected: ["Recusada", "text-muted"],
+};
+const OFFER_STATUS: Record<string, string> = {
+  open: "Aberta", awaiting_payment: "Aguardando pagamento", matched: "Em negociação", completed: "Concluída", cancelled: "Cancelada", expired: "Expirada",
+};
+const SYNC_EVERY_MS = 60_000;
+
+export function BalcaoClient({ initial, canEdit }: { initial: Status; canEdit: boolean }) {
+  const [status, setStatus] = useState(initial);
+  if (!status.linked) return <LinkForm onLinked={setStatus} canEdit={canEdit} />;
+  return <Linked status={status} setStatus={setStatus} canEdit={canEdit} />;
+}
+
+function LinkForm({ onLinked, canEdit }: { onLinked: (s: Status) => void; canEdit: boolean }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const r = await api<{ item: Status }>("/api/balcao", "POST", { code });
+    setBusy(false);
+    if (!r.ok) return toast(r.erro, "error");
+    toast("Conta do Balcão vinculada");
+    onLinked(r.data.item);
+  }
+  return (
+    <Empty title="Vincule sua conta do Balcão" icon={<Handshake className="h-5 w-5" />}>
+      <ol className="max-w-md list-decimal space-y-1 pl-5 text-left text-sm text-muted">
+        <li>No bot do Balcão, no Telegram, mande <b className="text-zinc-100">/milhasx</b>.</li>
+        <li>Copie o código que o bot responde (vale 10 minutos).</li>
+        <li>Cole aqui e toque em Vincular.</li>
+      </ol>
+      {canEdit ? (
+        <form onSubmit={submit} className="mt-2 flex w-full max-w-sm gap-2">
+          <input className="input tracking-widest uppercase" value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-EF23" maxLength={12} required aria-label="Código do bot do Balcão" autoComplete="off" />
+          <button className="btn-primary" disabled={busy}><Link2 className="h-4 w-4" />{busy ? "Vinculando…" : "Vincular"}</button>
+        </form>
+      ) : (
+        <p className="text-sm text-muted">Peça ao dono da conta para vincular o Balcão.</p>
+      )}
+    </Empty>
+  );
+}
+
+function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s: Status) => void; canEdit: boolean }) {
+  const router = useRouter();
+  const [tab, setTab] = useState<"ofertas" | "propostas">("ofertas");
+  const [program, setProgram] = useState("");
+  const [offers, setOffers] = useState<Offer[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [mine, setMine] = useState<MyProposal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const m = status.member!;
+
+  const lost = useCallback((r: { status: number; erro: string }) => {
+    if (r.status === 409 && /vincul/i.test(r.erro)) { // vínculo desfeito no Balcão: volta para a tela de vincular
+      toast(r.erro, "error");
+      setStatus({ ...status, linked: false, member: null });
+      return true;
+    }
+    return false;
+  }, [status, setStatus]);
+
+  const loadOffers = useCallback(async (p = 1) => {
+    const q = new URLSearchParams({ pagina: String(p), ...(program ? { programa: program } : {}) });
+    const r = await api<{ item: { offers: Offer[]; more: boolean; page: number } }>(`/api/balcao/offers?${q}`);
+    if (!r.ok) { if (!lost(r)) setError(r.erro); return; }
+    setError(null);
+    setOffers((prev) => (p === 1 ? r.data.item.offers : [...(prev ?? []), ...r.data.item.offers]));
+    setMore(r.data.item.more);
+    setPage(p);
+  }, [program, lost]);
+
+  const loadMine = useCallback(async () => {
+    const r = await api<{ items: MyProposal[] }>("/api/balcao/proposals");
+    if (!r.ok) { if (!lost(r)) setError(r.erro); return; }
+    setMine(r.data.items);
+  }, [lost]);
+
+  const sync = useCallback(async (manual = false) => {
+    setSyncing(true);
+    const r = await api<{ item: { moved: number; status: Status } }>("/api/balcao/sync", "POST");
+    setSyncing(false);
+    if (!r.ok) { if (!lost(r) && manual) toast(r.erro, "error"); return; }
+    setStatus(r.data.item.status);
+    if (r.data.item.moved) toast(`${r.data.item.moved} negociação(ões) do CRM Milhas atualizada(s) pelo Balcão`);
+  }, [lost, setStatus]);
+
+  const refresh = useCallback(async (manual = false) => {
+    await sync(manual);
+    await (tab === "ofertas" ? loadOffers(1) : loadMine());
+  }, [sync, tab, loadOffers, loadMine]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, SYNC_EVERY_MS);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  async function unlink() {
+    if (!(await confirmDialog({ title: "Desvincular o Balcão?", body: "As negociações do CRM Milhas continuam, mas deixam de andar sozinhas. Para vincular de novo, gere outro código no bot.", confirmLabel: "Desvincular", danger: true }))) return;
+    const r = await api<{ item: Status }>("/api/balcao", "DELETE");
+    if (!r.ok) return toast(r.erro, "error");
+    setStatus(r.data.item);
+    router.refresh();
+  }
+
+  async function propose(o: Offer, cents: number) {
+    const r = await api<{ item: { changed: boolean; deal: Deal } }>(`/api/balcao/offers/${o.id}/proposal`, "PUT", { cpmCents: cents });
+    if (!r.ok) { if (!lost(r)) toast(r.erro, "error"); return false; }
+    toast(r.data.item.changed ? `Proposta de ${fmtBRL(cents)} enviada ao comprador` : "Essa proposta já estava enviada");
+    await loadOffers(1);
+    return true;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+        <span className="flex items-center gap-2"><Handshake className="h-4 w-4 text-muted" />Vinculado como <b>{m.name ?? "membro"}</b>{m.username && <span className="text-muted">@{m.username}</span>}{m.role && <span className="rounded-full bg-panel2 px-2 py-0.5 text-xs">{ROLE[m.role] ?? m.role}</span>}</span>
+        {status.syncedAt && <span className="text-xs text-muted">Atualizado {fmtDateTime(status.syncedAt)}</span>}
+        <span className="ml-auto flex gap-2">
+          <button type="button" className="btn-ghost" onClick={() => void refresh(true)} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />Atualizar</button>
+          {canEdit && <button type="button" className="btn-ghost text-red-300" onClick={unlink}><Unlink className="h-4 w-4" />Desvincular</button>}
+        </span>
+      </div>
+      {!m.canView && <Alert kind="error">Seu plano no Balcão não está ativo: renove no bot para ver as ofertas.</Alert>}
+      {m.canView && !m.canSell && <Alert kind="info">Você pode ver as ofertas. Para mandar propostas, é preciso o Módulo Milheiro no Balcão.</Alert>}
+      {error && <Alert>{error}</Alert>}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <SegmentedButtons items={[{ key: "ofertas", label: "Ofertas abertas" }, { key: "propostas", label: "Minhas propostas" }]} value={tab} onChange={setTab} />
+        {tab === "ofertas" && (
+          <select className="input w-auto" value={program} onChange={(e) => setProgram(e.target.value)} aria-label="Programa">
+            {PROGRAMS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        )}
+      </div>
+
+      {tab === "ofertas" ? (
+        offers === null ? <p className="text-sm text-muted">Carregando ofertas…</p>
+        : offers.length === 0 ? <Empty title="Nenhuma oferta aberta agora" icon={<Handshake className="h-5 w-5" />}><p className="text-sm text-muted">Novas ofertas aparecem aqui sozinhas (a página atualiza a cada minuto).</p></Empty>
+        : (
+          <>
+            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {offers.map((o) => <OfferCard key={o.id} o={o} canPropose={canEdit && m.canSell && !o.sua_oferta} onPropose={propose} />)}
+            </div>
+            {more && <button type="button" className="btn-ghost" onClick={() => void loadOffers(page + 1)}>Carregar mais</button>}
+          </>
+        )
+      ) : mine === null ? <p className="text-sm text-muted">Carregando propostas…</p>
+        : mine.length === 0 ? <Empty title="Nenhuma proposta ainda" icon={<Handshake className="h-5 w-5" />} />
+        : <ProposalList items={mine} />}
+    </div>
+  );
+}
+
+function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean; onPropose: (o: Offer, cents: number) => Promise<boolean> }) {
+  const [counter, setCounter] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const a = o.analysis;
+  async function send(cents: number) {
+    setBusy(true);
+    const ok = await onPropose(o, cents);
+    setBusy(false);
+    if (ok) setCounter(null);
+  }
+  async function sendCounter(e: React.FormEvent) {
+    e.preventDefault();
+    const cents = parseBRLToCents(counter ?? "");
+    if (cents == null || cents < 100 || cents > 50_000) return toast("Valor por milheiro entre R$ 1,00 e R$ 500,00", "error");
+    await send(cents);
+  }
+  return (
+    <article className="card flex flex-col gap-3 p-4">
+      <header className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-muted">Oferta #{o.id} · {o.programa_nome}</p>
+          <p className="text-lg font-semibold">{fmtPts(o.milhas)} milhas · {o.cpfs} CPF{o.cpfs > 1 ? "s" : ""}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-semibold">{fmtBRL(o.milheiro_centavos)}</p>
+          <p className="text-xs text-muted">o milheiro · total {fmtBRL(o.total_centavos)}</p>
+        </div>
+      </header>
+      <div className="flex flex-wrap gap-1.5 text-xs">
+        {o.urgente && <span className="flex items-center gap-1 rounded-full bg-red-400/15 px-2 py-0.5 text-red-300"><Zap className="h-3 w-3" />Voo em menos de 7 dias</span>}
+        {o.intermediada && <span className="flex items-center gap-1 rounded-full bg-blue-400/15 px-2 py-0.5 text-blue-300"><ShieldCheck className="h-3 w-3" />Intermediação do balcão</span>}
+        <span className="rounded-full bg-panel2 px-2 py-0.5 text-muted">Válida até {fmtDateTime(o.valida_ate)}</span>
+      </div>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+        <span>Comprador: {ROLE[o.comprador.perfil ?? ""] ?? "membro"}</span>
+        {o.comprador.verificado && <span className="flex items-center gap-1 text-green-300"><BadgeCheck className="h-3 w-3" />verificado</span>}
+        <span>{o.comprador.negociacoes} negociação(ões)</span>
+        {o.comprador.nota != null && <span className="flex items-center gap-1"><Star className="h-3 w-3" />{o.comprador.nota.toFixed(1)} ({o.comprador.avaliacoes})</span>}
+      </p>
+      {o.observacao && <p className="rounded-lg bg-panel2 px-3 py-2 text-sm">{o.observacao}</p>}
+      <p className="text-sm">
+        {!a ? <span className="text-muted">Você não tem conta neste programa.</span>
+          : a.covers ? <>Emite com <b>{a.account}</b>{a.profitCents != null && <> · lucro <b className={a.profitCents >= 0 ? "text-green-300" : "text-red-300"}>{fmtBRL(a.profitCents)}</b></>}</>
+          : <span className="text-amber-300">Nenhuma conta cobre sozinha{a.missingMiles > 0 ? ` (faltam ${fmtPts(a.missingMiles)} milhas em ${a.account})` : a.cpfShort ? ` (faltam CPFs em ${a.account})` : ""}.</span>}
+      </p>
+      {o.myProposal && (
+        <p className="text-sm">Sua proposta: <b>{fmtBRL(o.myProposal.valor_centavos)}</b> <span className={PROPOSAL[o.myProposal.status][1]}>· {PROPOSAL[o.myProposal.status][0]}</span>
+          {o.deal && <> · <Link className="underline" href={`/app/crm-milhas?deal=${o.deal.id}`}>CRM Milhas #{o.deal.number}</Link></>}</p>
+      )}
+      <footer className="mt-auto flex flex-wrap items-center gap-2">
+        {canPropose && counter === null && (
+          <>
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => void send(o.milheiro_centavos)}>Aceitar {fmtBRL(o.milheiro_centavos)}</button>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => setCounter(o.myProposal ? (o.myProposal.valor_centavos / 100).toFixed(2).replace(".", ",") : "")}>Contrapropor</button>
+          </>
+        )}
+        {canPropose && counter !== null && (
+          <form onSubmit={sendCounter} className="flex w-full gap-2">
+            <input className="input" inputMode="decimal" value={counter} onChange={(e) => setCounter(e.target.value)} placeholder="R$ por milheiro (ex.: 21,50)" aria-label="Valor por milheiro" autoFocus />
+            <button className="btn-primary" disabled={busy}>{busy ? "Enviando…" : "Enviar"}</button>
+            <button type="button" className="btn-ghost" onClick={() => setCounter(null)}>Cancelar</button>
+          </form>
+        )}
+        {o.sua_oferta && <span className="text-xs text-muted">Esta oferta é sua.</span>}
+        {o.link_bot && <a className="btn-ghost ml-auto" href={o.link_bot} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" />Abrir no bot</a>}
+      </footer>
+    </article>
+  );
+}
+
+function ProposalList({ items }: { items: MyProposal[] }) {
+  return (
+    <div className="card divide-y divide-line">
+      {items.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
+          <span className="font-medium">#{p.oferta.id} · {p.oferta.programa_nome} · {fmtPts(p.oferta.milhas)} milhas</span>
+          <span>Minha proposta {fmtBRL(p.valor_centavos)}{p.contraproposta ? " (contraproposta)" : ""}</span>
+          <span className={PROPOSAL[p.status][1]}>{PROPOSAL[p.status][0]}</span>
+          <span className="text-muted">Oferta: {OFFER_STATUS[p.oferta.status] ?? p.oferta.status}</span>
+          <span className="ml-auto flex gap-3">
+            {p.deal && <Link className="underline" href={`/app/crm-milhas?deal=${p.deal.id}`}>CRM Milhas #{p.deal.number} · {p.deal.archived ? "arquivada" : DEAL_STAGE_LABELS[p.deal.stage]}</Link>}
+            {p.oferta.link_bot && <a className="underline" href={p.oferta.link_bot} target="_blank" rel="noreferrer">Abrir no bot</a>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
