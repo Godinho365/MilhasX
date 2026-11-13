@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { loadThirdParty } from "@/components/consent/registry";
 import { Eye, EyeOff } from "lucide-react";
 
 /** Título + subtítulo do cartão, com a linha separadora embaixo. */
@@ -51,23 +52,8 @@ declare global {
   }
 }
 
-const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-let scriptPromise: Promise<void> | null = null;
-function loadTurnstile() {
-  if (window.turnstile) return Promise.resolve();
-  scriptPromise ??= new Promise<void>((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = SCRIPT_SRC;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => {
-      scriptPromise = null;
-      reject(new Error("turnstile"));
-    };
-    document.head.appendChild(s);
-  });
-  return scriptPromise;
-}
+// O script vem do registro central de scripts de terceiros (categoria "necessários": segurança do formulário)
+const loadTurnstile = () => (window.turnstile ? Promise.resolve() : loadThirdParty("turnstile"));
 
 /**
  * Verificação "não sou robô" do Cloudflare Turnstile. Para gerar um token novo (eles valem uma vez só),

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MANUAL_CREDIT_TYPES, MANUAL_DEBIT_TYPES, CREDIT_TYPES, DEBIT_TYPES, type EntryType } from "@/domain/ledger";
 import { BALCAO_PROGRAMS } from "@/domain/balcao-ads";
+import { PRIVACY_REQUEST_KEYS } from "@/domain/privacy";
 
 type ManualType = (typeof MANUAL_CREDIT_TYPES)[number] | (typeof MANUAL_DEBIT_TYPES)[number];
 const MANUAL = [...MANUAL_CREDIT_TYPES, ...MANUAL_DEBIT_TYPES] as [ManualType, ...ManualType[]];
@@ -536,6 +537,15 @@ export const publicLeadSchema = z.object({
   programs: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
   incomeRange: z.string().trim().max(60).nullable().optional(),
   website: z.string().max(0).optional(),
+});
+/** Pedido de titular de dados (LGPD) pela página pública. `website` é a armadilha para robôs (fica vazio). */
+export const privacyRequestSchema = z.object({
+  name: z.string().trim().min(1, "Informe seu nome").max(120),
+  email: z.string().trim().email("E-mail inválido").max(200),
+  kind: z.enum(PRIVACY_REQUEST_KEYS, { errorMap: () => ({ message: "Escolha o tipo de pedido" }) }),
+  message: z.string().trim().max(2000).nullable().optional(),
+  captchaToken: z.string().max(4096).nullable().optional(),
+  website: z.string().max(200).optional(),
 });
 export const leadStatusSchema = z.object({ status: z.enum(["NEW", "CONTACTED", "CLIENT", "DISCARDED"]) });
 

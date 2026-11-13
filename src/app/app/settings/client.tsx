@@ -11,6 +11,7 @@ import { Switch } from "@/components/form-parts";
 import { NOTIFY_CATEGORIES, VALUES_MODES, VALUES_LABELS, type NotifyPrefs, type ValuesMode } from "@/domain/plans";
 import { AvatarUpload } from "./avatar";
 import { PushDevice } from "./push-device";
+import { openCookiePreferences } from "@/components/consent/consent";
 
 type Prefs = {
   showValues: boolean;
@@ -126,6 +127,15 @@ export function GeneralTab({ prefs: initial, vapidKey = "" }: { prefs: Prefs; va
           </table>
         </div>
         <p className="mt-3 text-xs text-muted">Avisos de segurança (código de verificação, senha alterada, conta Google conectada) sempre vão por e-mail. O push chega nos aparelhos em que você tocou em "Ativar neste aparelho".</p>
+      </Section>
+
+      <Section title="Privacidade e cookies">
+        <p className="text-sm text-muted">Escolha quais cookies não essenciais podem ser usados. A escolha fica salva na sua conta e vale em todos os seus aparelhos.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" onClick={openCookiePreferences}>Preferências de cookies</button>
+          <a href="/privacidade" className="btn-subtle">Política de Privacidade</a>
+          <a href="/privacidade/solicitacao" className="btn-subtle">Pedidos sobre seus dados</a>
+        </div>
       </Section>
 
       <Section title="Segurança">

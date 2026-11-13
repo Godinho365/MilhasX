@@ -5,6 +5,9 @@ import "@fontsource-variable/inter";
 import "./globals.css";
 import { FeedbackHost } from "@/components/feedback";
 import { RenderStamp } from "@/components/render-stamp";
+import { ConsentProvider } from "@/components/consent/consent";
+import { CONSENT_COOKIE, decodeConsent } from "@/domain/consent";
+import { SESSION_COOKIE } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: process.env.APP_NAME || "MilhasX",
@@ -23,13 +26,17 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Tema vem do cookie já no HTML do servidor: a página abre no tema certo, sem piscar
-  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const jar = await cookies();
+  const theme = parseTheme(jar.get(THEME_COOKIE)?.value);
+  // Escolha de cookies deste navegador (a da conta chega pelo ConsentProvider, sem consulta ao banco aqui)
+  const consent = decodeConsent(jar.get(CONSENT_COOKIE)?.value);
   return (
     <html lang="pt-BR" data-theme={theme} suppressHydrationWarning>
       <body>
         {children}
         <FeedbackHost />
         <RenderStamp value={Date.now()} />
+        <ConsentProvider initial={consent} signedIn={jar.has(SESSION_COOKIE)} />
       </body>
     </html>
   );

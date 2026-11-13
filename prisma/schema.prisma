@@ -750,6 +750,7 @@ model UserPreference {
   emissionTerms      String? // termo de emissão mandado ao comprador antes de emitir (vazio = o padrão do MilhasX)
   metricsHidden      String[]  @default([]) // blocos escondidos na página Métricas ("vendas.mix", ...)
   overviewWidgets    String[]  @default([]) // blocos da Visão geral, na ordem (vazio = o padrão)
+  cookieConsent      Json? // escolha de cookies da pessoa, para valer em todos os aparelhos: { version, analytics, marketing, decidedAt }
 }
 
 model AuditLog {
@@ -1205,6 +1206,22 @@ model FlightSearch {
 }
 
 // Interessado em gestão de milhas, vindo da Central de Atendimento (página pública).
+/// Pedido de titular de dados (LGPD, art. 18) feito pela página pública /privacidade/solicitacao.
+model PrivacyRequest {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  kind      String // ACCESS | CORRECTION | DELETION | PORTABILITY | SHARING | REVOKE | OBJECTION | OTHER
+  message   String?
+  status    String   @default("NEW") // NEW | IN_PROGRESS | DONE
+  ipHash    String? // só para limitar envios repetidos (sha256 truncado, sem o IP)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([ipHash, createdAt])
+}
+
 model MilesLead {
   id          String   @id @default(cuid())
   userId      String
