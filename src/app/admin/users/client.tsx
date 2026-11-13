@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
 import { api } from "@/lib/api";
@@ -27,7 +28,7 @@ export function UserRow({ u, self }: { self: boolean; u: { id: string; name: str
   }
   return (
     <tr>
-      <td><span className="flex items-center gap-3"><Avatar name={u.name} /><span className="min-w-0"><span className="block truncate font-semibold">{u.name}</span><span className="block truncate text-xs text-muted">{u.email}</span></span></span></td>
+      <td><span className="flex items-center gap-3"><Avatar name={u.name} /><Link href={`/admin/users/${u.id}`} className="min-w-0 hover:text-[rgb(var(--brand))]"><span className="block truncate font-semibold hover:underline">{u.name}</span><span className="block truncate text-xs text-muted">{u.email}</span></Link></span></td>
       <td>{u.role === "ADMIN" ? <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-300">Admin</span> : <span className="text-muted">Cliente</span>}</td>
       <td>
         <select className="input h-8 w-28 py-0 text-xs" value={u.plan} onChange={(e) => setPlan(e.target.value as PlanCode, u.planInterval)} aria-label={`Plano de ${u.email}`}>
@@ -35,7 +36,7 @@ export function UserRow({ u, self }: { self: boolean; u: { id: string; name: str
         </select>
         {u.trialDaysLeft > 0 && <span className="mt-1 block text-[11px] text-amber-300">Teste: {u.trialDaysLeft}d</span>}
         {u.planRequest && (
-          <button className="mt-1 block text-left text-[11px] text-accent-light hover:underline" onClick={() => setPlan(u.planRequest!, u.planRequestInterval)}>
+          <button className="mt-1 block text-left text-[11px] text-[rgb(var(--brand))] hover:underline" onClick={() => setPlan(u.planRequest!, u.planRequestInterval)}>
             Pediu {PLAN_NAMES[u.planRequest]}{u.planRequestInterval === "ANUAL" ? " anual" : ""}: ativar
           </button>
         )}

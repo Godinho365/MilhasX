@@ -3,7 +3,7 @@
 import { prisma } from "../db";
 import type { PlanCode } from "@/domain/plans";
 import {
-  periodWindow, delta, revenue, churn, trialFunnel, trialConversion, activation, activeUsers, expiring, atRisk, seriesByBucket, inRange,
+  periodWindow, delta, revenue, churn, trialFunnel, trialConversion, activation, activeUsers, expiring, atRisk, seriesByBucket, inRange, recoveryList, cohorts,
   type PeriodKey, type AdminUser, type AdminSub,
 } from "@/domain/admin-metrics";
 
@@ -167,3 +167,62 @@ export async function adminDashboard(period: PeriodKey, now = new Date()) {
 }
 
 export type AdminDashboard = Awaited<ReturnType<typeof adminDashboard>>;
+
+/** Admin › Recuperação: quem chamar e quando foi o último contato registrado. */
+export async function recoveryData(now = new Date()) {
+  const [rawUsers, rawSubs, last] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: "USER", workspaceOwnerId: null },
+      select: { id: true, name: true, email: true, phone: true, plan: true, planInterval: true, trialEndsAt: true, createdAt: true, planRequest: true, planRequestedAt: true, deletionRequestedAt: true, status: true },
+    }),
+    prisma.subscription.findMany({ select: { id: true, userId: true, plan: true, interval: true, amountCents: true, status: true, createdAt: true, updatedAt: true } }),
+    lastActivity(),
+  ]);
+  const users: AdminUser[] = rawUsers.map((u) => ({ ...u, plan: u.plan as PlanCode, planRequest: u.planRequest as PlanCode | null }));
+  const subs: AdminSub[] = rawSubs.map((s) => ({ ...s, plan: s.plan as PlanCode }));
+  const items = recoveryList(users, subs, last, now);
+  const contacts = await prisma.auditLog.findMany({
+    where: { action: "admin.contact", targetId: { in: items.map((i) => i.userId) } },
+    select: { targetId: true, createdAt: true, meta: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const lastContact = new Map<string, { at: Date; channel: string }>();
+  for (const c of contacts) if (c.targetId && !lastContact.has(c.targetId)) lastContact.set(c.targetId, { at: c.createdAt, channel: (c.meta as { channel?: string } | null)?.channel ?? "" });
+  const byId = new Map(rawUsers.map((u) => [u.id, u]));
+  return items.map((i) => {
+    const u = byId.get(i.userId)!;
+    return { ...i, user: { name: u.name, email: u.email, phone: u.phone }, lastActivity: last.get(i.userId) ?? null, contact: lastContact.get(i.userId) ?? null };
+  });
+}
+
+/** Admin › Conversão: funil, coortes por semana/mês e conversão por origem do cadastro. */
+export async function conversionData(period: PeriodKey, now = new Date()) {
+  const w = periodWindow(period, now);
+  const [rawUsers, rawSubs, requestLogs, firstEntries] = await Promise.all([
+    prisma.user.findMany({
+      // Testes que acabam no período começaram até 31 dias antes (indicação dá 30 dias)
+      where: { role: "USER", workspaceOwnerId: null, createdAt: { gte: new Date(w.prevFrom.getTime() - 31 * DAY) } },
+      select: { id: true, plan: true, planInterval: true, trialEndsAt: true, createdAt: true, planRequest: true, planRequestedAt: true, deletionRequestedAt: true, status: true, googleId: true, referredById: true },
+    }),
+    prisma.subscription.findMany({ select: { id: true, userId: true, plan: true, interval: true, amountCents: true, status: true, createdAt: true, updatedAt: true } }),
+    prisma.auditLog.findMany({ where: { action: { in: ["billing.plan_request", "billing.checkout"] } }, select: { actorId: true } }),
+    prisma.entry.groupBy({ by: ["userId"], _min: { createdAt: true } }),
+  ]);
+  const users = rawUsers.map((u) => ({
+    ...u, plan: u.plan as PlanCode, planRequest: u.planRequest as PlanCode | null,
+    group: u.referredById ? "Indicação de cliente" : u.googleId ? "Google" : "E-mail e senha",
+  }));
+  const ids = new Set(users.map((u) => u.id));
+  const subs: AdminSub[] = rawSubs.filter((s) => ids.has(s.userId)).map((s) => ({ ...s, plan: s.plan as PlanCode }));
+  const requesters = new Set(requestLogs.map((l) => l.actorId).filter((x): x is string => !!x));
+  const firstEntry = new Map(firstEntries.filter((e) => e._min.createdAt).map((e) => [e.userId, e._min.createdAt!]));
+  const cur = trialFunnel(users, subs, requesters, w.from, w.to);
+  const prev = trialFunnel(users, subs, requesters, w.prevFrom, w.prevTo);
+  return {
+    window: w,
+    funnel: cur.map((s, i) => ({ ...s, prev: prev[i]!.count, delta: delta(s.count, prev[i]!.count) })),
+    trial: { cur: trialConversion(users, w.from, w.to, now), prev: trialConversion(users, w.prevFrom, w.prevTo, now) },
+    cohorts: cohorts(users, subs, requesters, firstEntry, w),
+    sources: cohorts(users, subs, requesters, firstEntry, w, "group"),
+  };
+}

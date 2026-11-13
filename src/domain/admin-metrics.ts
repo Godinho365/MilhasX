@@ -235,3 +235,75 @@ export function atRisk(users: AdminUser[], lastActivity: Map<string, Date>, now 
   const del = (r: RiskItem) => (r.reason.startsWith("Pediu") ? 0 : 1);
   return out.sort((a, b) => del(a) - del(b) || (b.daysIdle ?? 1e9) - (a.daysIdle ?? 1e9));
 }
+
+// ---------- Recuperação ----------
+
+export type RecoveryKind = "request" | "checkout" | "trial" | "risk";
+export type RecoveryItem = { userId: string; kind: RecoveryKind; at: Date; detail: string; plan: PlanCode | null; days: number | null };
+
+/**
+ * Quem vale chamar: pediu plano e não ativou (1+ dia), começou o checkout e não pagou (1+ dia, últimos 30),
+ * teste acabando em 7 dias ou que acabou há até 3 dias, e pagantes/testes sem uso há 14+ dias.
+ * Uma pessoa aparece só no motivo mais forte (nessa ordem).
+ */
+export function recoveryList(users: AdminUser[], subs: AdminSub[], lastActivity: Map<string, Date>, now = new Date()): RecoveryItem[] {
+  const out = new Map<string, RecoveryItem>();
+  const ago = (d: Date) => (now.getTime() - d.getTime()) / DAY;
+  const active = users.filter((u) => u.status === "ACTIVE" && !u.deletionRequestedAt);
+  const ids = new Set(active.map((u) => u.id));
+  const authorized = new Set(subs.filter((s) => s.status === "AUTHORIZED").map((s) => s.userId));
+  for (const u of active) {
+    if (u.planRequest && u.planRequestedAt && ago(u.planRequestedAt) >= 1)
+      out.set(u.id, { userId: u.id, kind: "request", at: u.planRequestedAt, detail: `Pediu o plano ${u.planRequest} há ${Math.floor(ago(u.planRequestedAt))} dias`, plan: u.planRequest, days: null });
+  }
+  for (const s of [...subs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())) {
+    if (s.status !== "PENDING" || !ids.has(s.userId) || out.has(s.userId) || authorized.has(s.userId)) continue;
+    const age = ago(s.createdAt);
+    if (age >= 1 && age <= 30) out.set(s.userId, { userId: s.userId, kind: "checkout", at: s.createdAt, detail: `Checkout de ${s.plan} sem pagamento há ${Math.floor(age)} dias`, plan: s.plan, days: null });
+  }
+  for (const u of active) {
+    if (out.has(u.id) || u.plan !== "PESSOAL" || !u.trialEndsAt) continue;
+    const left = Math.ceil((u.trialEndsAt.getTime() - now.getTime()) / DAY);
+    if (left <= 7 && left >= -3)
+      out.set(u.id, { userId: u.id, kind: "trial", at: u.trialEndsAt, detail: left > 0 ? `Teste acaba em ${left} ${left === 1 ? "dia" : "dias"}` : left === 0 ? "Teste acaba hoje" : `Teste acabou há ${-left} ${left === -1 ? "dia" : "dias"}`, plan: null, days: left });
+  }
+  for (const r of atRisk(active, lastActivity, now)) {
+    if (out.has(r.userId)) continue;
+    out.set(r.userId, { userId: r.userId, kind: "risk", at: r.lastActivity ?? now, detail: r.reason, plan: null, days: r.daysIdle });
+  }
+  const rank: Record<RecoveryKind, number> = { request: 0, checkout: 1, trial: 2, risk: 3 };
+  return [...out.values()].sort((a, b) => rank[a.kind] - rank[b.kind] || a.at.getTime() - b.at.getTime());
+}
+
+// ---------- Conversão ----------
+
+export type CohortRow = { key: string; signups: number; activated: number; asked: number; paid: number; rate: number };
+
+/**
+ * Coortes de cadastro (por semana, ou por mês no período de 12 meses): quantos ativaram (1º lançamento em 7 dias),
+ * pediram plano e viraram pagantes. `group` troca a coorte por outra chave (ex.: origem do cadastro).
+ */
+export function cohorts(
+  users: (AdminUser & { group?: string })[], subs: AdminSub[], requesters: Set<string>, firstEntry: Map<string, Date>,
+  w: Pick<PeriodWindow, "from" | "to" | "bucket">, by: "bucket" | "group" = "bucket",
+): CohortRow[] {
+  const bucket: Bucket = w.bucket === "month" ? "month" : "week";
+  const subUsers = new Set(subs.map((s) => s.userId));
+  const paidUsers = new Set(subs.filter((s) => s.status === "AUTHORIZED").map((s) => s.userId));
+  const rows = new Map<string, CohortRow>();
+  if (by === "bucket") for (const k of bucketKeys({ ...w, bucket })) rows.set(k, { key: k, signups: 0, activated: 0, asked: 0, paid: 0, rate: 0 });
+  for (const u of users) {
+    if (!inRange(u.createdAt, w.from, w.to)) continue;
+    const k = by === "bucket" ? bucketKey(u.createdAt, bucket) : u.group ?? "Outros";
+    const r = rows.get(k) ?? { key: k, signups: 0, activated: 0, asked: 0, paid: 0, rate: 0 };
+    rows.set(k, r);
+    r.signups++;
+    const f = firstEntry.get(u.id);
+    if (f && f.getTime() - u.createdAt.getTime() <= 7 * DAY) r.activated++;
+    const paid = isPaidPlan(u.plan) || paidUsers.has(u.id);
+    if (paid || requesters.has(u.id) || u.planRequestedAt || subUsers.has(u.id)) r.asked++;
+    if (paid) r.paid++;
+  }
+  const out = [...rows.values()].map((r) => ({ ...r, rate: r.signups ? Math.round((r.paid / r.signups) * 1000) / 10 : 0 }));
+  return by === "bucket" ? out.reverse() : out.sort((a, b) => b.signups - a.signups);
+}

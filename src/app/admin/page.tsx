@@ -1,16 +1,15 @@
 import Link from "next/link";
-import { Activity, AlertTriangle, BadgeDollarSign, CalendarClock, Download, Mail, Repeat, ShieldAlert, TrendingUp, UserPlus, Users } from "lucide-react";
+import { Activity, AlertTriangle, BadgeCheck, BadgeDollarSign, CalendarClock, Download, Mail, Repeat, ShieldAlert, TrendingUp, UserPlus, UserX, Users } from "lucide-react";
+import { pendingLists } from "@/server/services/admin-pending";
 import { adminDashboard } from "@/server/services/admin-dashboard";
-import { PERIODS, parsePeriod } from "@/domain/admin-metrics";
+import { parsePeriod } from "@/domain/admin-metrics";
 import { PLANS } from "@/domain/plans";
 import { PageHeader } from "@/components/stat";
-import { Segmented } from "@/components/ui";
 import { CountSeries, Donut, HBar } from "@/components/charts";
 import { fmtBRL, fmtPts, fmtDateTime, fmtDay } from "@/lib/format";
-import { DeltaBadge, Kpi, Panel, Pill, Section } from "./dashboard-ui";
+import { DeltaBadge, Kpi, PendCard, PendRow, Panel, Section } from "./dashboard-ui";
 
 const pct = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
-const userHref = (email: string) => (email ? `/admin/users?q=${encodeURIComponent(email)}` : "/admin/users");
 const KIND = {
   request: { label: "Pedido de plano", tone: "blue" },
   paused: { label: "Pausada", tone: "red" },
@@ -20,29 +19,26 @@ const KIND = {
 
 export default async function AdminHome({ searchParams }: { searchParams: Promise<{ p?: string }> }) {
   const period = parsePeriod((await searchParams).p);
-  const d = await adminDashboard(period);
+  const [d, pl] = await Promise.all([adminDashboard(period), pendingLists()]);
   const { revenue: rv, growth: g, health: h, window: w } = d;
   const vs = `vs. ${w.label} anteriores`;
 
   return (
     <>
-      <PageHeader title="Indicadores" subtitle={`Últimos ${w.label} (${fmtDay(w.from)} a ${fmtDay(w.to)}), comparados aos ${w.label} anteriores`}>
-        <a className="btn-ghost h-9" href="/api/admin/export?kind=users"><Download className="h-4 w-4" />Usuários</a>
-        <a className="btn-ghost h-9" href="/api/admin/export?kind=programs"><Download className="h-4 w-4" />Programas</a>
-        <a className="btn-ghost h-9" href="/api/admin/export?kind=audit"><Download className="h-4 w-4" />Auditoria</a>
+      <PageHeader title="Visão geral" subtitle={`Indicadores do MilhasX com dados reais · últimos ${w.label} (${fmtDay(w.from)} a ${fmtDay(w.to)}), comparados aos ${w.label} anteriores`}>
+        <Link className="btn-ghost h-9 bg-panel" href="/admin/reports"><Download className="h-4 w-4" />Relatórios</Link>
       </PageHeader>
-      <Segmented items={PERIODS.map((p) => ({ key: p.key, label: p.label, href: `/admin?p=${p.key}` }))} active={period} />
 
       {/* ---------- Receita ---------- */}
       <Section title="Receita" subtitle="Assinaturas em vigor hoje. O MRR soma o valor cobrado no Mercado Pago e o preço de tabela dos planos ativados pela administração.">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi icon={<BadgeDollarSign className="h-4 w-4" />} label="MRR" value={fmtBRL(rv.mrrCents)} hint={<>{fmtBRL(rv.paidCents)} no Mercado Pago · {fmtBRL(rv.manualCents)} ativado pelo admin</>} />
+          <Kpi tone="hl" icon={<BadgeDollarSign className="h-4 w-4" />} label="MRR" value={fmtBRL(rv.mrrCents)} hint={<>{fmtBRL(rv.paidCents)} no Mercado Pago · {fmtBRL(rv.manualCents)} ativado pelo admin</>} />
           <Kpi icon={<TrendingUp className="h-4 w-4" />} label="ARR" value={fmtBRL(rv.arrCents)} hint="MRR × 12" />
           <Kpi icon={<Users className="h-4 w-4" />} label="Pagantes" value={fmtPts(rv.payers)} hint={`Ticket médio ${fmtBRL(rv.arpuCents)}/mês · ${rv.newPayers.cur} novos no período`} />
           <Kpi icon={<Repeat className="h-4 w-4" />} label="Churn" value={pct(rv.churn.rate)} delta={rv.churn.delta} inverse hint={`${rv.churn.lost} ${rv.churn.lost === 1 ? "saída" : "saídas"} · antes ${pct(rv.churn.prevRate)}`} />
           <Kpi label="Em teste agora" value={fmtPts(rv.trialsActive)} hint="Usando o Gestor no teste grátis" href="/admin/users?f=trial" />
           <Kpi label="Conversão do teste" value={pct(rv.trialConversion.rate)} hint={`${rv.trialConversion.converted} de ${rv.trialConversion.ended} testes encerrados no período`} />
-          <Kpi label="Pedidos de plano" value={fmtPts(h.pendingRequests)} hint="Esperando ativação" href="/admin/users?f=request" />
+          <Kpi tone={h.pendingRequests ? "warn" : undefined} label="Pedidos de plano" value={fmtPts(h.pendingRequests)} hint="Esperando ativação" href="/admin/subscriptions#pedidos" />
           <Kpi label="Volume vendido" value={fmtBRL(d.salesVolume.cur)} delta={d.salesVolume.delta} hint={`Vendas dos clientes ${vs}`} />
         </div>
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
@@ -64,7 +60,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
                     <span className="tabular-nums"><strong className="font-semibold">{fmtPts(s.count)}</strong>{i > 0 && <span className="ml-2 text-xs text-muted">{pct(s.pctOfPrev)} da etapa anterior</span>}</span>
                   </div>
                   <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-panel2" aria-hidden>
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${Math.max(s.pctOfFirst, s.count ? 2 : 0)}%`, opacity: 1 - i * 0.18 }} />
+                    <div className="h-full rounded-full bg-[rgb(var(--brand))]" style={{ width: `${Math.max(s.pctOfFirst, s.count ? 2 : 0)}%`, opacity: 1 - i * 0.18 }} />
                   </div>
                 </li>
               ))}
@@ -74,36 +70,21 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
         </div>
       </Section>
 
-      {/* ---------- Vencimentos e risco ---------- */}
-      <Section title="Atenção" subtitle="O que vence nos próximos 7 dias e quem pode cancelar">
-        <div className="grid gap-3 lg:grid-cols-2">
-          <Panel title="Vencem logo" subtitle="Testes que acabam, renovações previstas, pausas e pedidos pendentes">
-            {d.expiring.length === 0 ? <p className="py-6 text-center text-sm text-muted">Nada vence nos próximos 7 dias.</p> : (
-              <ul className="-mx-2 max-h-96 divide-y divide-line overflow-y-auto">
-                {d.expiring.slice(0, 30).map((e) => (
-                  <li key={`${e.kind}${e.userId}`} className="flex items-center gap-3 px-2 py-2 text-sm">
-                    <CalendarClock className="h-4 w-4 shrink-0 text-muted" />
-                    <Link href={userHref(e.user.email)} className="min-w-0 flex-1 hover:underline"><span className="block truncate font-medium">{e.user.name}</span><span className="block truncate text-xs text-muted">{e.detail}</span></Link>
-                    <Pill tone={KIND[e.kind].tone}>{KIND[e.kind].label}</Pill>
-                    <span className="w-24 shrink-0 text-right text-xs tabular-nums text-muted">{e.kind === "request" || e.kind === "paused" ? `desde ${fmtDay(e.at)}` : fmtDay(e.at)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-          <Panel title="Em risco de cancelar" subtitle="Pagantes e testes sem login, lançamento ou venda há 14 dias ou mais">
-            {d.risk.length === 0 ? <p className="py-6 text-center text-sm text-muted">Ninguém em risco agora.</p> : (
-              <ul className="-mx-2 max-h-96 divide-y divide-line overflow-y-auto">
-                {d.risk.map((x) => (
-                  <li key={x.userId} className="flex items-center gap-3 px-2 py-2 text-sm">
-                    <AlertTriangle className={`h-4 w-4 shrink-0 ${x.reason.startsWith("Pediu") ? "text-red-400" : "text-amber-300"}`} />
-                    <Link href={userHref(x.user.email)} className="min-w-0 flex-1 hover:underline"><span className="block truncate font-medium">{x.user.name}</span><span className="block truncate text-xs text-muted">{x.reason}</span></Link>
-                    <span className="shrink-0 text-right text-xs text-muted">{x.lastActivity ? `último uso ${fmtDay(x.lastActivity)}` : "nunca usou"}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+      {/* ---------- Central de pendências ---------- */}
+      <Section title="Central de pendências" subtitle="O que pede ação agora">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <PendCard title="Pedidos de plano" icon={<BadgeCheck className="h-4 w-4" />} href="/admin/subscriptions#pedidos" total={h.pendingRequests} empty="Nenhum pedido esperando">
+            {pl.requests.map((u) => <PendRow key={u.id} href={`/admin/users/${u.id}`} title={u.name} meta={`${PLANS[u.planRequest!].name}${u.planRequestInterval === "ANUAL" ? " anual" : ""} · ${u.planRequestedAt ? fmtDay(u.planRequestedAt) : ""}`} />)}
+          </PendCard>
+          <PendCard title="Vencem logo" icon={<CalendarClock className="h-4 w-4" />} href="/admin/recovery?t=trial" total={d.expiring.length} empty="Nada vence nos próximos 7 dias">
+            {d.expiring.slice(0, 5).map((e) => <PendRow key={`${e.kind}${e.userId}`} href={`/admin/users/${e.userId}`} title={e.user.name} meta={`${KIND[e.kind].label} · ${fmtDay(e.at)}`} bad={e.kind === "paused"} />)}
+          </PendCard>
+          <PendCard title="Em risco de cancelar" icon={<AlertTriangle className="h-4 w-4" />} href="/admin/recovery?t=risk" total={d.risk.length} empty="Ninguém em risco agora">
+            {d.risk.slice(0, 5).map((x) => <PendRow key={x.userId} href={`/admin/users/${x.userId}`} title={x.user.name} meta={x.lastActivity ? `uso ${fmtDay(x.lastActivity)}` : "nunca usou"} bad={x.reason.startsWith("Pediu")} />)}
+          </PendCard>
+          <PendCard title="Pedidos de exclusão" icon={<UserX className="h-4 w-4" />} href="/admin/users?f=deletion" total={h.deletionRequests} empty="Nenhum pedido de exclusão">
+            {pl.deletions.map((u) => <PendRow key={u.id} href={`/admin/users/${u.id}`} title={u.name} meta={fmtDay(u.deletionRequestedAt!)} bad />)}
+          </PendCard>
         </div>
       </Section>
 
@@ -117,7 +98,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
         </div>
         <div className="mt-3">
           <Panel title="Cadastros e usuários ativos" subtitle={w.bucket === "day" ? "Por dia" : w.bucket === "week" ? "Por semana" : "Por mês"}>
-            <CountSeries data={g.series} bucket={w.bucket} label="Gráfico de cadastros e usuários ativos" empty="Sem cadastros nem atividade no período." series={[{ key: "signups", name: "Cadastros", color: "#60a5fa" }, { key: "active", name: "Usuários ativos", color: "#4ade80" }]} />
+            <CountSeries data={g.series} bucket={w.bucket} label="Gráfico de cadastros e usuários ativos" empty="Sem cadastros nem atividade no período." series={[{ key: "signups", name: "Cadastros", color: "#102A50" }, { key: "active", name: "Usuários ativos", color: "#E6A51C" }]} />
           </Panel>
         </div>
       </Section>
@@ -142,7 +123,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
       </Section>
 
       {/* ---------- Saúde e suporte ---------- */}
-      <Section title="Saúde do sistema e suporte" action={<Link href="/admin/audit" className="text-xs text-accent-light hover:underline">Ver auditoria completa</Link>}>
+      <Section title="Saúde do sistema e suporte" action={<Link href="/admin/audit" className="text-xs font-semibold text-[rgb(var(--brand))] hover:underline">Ver auditoria completa</Link>}>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi icon={<Mail className="h-4 w-4" />} label="E-mails automáticos" value={fmtPts(h.emails.cur)} delta={h.emails.delta} hint={h.emails.byKind.length ? h.emails.byKind.map((k) => `${k.kind}: ${k.count}`).join(" · ") : "Nenhum aviso enviado no período"} />
           <Kpi label="Push" value={fmtPts(h.push.total)} hint={`${h.push.new} aparelhos novos no período`} />

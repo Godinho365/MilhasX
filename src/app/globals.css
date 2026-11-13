@@ -78,6 +78,33 @@
   --sky-300: 3 105 161; --sky-400: 2 132 199; --emerald-300: 4 120 87; --emerald-400: 5 150 105;
   --teal-300: 15 118 110; --teal-400: 13 148 136; --fuchsia-300: 162 28 175; --fuchsia-400: 192 38 211;
 }
+/* Painel da administração: claro, azul-marinho e dourado (mesma identidade do painel do Balcão) */
+[data-theme="admin"] {
+  color-scheme: light;
+  --bg: 244 246 250; --side: 255 255 255; --panel: 255 255 255; --panel2: 241 245 249; --line: 227 232 239; --muted: 100 116 139;
+  --white: 15 27 45;
+  --zinc-50: 15 27 45; --zinc-100: 30 41 59; --zinc-200: 51 65 85; --zinc-300: 71 85 105; --zinc-400: 100 116 139;
+  --zinc-500: 148 163 184; --zinc-600: 203 213 225; --zinc-700: 226 232 240; --zinc-800: 237 241 245; --zinc-900: 241 245 249; --zinc-950: 255 255 255;
+  --accent: 16 42 80; --accent-light: 16 42 80; --accent-soft: 230 236 245;
+  --gold: 230 165 28; --brand: 16 42 80; --brand2: 27 59 111;
+  --ok: 22 163 74; --bad: 220 38 38;
+  --red-300: 220 38 38; --red-400: 220 38 38; --green-300: 22 140 60; --green-400: 22 163 74;
+  --amber-300: 183 128 15; --amber-400: 217 119 6; --blue-300: 29 78 216; --blue-400: 37 99 235;
+  --violet-300: 109 40 217; --violet-400: 124 58 237; --orange-300: 194 65 12; --orange-400: 234 88 12;
+  --sky-300: 3 105 161; --sky-400: 2 132 199; --emerald-300: 4 120 87; --emerald-400: 5 150 105;
+  --teal-300: 15 118 110; --teal-400: 13 148 136; --fuchsia-300: 162 28 175; --fuchsia-400: 192 38 211;
+}
+[data-theme="admin"] body, [data-theme="admin"].adm-root { background-color: rgb(var(--bg)); color: rgb(var(--white)); }
+[data-theme="admin"] .card { box-shadow: 0 1px 2px rgb(15 27 45 / 0.04); }
+[data-theme="admin"] .btn-primary { background-color: rgb(var(--brand)); color: #fff; }
+[data-theme="admin"] .btn-primary:hover { background-color: rgb(var(--brand2)); }
+[data-theme="admin"] .btn-gold { @apply btn; background-color: rgb(var(--gold)); color: rgb(var(--brand)); }
+[data-theme="admin"] .btn-gold:hover { filter: brightness(0.96); }
+[data-theme="admin"] .table-base th { background-color: #F8FAFC; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+[data-theme="admin"] .table-base tbody tr:hover { background-color: #F8FAFC; }
+[data-theme="admin"] .input:focus { border-color: rgb(var(--brand)); box-shadow: 0 0 0 3px rgb(16 42 80 / 0.1); }
+[data-theme="admin"] .checkbox { border-color: rgb(var(--brand) / 0.8); }
+[data-theme="admin"] .checkbox:checked { background-color: rgb(var(--brand)); border-color: rgb(var(--brand)); }
 @media (prefers-color-scheme: light) {
   [data-theme="system"] {
     color-scheme: light;
@@ -133,7 +160,7 @@ html[data-values="hidden"] main .tabular-nums { filter: blur(7px); transition: f
 html[data-values="hidden"] main .tabular-nums:hover { filter: none; }
 
 /* Peças só de um tema (ex.: o logotipo de letras escuras só no claro) */
-[data-theme="dark"] .only-light, [data-theme="light"] .only-dark, [data-theme="client"] .only-dark { display: none; }
+[data-theme="dark"] .only-light, [data-theme="light"] .only-dark, [data-theme="client"] .only-dark, [data-theme="admin"] .only-dark { display: none; }
 @media (prefers-color-scheme: dark) { [data-theme="system"] .only-light { display: none; } }
 @media (prefers-color-scheme: light) { [data-theme="system"] .only-dark { display: none; } }
 

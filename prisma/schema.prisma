@@ -166,6 +166,7 @@ model User {
   telegramDms         TelegramDm[]
   trafficConnection   TrafficConnection?
   trafficReports      TrafficReport[]
+  planInviteRedemptions PlanInviteRedemption[]
 
   @@index([workspaceOwnerId])
 }
@@ -1064,10 +1065,63 @@ model Subscription {
   amountCents Int
   status      String   @default("PENDING") // PENDING | AUTHORIZED | PAUSED | CANCELLED
   checkoutUrl String?
+  /// Cupom aplicado no checkout; amountCents já vem com o desconto (discountCents por cobrança)
+  couponId      String?
+  coupon        Coupon?  @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  discountCents Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([userId, createdAt])
+  @@index([couponId])
+}
+
+/// Cupom de desconto da assinatura (Admin › Cupons). O desconto vale para todas as cobranças da assinatura.
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique // maiúsculas, sem espaços
+  kind        String // PERCENT | FIXED
+  value       Int // PERCENT: 1 a 100; FIXED: centavos por cobrança
+  plans       String[] // PRO, GESTOR (vazio = todos)
+  intervals   String[] // MENSAL, ANUAL (vazio = os dois)
+  maxUses     Int? // assinaturas pagas com o cupom
+  expiresAt   DateTime?
+  active      Boolean   @default(true)
+  note        String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  subscriptions Subscription[]
+}
+
+/// Convite com plano ou teste (Admin › Convites): o link /convite/CODIGO dá um plano de cortesia ou dias de teste do Gestor.
+model PlanInvite {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  kind        String // PLAN | TRIAL
+  plan        Plan? // PLAN: plano dado
+  interval    String? // PLAN: MENSAL | ANUAL
+  days        Int? // TRIAL: dias de teste
+  maxUses     Int?
+  expiresAt   DateTime?
+  active      Boolean   @default(true)
+  note        String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  redemptions PlanInviteRedemption[]
+}
+
+model PlanInviteRedemption {
+  id        String     @id @default(cuid())
+  inviteId  String
+  invite    PlanInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([inviteId, userId])
+  @@index([userId])
 }
 
 // CRM de pedidos de emissão: funis (Funil Comercial, Pós-Venda...) com colunas editáveis, captação pela página pública.
