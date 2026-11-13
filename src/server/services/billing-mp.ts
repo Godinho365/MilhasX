@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import type { Plan } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
 import { PLANS, planPriceCents, type PlanCode, type PlanInterval } from "@/domain/plans";
+import { quoteCoupon } from "./promo";
 
 // Assinaturas pagas no Mercado Pago ("assinatura sem plano associado", pagamento pendente):
 // o servidor cria um preapproval e manda o usuário para o link de pagamento do Mercado Pago.
@@ -47,13 +48,21 @@ async function mp<T>(path: string, init: { method?: string; body?: unknown } = {
 const STATUS: Record<string, string> = { pending: "PENDING", authorized: "AUTHORIZED", paused: "PAUSED", cancelled: "CANCELLED" };
 
 /** Cria a assinatura no Mercado Pago e devolve o link de pagamento. */
-export async function startCheckout(userId: string, plan: PlanCode, interval: PlanInterval, payerEmail: string) {
+export async function startCheckout(userId: string, plan: PlanCode, interval: PlanInterval, payerEmail: string, couponCode?: string | null) {
   if (plan === "PESSOAL") throw new DomainError(400, "O plano Pessoal é gratuito");
   const base = process.env.APP_URL;
   if (!base) throw new DomainError(503, "APP_URL não configurada no servidor");
   const months = interval === "ANUAL" ? 12 : 1;
-  const amountCents = planPriceCents(plan, interval) * months;
-  const sub = await prisma.subscription.create({ data: { userId, plan, interval, amountCents } });
+  const fullCents = planPriceCents(plan, interval) * months;
+  // Cupom: o desconto entra no valor de cada cobrança do preapproval
+  let coupon: { id: string; discountCents: number } | null = null;
+  if (couponCode?.trim()) {
+    const q = await quoteCoupon(couponCode, plan, interval, fullCents);
+    if (!q.check.ok) throw new DomainError(400, q.check.error);
+    coupon = { id: q.coupon!.id, discountCents: q.check.discountCents };
+  }
+  const amountCents = fullCents - (coupon?.discountCents ?? 0);
+  const sub = await prisma.subscription.create({ data: { userId, plan, interval, amountCents, couponId: coupon?.id ?? null, discountCents: coupon?.discountCents ?? 0 } });
   const pre = await mp<Preapproval>("/preapproval", {
     method: "POST",
     body: {
@@ -67,7 +76,7 @@ export async function startCheckout(userId: string, plan: PlanCode, interval: Pl
   });
   if (!pre.init_point) throw new DomainError(502, "O Mercado Pago não devolveu o link de pagamento");
   await prisma.subscription.update({ where: { id: sub.id }, data: { externalId: pre.id, checkoutUrl: pre.init_point } });
-  await audit(prisma, userId, "billing.checkout", "Subscription", sub.id, { plan, interval, amountCents });
+  await audit(prisma, userId, "billing.checkout", "Subscription", sub.id, { plan, interval, amountCents, ...(coupon ? { couponId: coupon.id, discountCents: coupon.discountCents } : {}) });
   return { checkoutUrl: pre.init_point };
 }
 

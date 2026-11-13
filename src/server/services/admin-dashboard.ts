@@ -1,6 +1,7 @@
 // Admin › Indicadores: busca no banco o que o painel precisa e entrega os números prontos.
 // As contas ficam em domain/admin-metrics.ts (puras e testadas).
 import { prisma } from "../db";
+import { courtesyUserIds } from "./promo";
 import type { PlanCode } from "@/domain/plans";
 import {
   periodWindow, delta, revenue, churn, trialFunnel, trialConversion, activation, activeUsers, expiring, atRisk, seriesByBucket, inRange, recoveryList, cohorts,
@@ -42,7 +43,7 @@ export async function adminDashboard(period: PeriodKey, now = new Date()) {
   const w = periodWindow(period, now);
   const r = (from: Date, to: Date) => ({ createdAt: { gte: from, lt: to } });
 
-  const [rawUsers, rawSubs, requestLogs, planLogs, firstEntries, activity, last] = await Promise.all([
+  const [rawUsers, rawSubs, requestLogs, planLogs, firstEntries, activity, last, courtesy] = await Promise.all([
     prisma.user.findMany({
       // Clientes: sem administradores e sem os logins de equipe (que pertencem à conta do dono)
       where: { role: "USER", workspaceOwnerId: null },
@@ -54,6 +55,7 @@ export async function adminDashboard(period: PeriodKey, now = new Date()) {
     prisma.entry.groupBy({ by: ["userId"], _min: { createdAt: true } }),
     activitySince(new Date(Math.min(w.prevFrom.getTime(), now.getTime() - 30 * DAY))),
     lastActivity(),
+    courtesyUserIds(),
   ]);
 
   const ids = new Set(rawUsers.map((u) => u.id));
@@ -67,7 +69,7 @@ export async function adminDashboard(period: PeriodKey, now = new Date()) {
   const firstEntry = new Map(firstEntries.filter((e) => e._min.createdAt).map((e) => [e.userId, e._min.createdAt!]));
 
   // ---- Receita
-  const rev = revenue(users, subs);
+  const rev = revenue(users, subs, courtesy);
   const ch = churn(subs, downgrades, w.from, w.to, rev.payers);
   const chPrev = churn(subs, downgrades, w.prevFrom, w.prevTo, rev.payers);
   const newPayers = (from: Date, to: Date) =>

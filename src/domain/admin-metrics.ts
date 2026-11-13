@@ -99,14 +99,19 @@ const isPaidPlan = (p: PlanCode) => p !== "PESSOAL";
  * Receita recorrente mensal. Quem tem assinatura autorizada no Mercado Pago entra pelo valor cobrado
  * (o anual dividido por 12); quem foi ativado pela administração entra pelo preço de tabela.
  */
-export function revenue(users: AdminUser[], subs: AdminSub[]) {
+export function revenue(users: AdminUser[], subs: AdminSub[], courtesy: Set<string> = new Set()) {
   const authorized = new Map<string, AdminSub>();
   for (const s of subs) if (s.status === "AUTHORIZED" && (!authorized.has(s.userId) || authorized.get(s.userId)!.createdAt < s.createdAt)) authorized.set(s.userId, s);
-  let paidCents = 0, manualCents = 0;
+  let paidCents = 0, manualCents = 0, courtesyCount = 0;
   const byPlan: Record<string, { count: number; mrrCents: number }> = {};
   for (const u of users) {
     if (!isPaidPlan(u.plan) || u.status !== "ACTIVE") continue;
     const sub = authorized.get(u.id);
+    // Plano de cortesia (convite) sem assinatura: não é receita
+    if (!sub && courtesy.has(u.id)) {
+      courtesyCount++;
+      continue;
+    }
     const mrr = sub ? Math.round(sub.amountCents / months(sub.interval)) : planPriceCents(u.plan, (u.planInterval ?? "MENSAL") as PlanInterval);
     if (sub) paidCents += mrr;
     else manualCents += mrr;
@@ -117,7 +122,7 @@ export function revenue(users: AdminUser[], subs: AdminSub[]) {
   }
   const mrrCents = paidCents + manualCents;
   const payers = Object.values(byPlan).reduce((t, p) => t + p.count, 0);
-  return { mrrCents, arrCents: mrrCents * 12, paidCents, manualCents, payers, arpuCents: payers ? Math.round(mrrCents / payers) : 0, byPlan };
+  return { mrrCents, arrCents: mrrCents * 12, paidCents, manualCents, payers, courtesy: courtesyCount, arpuCents: payers ? Math.round(mrrCents / payers) : 0, byPlan };
 }
 
 /** Saídas no período: assinaturas canceladas/pausadas e rebaixamentos feitos pela administração. */

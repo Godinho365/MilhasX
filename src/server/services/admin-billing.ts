@@ -10,7 +10,7 @@ export async function subscriptionsOverview(period: PeriodKey, status: string | 
   const userSel = { select: { id: true, name: true, email: true } } as const;
   const [all, list, requests, manual] = await Promise.all([
     prisma.subscription.findMany({ select: { userId: true, status: true, amountCents: true, interval: true, createdAt: true, updatedAt: true } }),
-    prisma.subscription.findMany({ where: st ? { status: st } : undefined, include: { user: userSel }, orderBy: { updatedAt: "desc" }, take: 200 }),
+    prisma.subscription.findMany({ where: st ? { status: st } : undefined, include: { user: userSel, coupon: { select: { code: true } } }, orderBy: { updatedAt: "desc" }, take: 200 }),
     prisma.user.findMany({
       where: { planRequest: { not: null } },
       select: { id: true, name: true, email: true, plan: true, planRequest: true, planRequestInterval: true, planRequestedAt: true, trialEndsAt: true },
@@ -18,7 +18,7 @@ export async function subscriptionsOverview(period: PeriodKey, status: string | 
     }),
     prisma.user.findMany({
       where: { plan: { not: "PESSOAL" }, status: "ACTIVE", subscriptions: { none: { status: "AUTHORIZED" } } },
-      select: { id: true, name: true, email: true, plan: true, planInterval: true },
+      select: { id: true, name: true, email: true, plan: true, planInterval: true, planInviteRedemptions: { where: { invite: { kind: "PLAN" } }, select: { invite: { select: { code: true } } }, take: 1 } },
       orderBy: { name: "asc" },
       take: 200,
     }),

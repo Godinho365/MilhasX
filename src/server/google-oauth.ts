@@ -16,6 +16,8 @@ export interface GoogleState {
   state: string;
   mode: "signin" | "signup";
   ref?: string;
+  /** Convite com plano para usar depois de entrar (/convite/CODIGO) */
+  invite?: string;
 }
 
 export const newState = () => randomBytes(24).toString("base64url");
@@ -45,7 +47,7 @@ export function parseState(raw: string | null): GoogleState | null {
   try {
     const v = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
     if (typeof v?.state !== "string" || (v.mode !== "signin" && v.mode !== "signup")) return null;
-    return { state: v.state, mode: v.mode, ref: typeof v.ref === "string" ? v.ref.slice(0, 20) : undefined };
+    return { state: v.state, mode: v.mode, ref: typeof v.ref === "string" ? v.ref.slice(0, 20) : undefined, invite: typeof v.invite === "string" && /^[A-Z0-9_-]{3,30}$/.test(v.invite) ? v.invite : undefined };
   } catch {
     return null;
   }

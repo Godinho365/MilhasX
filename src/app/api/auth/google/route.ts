@@ -20,8 +20,10 @@ export async function GET(req: Request) {
   }
   const state = newState();
   const ref = url.searchParams.get("ref")?.trim().slice(0, 20) || undefined;
+  const inv = url.searchParams.get("convite")?.trim().toUpperCase();
+  const invite = inv && /^[A-Z0-9_-]{3,30}$/.test(inv) ? inv : undefined;
   return new Response(null, {
     status: 303,
-    headers: { location: googleAuthUrl(req, state), "set-cookie": stateCookie({ state, mode, ref }) },
+    headers: { location: googleAuthUrl(req, state), "set-cookie": stateCookie({ state, mode, ref, invite }) },
   });
 }

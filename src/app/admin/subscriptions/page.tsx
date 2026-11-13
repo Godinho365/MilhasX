@@ -56,7 +56,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             <tr key={s.id}>
               <td><Link href={`/admin/users/${s.user.id}`} className="font-semibold hover:underline">{s.user.name}</Link><span className="block text-xs text-muted">{s.user.email}</span></td>
               <td>{planName(s.plan, s.interval)}</td>
-              <td className="text-right tabular-nums">{fmtBRL(s.amountCents)}{s.interval === "ANUAL" && <span className="block text-xs text-muted">{fmtBRL(Math.round(s.amountCents / 12))}/mês</span>}</td>
+              <td className="text-right tabular-nums">{fmtBRL(s.amountCents)}{s.coupon && <span className="block text-xs text-green-400">cupom {s.coupon.code} · −{fmtBRL(s.discountCents)}</span>}{s.interval === "ANUAL" && <span className="block text-xs text-muted">{fmtBRL(Math.round(s.amountCents / 12))}/mês</span>}</td>
               <td><Pill tone={STATUS[s.status]?.tone ?? "zinc"}>{STATUS[s.status]?.label ?? s.status}</Pill></td>
               <td className="text-muted">{fmtDay(s.createdAt)}</td>
               <td className="text-muted">{fmtDay(s.updatedAt)}</td>
@@ -70,7 +70,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
           {d.manual.map((u) => (
             <tr key={u.id}>
               <td><Link href={`/admin/users/${u.id}`} className="font-semibold hover:underline">{u.name}</Link><span className="block text-xs text-muted">{u.email}</span></td>
-              <td>{planName(u.plan, u.planInterval)}</td>
+              <td>{planName(u.plan, u.planInterval)}{u.planInviteRedemptions[0] && <span className="ml-2"><Pill tone="amber">Cortesia · {u.planInviteRedemptions[0].invite.code}</Pill></span>}</td>
               <td className="text-right tabular-nums text-muted"><Clock className="mr-1 inline h-3.5 w-3.5" />{fmtBRL(planPriceCents(u.plan, (u.planInterval ?? "MENSAL") as PlanInterval))}/mês</td>
             </tr>
           ))}

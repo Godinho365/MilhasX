@@ -5,6 +5,7 @@ import { listUsers, userFilterCounts, USER_FILTERS } from "@/server/services/adm
 import { PageHeader } from "@/components/stat";
 import { UserRow } from "./client";
 import { effectivePlan } from "@/domain/plans";
+import { Chips } from "../dashboard-ui";
 
 const FILTER_LABELS: Record<(typeof USER_FILTERS)[number] | "all", string> = {
   all: "Todos", paid: "Pagantes", trial: "Em teste", request: "Pediram plano", deletion: "Pediram exclusão", disabled: "Desativados", admin: "Admins",
@@ -20,18 +21,12 @@ export default async function AdminUsers({ searchParams }: { searchParams: Promi
   return (
     <>
       <PageHeader title="Usuários" subtitle={`${counts.all} contas · ${counts.paid} pagantes · ${counts.trial} em teste`}>
-        <a className="btn-ghost h-9" href="/api/admin/export?kind=users">Exportar CSV</a>
+        <a className="btn-ghost h-9 bg-panel" href="/api/admin/export?kind=users">Exportar CSV</a>
       </PageHeader>
-      <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Filtros">
-        {(["all", ...USER_FILTERS] as const).map((k) => (
-          <Link key={k} href={href(k)} role="tab" aria-selected={f === k} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${f === k ? "border-zinc-500 bg-panel2 text-white" : "border-line text-muted hover:text-zinc-100"}`}>
-            {FILTER_LABELS[k]}<span className="tabular-nums text-muted">{counts[k]}</span>
-          </Link>
-        ))}
-      </div>
+      <Chips active={f} items={(["all", ...USER_FILTERS] as const).map((k) => ({ key: k, label: FILTER_LABELS[k], href: href(k), n: counts[k] }))} />
       <form className="mb-3 flex gap-2">
         {f !== "all" && <input type="hidden" name="f" value={f} />}
-        <div className="relative max-w-sm flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><input className="input pl-9" name="q" defaultValue={q} placeholder="Nome ou e-mail" aria-label="Buscar usuário" /></div>
+        <div className="relative max-w-sm flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><input className="input bg-panel pl-9" name="q" defaultValue={q} placeholder="Nome ou e-mail" aria-label="Buscar usuário" /></div>
         <button className="btn-ghost">Buscar</button>
         {q && <Link href={href(f)} className="btn-ghost">Limpar</Link>}
       </form>

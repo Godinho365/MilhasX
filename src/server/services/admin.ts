@@ -228,3 +228,30 @@ export async function logContact(actorId: string, userId: string, channel: "what
   if (!(await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }))) throw new DomainError(404, "Usuário não encontrado");
   await audit(prisma, actorId, "admin.contact", "User", userId, { channel, reason: reason.slice(0, 60) });
 }
+
+// ---------- Solicitações LGPD (formulário público /privacidade/solicitacao) ----------
+
+export const PRIVACY_STATUSES = ["NEW", "IN_PROGRESS", "DONE"] as const;
+export const PRIVACY_DEADLINE_DAYS = 15; // prazo de resposta da LGPD (art. 19, II)
+
+export async function listPrivacyRequests(status: string | null) {
+  const st = (PRIVACY_STATUSES as readonly string[]).includes(status ?? "") ? status! : null;
+  const [items, grouped] = await Promise.all([
+    prisma.privacyRequest.findMany({ where: st ? { status: st } : undefined, orderBy: { createdAt: "desc" }, take: 300 }),
+    prisma.privacyRequest.groupBy({ by: ["status"], _count: true }),
+  ]);
+  // Liga o pedido à conta com o mesmo e-mail, quando existe
+  const accounts = await prisma.user.findMany({ where: { email: { in: [...new Set(items.map((i) => i.email))] } }, select: { id: true, email: true } });
+  const byEmail = new Map(accounts.map((a) => [a.email, a.id]));
+  return {
+    status: st,
+    counts: Object.fromEntries(PRIVACY_STATUSES.map((s) => [s, grouped.find((g) => g.status === s)?._count ?? 0])) as Record<(typeof PRIVACY_STATUSES)[number], number>,
+    items: items.map((i) => ({ ...i, userId: byEmail.get(i.email) ?? null, dueAt: new Date(i.createdAt.getTime() + PRIVACY_DEADLINE_DAYS * 86400_000) })),
+  };
+}
+
+export async function setPrivacyStatus(actorId: string, id: string, status: (typeof PRIVACY_STATUSES)[number]) {
+  const r = await prisma.privacyRequest.update({ where: { id }, data: { status } }).catch(() => null);
+  if (!r) throw new DomainError(404, "Pedido não encontrado");
+  await audit(prisma, actorId, "admin.privacy_status", "PrivacyRequest", id, { status });
+}

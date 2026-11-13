@@ -32,7 +32,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
       {/* ---------- Receita ---------- */}
       <Section title="Receita" subtitle="Assinaturas em vigor hoje. O MRR soma o valor cobrado no Mercado Pago e o preço de tabela dos planos ativados pela administração.">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi tone="hl" icon={<BadgeDollarSign className="h-4 w-4" />} label="MRR" value={fmtBRL(rv.mrrCents)} hint={<>{fmtBRL(rv.paidCents)} no Mercado Pago · {fmtBRL(rv.manualCents)} ativado pelo admin</>} />
+          <Kpi tone="hl" icon={<BadgeDollarSign className="h-4 w-4" />} label="MRR" value={fmtBRL(rv.mrrCents)} hint={<>{fmtBRL(rv.paidCents)} no Mercado Pago · {fmtBRL(rv.manualCents)} ativado pelo admin{rv.courtesy ? ` · ${rv.courtesy} cortesia${rv.courtesy > 1 ? "s" : ""} fora` : ""}</>} />
           <Kpi icon={<TrendingUp className="h-4 w-4" />} label="ARR" value={fmtBRL(rv.arrCents)} hint="MRR × 12" />
           <Kpi icon={<Users className="h-4 w-4" />} label="Pagantes" value={fmtPts(rv.payers)} hint={`Ticket médio ${fmtBRL(rv.arpuCents)}/mês · ${rv.newPayers.cur} novos no período`} />
           <Kpi icon={<Repeat className="h-4 w-4" />} label="Churn" value={pct(rv.churn.rate)} delta={rv.churn.delta} inverse hint={`${rv.churn.lost} ${rv.churn.lost === 1 ? "saída" : "saídas"} · antes ${pct(rv.churn.prevRate)}`} />

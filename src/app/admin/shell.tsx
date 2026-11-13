@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BadgeCheck, BarChart3, Bell, BookOpen, Calculator, Calendar, ChevronRight, Hourglass, LayoutDashboard,
-  LogOut, Menu, Newspaper, Plane, RotateCcw, ScrollText, Settings, Ticket, TicketPercent, TrendingUp, UserX, Users, X,
+  LogOut, Menu, Newspaper, Plane, RotateCcw, ScrollText, Settings, Shield, Ticket, TicketPercent, TrendingUp, UserX, Users, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
@@ -31,6 +31,7 @@ export const ADMIN_NAV: { group: string; items: Item[] }[] = [
   ] },
   { group: "Gestão", items: [
     { label: "Relatórios", href: "/admin/reports", icon: BarChart3 },
+    { label: "Solicitações LGPD", href: "/admin/privacy", icon: Shield },
     { label: "Auditoria", href: "/admin/audit", icon: ScrollText },
     { label: "Parâmetros", href: "/admin/settings", icon: Settings },
   ] },
@@ -39,7 +40,7 @@ export const ADMIN_NAV: { group: string; items: Item[] }[] = [
 // Páginas que leem o período (?p=) mostram o seletor no topo
 const PERIOD_PAGES = ["/admin", "/admin/conversion", "/admin/reports", "/admin/subscriptions"];
 const PERIODS = [["7d", "Últimos 7 dias"], ["30d", "Últimos 30 dias"], ["90d", "Últimos 90 dias"], ["12m", "Últimos 12 meses"]] as const;
-const PEND_ICONS: Record<string, Item["icon"]> = { "badge-check": BadgeCheck, "alert-triangle": AlertTriangle, "user-x": UserX, hourglass: Hourglass, "rotate-ccw": RotateCcw };
+const PEND_ICONS: Record<string, Item["icon"]> = { "badge-check": BadgeCheck, "alert-triangle": AlertTriangle, "user-x": UserX, hourglass: Hourglass, "rotate-ccw": RotateCcw, shield: Shield };
 
 const activeHref = (path: string) => {
   if (path === "/admin") return "/admin";
