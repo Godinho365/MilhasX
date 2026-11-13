@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 
   try {
     const profile = await fetchGoogleProfile(req, code);
-    const { user, token, expiresAt } = await loginWithGoogle(profile, { ref: saved.ref, allowCreate: await isRegistrationOpen() });
+    const { user, token, expiresAt } = await loginWithGoogle(profile, { ref: saved.ref, utm: saved.utm, allowCreate: await isRegistrationOpen() });
     await prisma.loginAttempt.create({ data: { email: user.email, ip: clientIp(req), success: true } });
     headers.append("set-cookie", sessionCookie(token, expiresAt));
     return go(saved.invite ? `/presente/${encodeURIComponent(saved.invite)}` : "/app");

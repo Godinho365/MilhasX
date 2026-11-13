@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { readUtm } from "@/components/utm-keeper";
 import { Alert } from "@/components/ui";
 import { useHydrated } from "@/lib/use-hydrated";
 import { AuthTitle, GoogleButton, OrDivider, PasswordField, Turnstile } from "../parts";
@@ -82,6 +83,7 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
       captcha: codeRequired ? undefined : captcha || undefined,
       code: codeRequired ? code : undefined,
       ref: ref() || undefined,
+      utm: readUtm(),
     });
     setBusy(false);
     if (!r.ok) {
@@ -124,6 +126,7 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
     if (r) q.set("ref", r);
     const inv = invite();
     if (inv) q.set("convite", inv);
+    for (const [k, v] of Object.entries(readUtm() ?? {})) q.set(k, v);
     window.location.href = `/api/auth/google?${q}`;
   }
 
