@@ -120,16 +120,17 @@ export function ConsentProvider({ initial, signedIn }: { initial: Consent | null
           aria-label="Aviso de cookies"
           className="fixed inset-x-0 bottom-0 z-[60] p-3 sm:p-4"
         >
-          <div className="card mx-auto flex max-w-4xl flex-col gap-3 p-4 shadow-2xl shadow-black/40 sm:p-5 md:flex-row md:items-end">
-            <div className="min-w-0 flex-1">
+          <div className="card mx-auto flex max-w-3xl flex-col gap-4 p-4 shadow-2xl shadow-black/40 sm:p-5">
+            <div className="min-w-0">
               <p className="flex items-center gap-2 font-semibold"><Cookie className="h-4 w-4 text-accent-light" />Sua privacidade</p>
               <p className="mt-1 text-sm text-muted">
                 Usamos cookies necessários para o site funcionar. Cookies analíticos e de marketing só são usados se você permitir.
-                Você pode mudar a escolha quando quiser em &quot;Preferências de cookies&quot;, no rodapé.{" "}
+                Você pode mudar a escolha quando quiser em &quot;Preferências de cookies&quot;, no rodapé do site
+                {signedIn ? " ou em Configurações › Preferências" : ""}.{" "}
                 <Link href="/privacidade" className="underline">Política de Privacidade</Link>
               </p>
             </div>
-            <div className="grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button type="button" className="btn-ghost" disabled={saving} onClick={() => save(NONE)}>Rejeitar não essenciais</button>
               <button type="button" className="btn-ghost" disabled={saving} onClick={openCenter}>Personalizar</button>
               <button type="button" className="btn-ghost" disabled={saving} onClick={() => save(ALL)}>Aceitar todos</button>
