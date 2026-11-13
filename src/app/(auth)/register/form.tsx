@@ -40,6 +40,7 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
   const canSubmit = ready && terms && verified;
 
   const ref = () => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("ref"));
+  const invite = () => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("convite"));
 
   // Contagem para liberar o "Reenviar código"
   useEffect(() => {
@@ -87,7 +88,8 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
       if (!codeRequired) resetCaptcha();
       return setErro(r.erro);
     }
-    window.location.href = "/app";
+    const inv = invite();
+    window.location.href = inv ? `/presente/${encodeURIComponent(inv)}` : "/app";
   }
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -120,6 +122,8 @@ export function RegisterForm({ google, siteKey, initialError, codeRequired }: { 
     if (captcha) q.set("cf", captcha);
     const r = ref();
     if (r) q.set("ref", r);
+    const inv = invite();
+    if (inv) q.set("convite", inv);
     window.location.href = `/api/auth/google?${q}`;
   }
 

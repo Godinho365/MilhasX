@@ -18,7 +18,8 @@ export function LoginForm({ google, initialError }: { google: boolean; initialEr
     const r = await api("/api/auth/login", "POST", { email: f.get("email"), password: f.get("password") });
     setBusy(false);
     if (!r.ok) return setErro(r.erro);
-    window.location.href = "/app";
+    const inv = new URLSearchParams(window.location.search).get("convite");
+    window.location.href = inv ? `/presente/${encodeURIComponent(inv)}` : "/app";
   }
   return (
     <div>
@@ -40,7 +41,10 @@ export function LoginForm({ google, initialError }: { google: boolean; initialEr
       {google && (
         <div className="mt-4 space-y-4">
           <OrDivider />
-          <GoogleButton label="Continuar com Google" disabled={!ready} onClick={() => (window.location.href = "/api/auth/google?mode=signin")} />
+          <GoogleButton label="Continuar com Google" disabled={!ready} onClick={() => {
+            const inv = new URLSearchParams(window.location.search).get("convite");
+            window.location.href = `/api/auth/google?mode=signin${inv ? `&convite=${encodeURIComponent(inv)}` : ""}`;
+          }} />
           <p className="text-center text-xs text-muted">
             Ao continuar com Google, você concorda com os <Link href="/termos" target="_blank" className="underline hover:text-accent-light">Termos de Serviço</Link> e a{" "}
             <Link href="/privacidade" target="_blank" className="underline hover:text-accent-light">Política de Privacidade</Link>.

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { refreshSafe } from "@/lib/nav";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL } from "@/lib/format";
@@ -19,14 +19,32 @@ export function UpgradeClient({ current, currentInterval, pending, online, hasSu
   const [plan, setPlan] = useState<PlanCode | null>(null);
   const [busy, setBusy] = useState(false);
   const [payer, setPayer] = useState(email);
+  const [couponCode, setCouponCode] = useState("");
+  // Link com ?cupom=CODIGO já preenche o campo
+  useEffect(() => { setCouponCode(new URLSearchParams(window.location.search).get("cupom") ?? ""); }, []);
+  const [coupon, setCoupon] = useState<{ code: string; label: string; discountCents: number; finalCents: number } | null>(null);
   const paid = online && plan !== null && plan !== "PESSOAL";
+  const charge = plan && plan !== "PESSOAL" ? planPriceCents(plan, interval) * (interval === "ANUAL" ? 12 : 1) : 0;
+
+  async function applyCoupon() {
+    if (!plan || plan === "PESSOAL" || !couponCode.trim()) return;
+    setBusy(true);
+    const r = await api<{ label: string; discountCents: number; finalCents: number }>("/api/billing/coupon", "POST", { code: couponCode, plan, interval });
+    setBusy(false);
+    if (!r.ok) {
+      setCoupon(null);
+      return toast(r.erro, "error");
+    }
+    setCoupon({ code: couponCode.trim().toUpperCase(), ...r.data });
+    toast(`Cupom aplicado: ${r.data.label}`);
+  }
 
   async function confirm() {
     if (!plan) return;
     setBusy(true);
     if (paid) {
       // Vai para o checkout do Mercado Pago; o plano muda quando o pagamento for confirmado
-      const r = await api<{ checkoutUrl: string }>("/api/billing/checkout", "POST", { plan, interval, payerEmail: payer });
+      const r = await api<{ checkoutUrl: string }>("/api/billing/checkout", "POST", { plan, interval, payerEmail: payer, coupon: coupon?.code ?? null });
       if (!r.ok) {
         setBusy(false);
         return toast(r.erro, "error");
@@ -84,7 +102,7 @@ export function UpgradeClient({ current, currentInterval, pending, online, hasSu
                   <ul className="mb-5 flex-1 space-y-2 text-sm">
                     {p.features.map((f) => <li key={f} className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-green-300" />{f}</li>)}
                   </ul>
-                  <button className={k === "GESTOR" ? "btn-primary" : "btn-ghost"} disabled={isCurrent} onClick={() => { setPlan(k); setStep(1); }}>
+                  <button className={k === "GESTOR" ? "btn-primary" : "btn-ghost"} disabled={isCurrent} onClick={() => { setPlan(k); setCoupon(null); setStep(1); }}>
                     {isCurrent ? "Plano atual" : `Escolher ${p.name}`}
                   </button>
                 </section>
@@ -108,7 +126,15 @@ export function UpgradeClient({ current, currentInterval, pending, online, hasSu
               <Field label="E-mail da sua conta Mercado Pago" hint="O pagamento é feito no site do Mercado Pago, com cartão de crédito.">
                 <input className="input" type="email" value={payer} onChange={(e) => setPayer(e.target.value)} required maxLength={200} />
               </Field>
-              <p className="rounded-lg bg-panel2 px-3 py-2 text-sm text-muted">Cobrança {interval === "ANUAL" ? "anual" : "mensal"} de {fmtBRL(planPriceCents(plan, interval) * (interval === "ANUAL" ? 12 : 1))}. Você pode cancelar quando quiser em Configurações › Assinatura.</p>
+              <Field label="Cupom de desconto" hint={coupon ? `${coupon.label} em cada cobrança` : "Opcional"}>
+                <div className="flex gap-2">
+                  <input className="input uppercase" value={couponCode} onChange={(e) => { setCouponCode(e.target.value); setCoupon(null); }} maxLength={40} placeholder="Ex.: BEMVINDO10" aria-label="Cupom" />
+                  <button type="button" className="btn-ghost" onClick={applyCoupon} disabled={busy || !couponCode.trim()}>Aplicar</button>
+                </div>
+              </Field>
+              <p className="rounded-lg bg-panel2 px-3 py-2 text-sm text-muted">
+                Cobrança {interval === "ANUAL" ? "anual" : "mensal"} de {coupon ? <><s>{fmtBRL(charge)}</s> <strong className="text-zinc-100">{fmtBRL(coupon.finalCents)}</strong></> : fmtBRL(charge)}. Você pode cancelar quando quiser em Configurações › Assinatura.
+              </p>
             </>
           ) : online && plan === "PESSOAL" ? (
             <p className="rounded-lg bg-panel2 px-3 py-2 text-sm text-muted">{hasSubscription ? "Ao confirmar, a assinatura no Mercado Pago é cancelada e a conta volta ao plano Pessoal." : "O plano Pessoal é gratuito."}</p>
