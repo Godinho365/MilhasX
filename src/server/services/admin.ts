@@ -2,9 +2,32 @@ import type { Prisma, ProgramKind } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { detectImage } from "./extras";
 
-export async function listUsers(q?: string) {
+export const USER_FILTERS = ["paid", "trial", "request", "deletion", "disabled", "admin"] as const;
+export type UserFilter = (typeof USER_FILTERS)[number];
+
+function userFilterWhere(f: UserFilter, now = new Date()): Prisma.UserWhereInput {
+  switch (f) {
+    case "paid": return { plan: { not: "PESSOAL" } };
+    case "trial": return { plan: "PESSOAL", trialEndsAt: { gt: now } };
+    case "request": return { planRequest: { not: null } };
+    case "deletion": return { deletionRequestedAt: { not: null } };
+    case "disabled": return { status: "DISABLED" };
+    case "admin": return { role: "ADMIN" };
+  }
+}
+
+/** Quantos usuários caem em cada filtro rápido da aba Usuários. */
+export async function userFilterCounts() {
+  const counts = await Promise.all(USER_FILTERS.map((f) => prisma.user.count({ where: userFilterWhere(f) })));
+  return { all: await prisma.user.count(), ...Object.fromEntries(USER_FILTERS.map((f, i) => [f, counts[i]!])) } as Record<UserFilter | "all", number>;
+}
+
+export async function listUsers(q?: string, filter?: string | null) {
+  const and: Prisma.UserWhereInput[] = [];
+  if (q) and.push({ OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] });
+  if (filter && (USER_FILTERS as readonly string[]).includes(filter)) and.push(userFilterWhere(filter as UserFilter));
   return prisma.user.findMany({
-    where: q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] } : undefined,
+    where: and.length ? { AND: and } : undefined,
     select: {
       id: true, name: true, email: true, role: true, status: true, createdAt: true,
       plan: true, planInterval: true, trialEndsAt: true, planRequest: true, planRequestInterval: true, deletionRequestedAt: true,
