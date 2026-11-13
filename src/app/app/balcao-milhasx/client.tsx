@@ -1,9 +1,9 @@
 "use client";
 // Balcão MilhasX: vincular com o código do bot (/milhasx), ver as ofertas abertas (com a análise de emissão das suas
-// contas) e mandar proposta: aceitar o valor do comprador ou contrapropor. A página sincroniza com o Balcão ao abrir
-// e a cada minuto enquanto está visível; a negociação do CRM Milhas anda sozinha (escolhido → Aguardando; recusado,
-// expirado ou cancelado → arquivada).
-import { useCallback, useEffect, useState } from "react";
+// contas) e mandar proposta: aceitar o valor do comprador ou contrapropor. Em tempo real: o servidor confere o Balcão
+// a cada 2 s e manda o que mudou pelo WebSocket (/ws), e a tela só aplica; sem o tempo real, confere a cada minuto. A
+// negociação do CRM Milhas anda sozinha (escolhido → Aguardando; recusado, expirado ou cancelado → arquivada).
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Handshake, Link2, RefreshCw, Unlink, ExternalLink, ShieldCheck, Zap, BadgeCheck, Star } from "lucide-react";
@@ -12,6 +12,7 @@ import { fmtBRL, fmtPts, fmtDateTime, parseBRLToCents } from "@/lib/format";
 import { Alert, Empty, SegmentedButtons } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { DEAL_STAGE_LABELS } from "@/domain/miles-deals";
+import { useRealtimeConnection, useRealtimeEvents } from "@/lib/realtime";
 
 type Status = {
   enabled: boolean; linked: boolean; linkedAt: string | null; syncedAt: string | null;
@@ -41,10 +42,10 @@ const OFFER_STATUS: Record<string, string> = {
 };
 const SYNC_EVERY_MS = 60_000;
 
-export function BalcaoClient({ initial, canEdit }: { initial: Status; canEdit: boolean }) {
+export function BalcaoClient({ initial, canEdit, realtime }: { initial: Status; canEdit: boolean; realtime: boolean }) {
   const [status, setStatus] = useState(initial);
   if (!status.linked) return <LinkForm onLinked={setStatus} canEdit={canEdit} />;
-  return <Linked status={status} setStatus={setStatus} canEdit={canEdit} />;
+  return <Linked status={status} setStatus={setStatus} canEdit={canEdit} realtime={realtime} />;
 }
 
 function LinkForm({ onLinked, canEdit }: { onLinked: (s: Status) => void; canEdit: boolean }) {
@@ -78,7 +79,7 @@ function LinkForm({ onLinked, canEdit }: { onLinked: (s: Status) => void; canEdi
   );
 }
 
-function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s: Status) => void; canEdit: boolean }) {
+function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setStatus: (s: Status) => void; canEdit: boolean; realtime: boolean }) {
   const router = useRouter();
   const [tab, setTab] = useState<"ofertas" | "propostas">("ofertas");
   const [program, setProgram] = useState("");
@@ -88,30 +89,41 @@ function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s:
   const [mine, setMine] = useState<MyProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const rt = useRealtimeConnection(realtime);
+  const live = rt.state === "live";
   const m = status.member!;
+  // o status muda a cada sincronização: lido por ref, para as funções abaixo não mudarem (e não recarregarem tudo)
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const programRef = useRef(program);
+  programRef.current = program;
 
   const lost = useCallback((r: { status: number; erro: string }) => {
     if (r.status === 409 && /vincul/i.test(r.erro)) { // vínculo desfeito no Balcão: volta para a tela de vincular
       toast(r.erro, "error");
-      setStatus({ ...status, linked: false, member: null });
+      setStatus({ ...statusRef.current, linked: false, member: null });
       return true;
     }
     return false;
-  }, [status, setStatus]);
+  }, [setStatus]);
 
   const loadOffers = useCallback(async (p = 1) => {
-    const q = new URLSearchParams({ pagina: String(p), ...(program ? { programa: program } : {}) });
+    const prog = programRef.current;
+    const q = new URLSearchParams({ pagina: String(p), ...(prog ? { programa: prog } : {}) });
     const r = await api<{ item: { offers: Offer[]; more: boolean; page: number } }>(`/api/balcao/offers?${q}`);
     if (!r.ok) { if (!lost(r)) setError(r.erro); return; }
     setError(null);
     setOffers((prev) => (p === 1 ? r.data.item.offers : [...(prev ?? []), ...r.data.item.offers]));
     setMore(r.data.item.more);
     setPage(p);
-  }, [program, lost]);
+  }, [lost]);
 
   const loadMine = useCallback(async () => {
     const r = await api<{ items: MyProposal[] }>("/api/balcao/proposals");
     if (!r.ok) { if (!lost(r)) setError(r.erro); return; }
+    setError(null);
     setMine(r.data.items);
   }, [lost]);
 
@@ -124,16 +136,37 @@ function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s:
     if (r.data.item.moved) toast(`${r.data.item.moved} negociação(ões) do CRM Milhas atualizada(s) pelo Balcão`);
   }, [lost, setStatus]);
 
+  const reload = useCallback(() => (tabRef.current === "ofertas" ? loadOffers(1) : loadMine()), [loadOffers, loadMine]);
   const refresh = useCallback(async (manual = false) => {
     await sync(manual);
-    await (tab === "ofertas" ? loadOffers(1) : loadMine());
-  }, [sync, tab, loadOffers, loadMine]);
+    await reload();
+  }, [sync, reload]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // ao abrir: sincroniza uma vez; ao trocar de aba ou de programa: só a lista
+  useEffect(() => { void sync(); }, [sync]);
+  useEffect(() => { void reload(); }, [tab, program, reload]);
+  // sem o tempo real (desligado ou caiu): confere a cada minuto enquanto a aba está visível
   useEffect(() => {
+    if (live) return;
     const t = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, SYNC_EVERY_MS);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [live, refresh]);
+  // o tempo real voltou depois de cair: pode ter perdido algo, recarrega a lista
+  const wasLive = useRef(false);
+  useEffect(() => {
+    if (live && wasLive.current === false && offers !== null) void reload();
+    wasLive.current = live;
+  }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // evento do servidor: aplica na lista sem chamar o Balcão
+  useRealtimeEvents(realtime, (e) => {
+    if (e.type === "resync") return void reload();
+    if (e.type !== "balcao") return;
+    const ev = e as unknown as { offers: Offer[]; proposals: Proposal[]; moved: number };
+    setOffers((prev) => (prev ? mergeOffers(prev, ev.offers, ev.proposals, programRef.current) : prev));
+    if (ev.proposals.length && tabRef.current === "propostas") void loadMine();
+    if (ev.moved) toast(`${ev.moved} negociação(ões) do CRM Milhas atualizada(s) pelo Balcão`);
+  });
 
   async function unlink() {
     if (!(await confirmDialog({ title: "Desvincular o Balcão?", body: "As negociações do CRM Milhas continuam, mas deixam de andar sozinhas. Para vincular de novo, gere outro código no bot.", confirmLabel: "Desvincular", danger: true }))) return;
@@ -155,7 +188,8 @@ function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s:
     <div className="space-y-4">
       <div className="card flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
         <span className="flex items-center gap-2"><Handshake className="h-4 w-4 text-muted" />Vinculado como <b>{m.name ?? "membro"}</b>{m.username && <span className="text-muted">@{m.username}</span>}{m.role && <span className="rounded-full bg-panel2 px-2 py-0.5 text-xs">{ROLE[m.role] ?? m.role}</span>}</span>
-        {status.syncedAt && <span className="text-xs text-muted">Atualizado {fmtDateTime(status.syncedAt)}</span>}
+        {live ? <span className="flex items-center gap-1.5 text-xs text-green-300"><span className="h-2 w-2 rounded-full bg-green-400" />Ao vivo</span>
+          : status.syncedAt && <span className="text-xs text-muted">Atualizado {fmtDateTime(status.syncedAt)}</span>}
         <span className="ml-auto flex gap-2">
           <button type="button" className="btn-ghost" onClick={() => void refresh(true)} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />Atualizar</button>
           {canEdit && <button type="button" className="btn-ghost text-red-300" onClick={unlink}><Unlink className="h-4 w-4" />Desvincular</button>}
@@ -176,7 +210,7 @@ function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s:
 
       {tab === "ofertas" ? (
         offers === null ? <p className="text-sm text-muted">Carregando ofertas…</p>
-        : offers.length === 0 ? <Empty title="Nenhuma oferta aberta agora" icon={<Handshake className="h-5 w-5" />}><p className="text-sm text-muted">Novas ofertas aparecem aqui sozinhas (a página atualiza a cada minuto).</p></Empty>
+        : offers.length === 0 ? <Empty title="Nenhuma oferta aberta agora" icon={<Handshake className="h-5 w-5" />}><p className="text-sm text-muted">{live ? "Novas ofertas aparecem aqui na hora." : "Novas ofertas aparecem aqui sozinhas (a página confere a cada minuto)."}</p></Empty>
         : (
           <>
             <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -190,6 +224,23 @@ function Linked({ status, setStatus, canEdit }: { status: Status; setStatus: (s:
         : <ProposalList items={mine} />}
     </div>
   );
+}
+
+/** Aplica o que mudou no Balcão: oferta aberta entra no topo (ou é atualizada); a que fechou sai da lista. A minha
+ *  proposta só muda se veio no evento (o evento traz só o que mudou). */
+function mergeOffers(prev: Offer[], changed: Offer[], proposals: Proposal[], program: string): Offer[] {
+  let list = [...prev];
+  for (const o of changed) {
+    const i = list.findIndex((x) => x.id === o.id);
+    if (o.status !== "open") { if (i >= 0) list.splice(i, 1); continue; }
+    if (i >= 0) list[i] = { ...o, myProposal: o.myProposal ?? list[i]!.myProposal, deal: o.deal ?? list[i]!.deal };
+    else if (!program || o.programa === program) list = [o, ...list];
+  }
+  for (const p of proposals) {
+    const i = list.findIndex((x) => x.id === p.oferta_id);
+    if (i >= 0) list[i] = { ...list[i]!, myProposal: p };
+  }
+  return list;
 }
 
 function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean; onPropose: (o: Offer, cents: number) => Promise<boolean> }) {

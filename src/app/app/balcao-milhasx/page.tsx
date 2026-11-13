@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/stat";
 import { Alert } from "@/components/ui";
 import { can } from "@/domain/permissions";
 import { balcaoStatus } from "@/server/services/balcao";
+import { realtimeEnabled } from "@/server/realtime/upgrade";
 import { BalcaoClient } from "./client";
 
 // Balcão MilhasX: as ofertas de compra do nosso balcão no Telegram, com a conta que emitiria e o lucro, e a proposta
@@ -17,7 +18,7 @@ export default async function BalcaoMilhasXPage() {
       {!status.enabled ? (
         <Alert kind="info">O servidor ainda não está ligado ao Balcão (faltam BALCAO_API_URL, BALCAO_API_SECRET ou CREDENTIALS_KEY).</Alert>
       ) : (
-        <BalcaoClient initial={status} canEdit={canEdit} />
+        <BalcaoClient initial={status} canEdit={canEdit} realtime={realtimeEnabled()} />
       )}
     </>
   );
