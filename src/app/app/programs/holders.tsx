@@ -10,6 +10,8 @@ import { Avatar } from "@/components/stat";
 import { Modal, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { HolderDialog, docLabel, type HolderFull, type Attachment } from "./holder-dialog";
+import { holderPending, fmtCpf, fmtPhone } from "@/domain/holder-pending";
+import { holderCpf } from "@/domain/beneficiaries";
 
 export { HolderDialog, type HolderFull };
 
@@ -69,15 +71,29 @@ export function HoldersTab({ holders, accounts, onNew, onAddAccount }: { holders
   if (holders.length === 0) {
     return <Empty title="Nenhum titular cadastrado" icon={<Users className="h-5 w-5" />}><button className="btn-primary" onClick={onNew}>Cadastrar titular</button></Empty>;
   }
+  const act = holders.filter((h) => h.active);
+  const noCpf = act.filter((h) => !holderCpf(h.documents)).length;
+  const noPhone = act.filter((h) => holderPending(h).some((p) => p.key === "phone")).length;
+  const incomplete = act.filter((h) => holderPending(h).length > 0).length;
+  const chip = (n: number, label: string, important: boolean) => (
+    <span className={`rounded-full px-3 py-1 text-sm ${n === 0 ? "bg-emerald-500/15 text-emerald-300" : important ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>{n === 0 ? `✓ ${label}: todos` : `${n} ${label}`}</span>
+  );
   return (
     <>
+      <div className="mb-3 flex flex-wrap items-center gap-2" aria-label="Pendências dos titulares">
+        {chip(noCpf, noCpf === 0 ? "CPF" : noCpf === 1 ? "sem CPF" : "sem CPF", true)}
+        {chip(noPhone, noPhone === 0 ? "Telefone" : "sem telefone", true)}
+        {chip(incomplete, incomplete === 0 ? "Cadastros completos" : incomplete === 1 ? "cadastro com pendência" : "cadastros com pendência", false)}
+      </div>
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="table-base">
-            <thead><tr><th>Titular</th><th>Nascimento</th><th>Programas</th><th className="w-16 text-right">Ações</th></tr></thead>
+            <thead><tr><th>Titular</th><th>CPF</th><th>Telefone</th><th>Nascimento</th><th>Pendências</th><th>Programas</th><th className="w-16 text-right">Ações</th></tr></thead>
             <tbody>
               {holders.map((h) => {
                 const accs = accounts.filter((a) => a.holderId === h.id);
+                const cpf = holderCpf(h.documents);
+                const pend = holderPending(h);
                 return (
                   <tr key={h.id} className={h.active ? "" : "opacity-60"}>
                     <td>
@@ -88,7 +104,16 @@ export function HoldersTab({ holders, accounts, onNew, onAddAccount }: { holders
                         {!h.active && <span className="rounded-full bg-panel2 px-2 py-0.5 text-xs font-medium text-muted">Inativo</span>}
                       </button>
                     </td>
+                    <td className="whitespace-nowrap tabular-nums">{cpf ? fmtCpf(cpf) : <button type="button" onClick={() => setEditing(h)} className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-300 hover:bg-red-500/25">Falta CPF</button>}</td>
+                    <td className="whitespace-nowrap tabular-nums">{h.phone && !pend.some((p) => p.key === "phone") ? fmtPhone(h.phone) : <button type="button" onClick={() => setEditing(h)} className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-300 hover:bg-red-500/25">Falta telefone</button>}</td>
                     <td className="tabular-nums">{h.birthDate ? fmtDate(h.birthDate) : <span className="text-muted">-</span>}</td>
+                    <td>
+                      {pend.length === 0
+                        ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300">Completo</span>
+                        : <button type="button" onClick={() => setEditing(h)} title={`Falta: ${pend.map((p) => p.label).join(", ")}`} className={`rounded-full px-2 py-0.5 text-xs font-medium ${pend.some((p) => p.important) ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>
+                            {pend.length} {pend.length === 1 ? "pendente" : "pendentes"}<span className="ml-1 font-normal opacity-80">({pend.map((p) => p.label).join(", ")})</span>
+                          </button>}
+                    </td>
                     <td className="text-muted">{accs.length} {accs.length === 1 ? "conta" : "contas"}</td>
                     <td className="text-right">
                       <button
