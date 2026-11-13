@@ -65,6 +65,8 @@ export default function PrivacidadePage() {
         <li>
           <strong>Integrações que você conecta:</strong> Telegram (número usado no login, sessão criptografada e mensagens dos grupos e conversas
           escolhidos, para o recurso de chat de balcões); Meta (token de acesso criptografado e métricas dos anúncios, para a área Tráfego);
+          Balcão MilhasX (token do vínculo criptografado e, do membro do Balcão vinculado, o nome e o @ do Telegram, o perfil e a situação do
+          plano; as ofertas abertas do Balcão, sem identificar quem comprou, e as propostas que você manda, para a página Balcão MilhasX);
           notificações push (endereço de inscrição do navegador no aparelho em que você ativou).
         </li>
         <li>
@@ -132,6 +134,11 @@ export default function PrivacidadePage() {
         <li>Anthropic (processamento das mensagens do assistente com inteligência artificial);</li>
         <li>Meta (quando você conecta a conta de anúncios na área Tráfego);</li>
         <li>Telegram (quando você conecta sua conta ao chat de balcões);</li>
+        <li>
+          Balcão MilhasX, o balcão de milhas no Telegram (quando você vincula a sua conta na página Balcão MilhasX): enviamos as propostas que você
+          manda por aqui e um identificador da sua conta, e recebemos os dados do seu membro do Balcão e as ofertas abertas. O vínculo é desfeito
+          na própria página ou no bot do Balcão;
+        </li>
         <li>serviços de notificação push do navegador ou do sistema do aparelho (quando você ativa as notificações);</li>
         <li>YouTube ou Vimeo (somente quando você toca para assistir um vídeo dos guias);</li>
         <li>autoridades, quando exigido por lei ou ordem judicial.</li>
@@ -174,6 +181,7 @@ export default function PrivacidadePage() {
         <li>Dados da conta e os que você cadastra: <Fill>prazo de retenção enquanto a conta está ativa e depois do encerramento</Fill>.</li>
         <li>Sessões de login: até 30 dias, ou até você sair da conta.</li>
         <li>Mensagens do Telegram usadas no chat de balcões: apagadas automaticamente depois de 90 dias (padrão do sistema, pode ser alterado pela administração).</li>
+        <li>Vínculo com o Balcão MilhasX: até você desvincular ou o vínculo ser desfeito no Balcão. As negociações que ele cria no CRM Milhas seguem o prazo dos dados que você cadastra.</li>
         <li>Registros de acesso e de segurança: <Fill>prazo de guarda dos registros de acesso</Fill>.</li>
         <li>Dados de cobrança e notas: <Fill>prazo exigido pela legislação aplicável</Fill>.</li>
         <li>Pedidos sobre dados pessoais: <Fill>prazo de guarda dos pedidos e das respostas</Fill>.</li>
