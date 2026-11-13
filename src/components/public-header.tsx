@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand";
+import { CookiePreferencesLink } from "@/components/consent/link";
 
 /** Cabeçalho das páginas públicas (início, login, cadastro, termos e privacidade). */
 export function PublicHeader({ name, links }: { name: string; links?: { href: string; label: string }[] }) {
@@ -27,7 +28,7 @@ export function PublicFooter({ name }: { name: string }) {
   const cols = [
     { title: "Produto", links: [["/#recursos", "Recursos"], ["/#simulador", "Simulador"], ["/#planos", "Planos"]] },
     { title: "Conta", links: [["/register", "Criar conta"], ["/login", "Entrar"], ["/#duvidas", "Dúvidas"]] },
-    { title: "Políticas", links: [["/termos", "Termos de Serviço"], ["/privacidade", "Política de Privacidade"]] },
+    { title: "Políticas", links: [["/termos", "Termos de Serviço"], ["/privacidade", "Política de Privacidade"], ["/privacidade/solicitacao", "Pedidos sobre seus dados"]] },
   ];
   return (
     <footer className="border-t border-line">
@@ -43,6 +44,7 @@ export function PublicFooter({ name }: { name: string }) {
               {c.links.map(([href, label]) => (
                 <li key={href}><Link href={href} className="hover:text-accent-light">{label}</Link></li>
               ))}
+              {c.title === "Políticas" && <li><CookiePreferencesLink className="hover:text-accent-light" /></li>}
             </ul>
           </nav>
         ))}
