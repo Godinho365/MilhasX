@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Clock } from "lucide-react";
 import { requirePageUser } from "@/server/session";
 import { prisma } from "@/server/db";
+import { GuideVideo } from "./video";
 
 const LEVEL = { BEGINNER: "Iniciante", INTERMEDIATE: "Intermediário", ADVANCED: "Avançado" } as const;
 
@@ -13,7 +14,7 @@ function embedUrl(url: string | null) {
     const u = new URL(url);
     if (/(^|\.)youtube\.com$/.test(u.hostname) && u.searchParams.get("v")) return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(u.searchParams.get("v")!)}`;
     if (u.hostname === "youtu.be") return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(u.pathname.slice(1))}`;
-    if (/(^|\.)vimeo\.com$/.test(u.hostname) && /^\/\d+$/.test(u.pathname)) return `https://player.vimeo.com/video${u.pathname}`;
+    if (/(^|\.)vimeo\.com$/.test(u.hostname) && /^\/\d+$/.test(u.pathname)) return `https://player.vimeo.com/video${u.pathname}?dnt=1`; // dnt: o Vimeo não rastreia a sessão
   } catch {}
   return null;
 }
@@ -55,11 +56,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
       </div>
       <h1 className="text-3xl font-semibold tracking-tight">{g.title}</h1>
       <p className="mt-2 text-lg text-muted">{g.summary}</p>
-      {embed && (
-        <div className="mt-6 aspect-video overflow-hidden rounded-card border border-line">
-          <iframe src={embed} title={g.title} className="h-full w-full" allow="encrypted-media; picture-in-picture" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" />
-        </div>
-      )}
+      {embed && <GuideVideo src={embed} title={g.title} />}
       {!embed && g.videoUrl && <a href={g.videoUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost mt-6">Assistir o vídeo</a>}
       <div className="mt-8 space-y-4 text-[15px] leading-7 text-zinc-200">
         {blocks.map((b, i) => <Block key={i} text={b} />)}

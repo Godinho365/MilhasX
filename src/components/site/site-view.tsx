@@ -3,6 +3,7 @@
 // página pública (servidor) quanto para a prévia ao vivo do editor (cliente).
 // Cores só por estilo inline/variáveis próprias: as classes de cor do app mudam com o tema claro/escuro.
 import { PAGE_LABELS, SITE_PAGES, siteWhatsapp, type Section, type SiteContent, type SitePage } from "@/domain/site";
+import { CookiePreferencesLink } from "@/components/consent/link";
 import type { SiteTheme } from "@/domain/site-themes";
 import { btnStyle, cardStyle, headingStyle, wrap } from "./site-style";
 import { CheckBadgeIcon, WhatsappIcon, socialLinks } from "./site-icons";
@@ -533,7 +534,11 @@ function Footer({ ctx }: { ctx: SiteCtx }) {
           {b.cadastur && <span>Cadastur {b.cadastur}</span>}
         </div>
       </div>
-      <p style={{ ...wrap, marginTop: 40, fontSize: 13, opacity: 0.6 }}>© {new Date().getFullYear()}{b.name ? ` ${b.name}` : ""}</p>
+      <p style={{ ...wrap, marginTop: 40, fontSize: 13, opacity: 0.6, display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+        <span>© {new Date().getFullYear()}{b.name ? ` ${b.name}` : ""}</span>
+        <a href="/privacidade" style={{ color: "inherit" }}>Privacidade</a>
+        <CookiePreferencesLink style={{ color: "inherit" }} />
+      </p>
     </footer>
   );
 }
