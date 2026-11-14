@@ -61,9 +61,9 @@ export function PendRow({ href, title, meta, bad }: { href: string; title: strin
   );
 }
 
-export function Section({ title, subtitle, children, action }: { title: string; subtitle?: string; children: React.ReactNode; action?: React.ReactNode }) {
+export function Section({ title, subtitle, children, action, id }: { title: string; subtitle?: string; children: React.ReactNode; action?: React.ReactNode; id?: string }) {
   return (
-    <section className="mt-7">
+    <section id={id} className="mt-7 scroll-mt-20">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 className="text-[15px] font-bold tracking-tight">{title}</h2>
@@ -97,7 +97,7 @@ export function Chips({ items, active }: { items: { key: string; label: string; 
     <div className="mb-3 flex flex-wrap gap-1.5" role="tablist">
       {items.map((i) => (
         <Link key={i.key} href={i.href} role="tab" aria-selected={active === i.key}
-          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${active === i.key ? "border-[rgb(var(--brand))] bg-[rgb(var(--brand))] text-white" : "border-line bg-panel text-muted hover:text-zinc-100"}`}>
+          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${active === i.key ? "border-[rgb(var(--brand))] bg-[rgb(var(--brand))] text-[#fff]" : "border-line bg-panel text-muted hover:text-zinc-100"}`}>
           {i.label}{i.n !== undefined && <span className={`tabular-nums ${active === i.key ? "text-[#C7D2E3]" : "text-zinc-500"}`}>{i.n}</span>}
         </Link>
       ))}

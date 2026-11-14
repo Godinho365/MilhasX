@@ -44,7 +44,7 @@ export async function reportCsv(actorId: string, kind: ReportKind, period: Perio
       break;
     }
     case "leads": {
-      const d = await leadsData(period, null, now, Number.POSITIVE_INFINITY);
+      const d = await leadsData(period, null, now, "all");
       rows = [["email", "nome", "telefone", "situacao", "origem", "campanha", "metodo", "aceita_marketing", "usou", "chegou_em"],
         ...d.list.map((l) => [l.email, l.name, l.phone ?? "", l.status, l.origin, l.campaign ?? "", l.userId ? l.method : "", l.marketing ? "sim" : "nao", l.used ? "sim" : "nao", iso(l.createdAt)])];
       break;

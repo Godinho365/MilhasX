@@ -3,6 +3,8 @@ import { recoveryData } from "@/server/services/admin-dashboard";
 import { contactText, mailLink, waLink, CONTACT_LABELS } from "@/domain/admin-contact";
 import { PLANS } from "@/domain/plans";
 import { PageHeader } from "@/components/stat";
+import { Pagination } from "@/components/pagination";
+import { paginate, pageHref, pageParam } from "@/lib/paging";
 import { fmtDateTime, fmtDay } from "@/lib/format";
 import { Chips, Pill, TableCard } from "../dashboard-ui";
 import { ContactButtons } from "../users/[id]/actions";
@@ -17,13 +19,14 @@ const TABS = [
 const TONE = { request: "blue", checkout: "amber", trial: "amber", risk: "red" } as const;
 const SUBJECT = { request: "Seu pedido de plano no MilhasX", checkout: "Sua assinatura do MilhasX", trial: "Seu teste grátis do MilhasX", risk: "Sentimos sua falta no MilhasX" } as const;
 
-export default async function AdminRecovery({ searchParams }: { searchParams: Promise<{ t?: string; c?: string }> }) {
+export default async function AdminRecovery({ searchParams }: { searchParams: Promise<{ t?: string; c?: string; page?: string }> }) {
   const sp = await searchParams;
   const tab = TABS.some((t) => t.key === sp.t) ? sp.t! : "all";
   const hideContacted = sp.c === "0";
   const all = await recoveryData();
   const weekAgo = Date.now() - 7 * 86400_000;
-  const rows = all.filter((i) => (tab === "all" || i.kind === tab) && !(hideContacted && i.contact && i.contact.at.getTime() > weekAgo));
+  const pg = paginate(all.filter((i) => (tab === "all" || i.kind === tab) && !(hideContacted && i.contact && i.contact.at.getTime() > weekAgo)), pageParam(sp.page), 50);
+  const rows = pg.items;
   const href = (t: string, c = hideContacted) => `/admin/recovery?${new URLSearchParams({ ...(t !== "all" ? { t } : {}), ...(c ? { c: "0" } : {}) })}`;
 
   return (
@@ -49,6 +52,7 @@ export default async function AdminRecovery({ searchParams }: { searchParams: Pr
           );
         })}
       </TableCard>
+      <Pagination {...pg} href={pageHref("/admin/recovery", sp)} noun={["pessoa", "pessoas"]} />
     </>
   );
 }

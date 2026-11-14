@@ -1,6 +1,7 @@
 import type { Prisma, ProgramKind } from "@prisma/client";
 import { prisma, DomainError, audit } from "../db";
 import { detectImage } from "./extras";
+import { paging } from "@/lib/paging";
 
 export const USER_FILTERS = ["paid", "trial", "request", "deletion", "disabled", "admin"] as const;
 export type UserFilter = (typeof USER_FILTERS)[number];
@@ -22,20 +23,33 @@ export async function userFilterCounts() {
   return { all: await prisma.user.count(), ...Object.fromEntries(USER_FILTERS.map((f, i) => [f, counts[i]!])) } as Record<UserFilter | "all", number>;
 }
 
-export async function listUsers(q?: string, filter?: string | null) {
+function usersWhere(q?: string, filter?: string | null): Prisma.UserWhereInput | undefined {
   const and: Prisma.UserWhereInput[] = [];
   if (q) and.push({ OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] });
   if (filter && (USER_FILTERS as readonly string[]).includes(filter)) and.push(userFilterWhere(filter as UserFilter));
-  return prisma.user.findMany({
-    where: and.length ? { AND: and } : undefined,
-    select: {
-      id: true, name: true, email: true, role: true, status: true, createdAt: true,
-      plan: true, planInterval: true, trialEndsAt: true, planRequest: true, planRequestInterval: true, deletionRequestedAt: true,
-      _count: { select: { entries: true, accounts: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+  return and.length ? { AND: and } : undefined;
+}
+
+const USER_ROW = {
+  id: true, name: true, email: true, role: true, status: true, createdAt: true,
+  plan: true, planInterval: true, trialEndsAt: true, planRequest: true, planRequestInterval: true, deletionRequestedAt: true,
+  _count: { select: { entries: true, accounts: true } },
+} satisfies Prisma.UserSelect;
+// Do mais novo para o mais antigo; o id desempata quem foi criado no mesmo instante (a paginação não repete nem pula ninguém)
+const USER_ORDER = [{ createdAt: "desc" }, { id: "desc" }] satisfies Prisma.UserOrderByWithRelationInput[];
+
+/** Busca rápida (API): os 200 cadastros mais recentes que batem com a busca e o filtro. */
+export async function listUsers(q?: string, filter?: string | null) {
+  return prisma.user.findMany({ where: usersWhere(q, filter), select: USER_ROW, orderBy: USER_ORDER, take: 200 });
+}
+
+export const USERS_PAGE_SIZE = 50;
+
+/** Uma página da aba Usuários; a busca e o filtro valem para a lista e para o total. */
+export async function listUsersPage(q: string | undefined, filter: string | null | undefined, page: number, pageSize = USERS_PAGE_SIZE) {
+  const where = usersWhere(q, filter);
+  const { skip, take, ...meta } = paging(await prisma.user.count({ where }), page, pageSize);
+  return { ...meta, items: await prisma.user.findMany({ where, select: USER_ROW, orderBy: USER_ORDER, skip, take }) };
 }
 
 export async function setUserStatus(actorId: string, userId: string, status: "ACTIVE" | "DISABLED") {
@@ -115,21 +129,20 @@ export async function metrics() {
   return { users, activeUsers, newUsers, entries, entries30, salesCount: sales._count, salesTotalCents: sales._sum.totalCents ?? 0, programs };
 }
 
+export const AUDIT_PAGE_SIZE = 50;
+
 export async function listAudit(opts: { action?: string; page?: number }) {
-  const pageSize = 50;
-  const page = Math.max(opts.page ?? 1, 1);
   const where: Prisma.AuditLogWhereInput = opts.action ? { action: { contains: opts.action } } : {};
-  const [total, items] = await Promise.all([
-    prisma.auditLog.count({ where }),
-    prisma.auditLog.findMany({
-      where,
-      include: { actor: { select: { email: true } } },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ]);
-  return { total, page, pages: Math.max(1, Math.ceil(total / pageSize)), items };
+  // Página além da última mostra a última (antes mostrava uma tabela vazia com "Mostrando 951-50")
+  const { skip, take, ...meta } = paging(await prisma.auditLog.count({ where }), opts.page ?? 1, AUDIT_PAGE_SIZE);
+  const items = await prisma.auditLog.findMany({
+    where,
+    include: { actor: { select: { email: true } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip,
+    take,
+  });
+  return { ...meta, items };
 }
 
 export async function getSettings() {
@@ -234,17 +247,20 @@ export async function logContact(actorId: string, userId: string, channel: "what
 export const PRIVACY_STATUSES = ["NEW", "IN_PROGRESS", "DONE"] as const;
 export const PRIVACY_DEADLINE_DAYS = 15; // prazo de resposta da LGPD (art. 19, II)
 
-export async function listPrivacyRequests(status: string | null) {
+export const PRIVACY_PAGE_SIZE = 50;
+
+export async function listPrivacyRequests(status: string | null, page = 1, pageSize = PRIVACY_PAGE_SIZE) {
   const st = (PRIVACY_STATUSES as readonly string[]).includes(status ?? "") ? status! : null;
-  const [items, grouped] = await Promise.all([
-    prisma.privacyRequest.findMany({ where: st ? { status: st } : undefined, orderBy: { createdAt: "desc" }, take: 300 }),
-    prisma.privacyRequest.groupBy({ by: ["status"], _count: true }),
-  ]);
+  const grouped = await prisma.privacyRequest.groupBy({ by: ["status"], _count: true });
+  const total = grouped.filter((g) => !st || g.status === st).reduce((t, g) => t + g._count, 0);
+  const { skip, take, ...meta } = paging(total, page, pageSize);
+  const items = await prisma.privacyRequest.findMany({ where: st ? { status: st } : undefined, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip, take });
   // Liga o pedido à conta com o mesmo e-mail, quando existe
   const accounts = await prisma.user.findMany({ where: { email: { in: [...new Set(items.map((i) => i.email))] } }, select: { id: true, email: true } });
   const byEmail = new Map(accounts.map((a) => [a.email, a.id]));
   return {
     status: st,
+    paging: meta,
     counts: Object.fromEntries(PRIVACY_STATUSES.map((s) => [s, grouped.find((g) => g.status === s)?._count ?? 0])) as Record<(typeof PRIVACY_STATUSES)[number], number>,
     items: items.map((i) => ({ ...i, userId: byEmail.get(i.email) ?? null, dueAt: new Date(i.createdAt.getTime() + PRIVACY_DEADLINE_DAYS * 86400_000) })),
   };
