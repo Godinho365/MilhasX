@@ -360,52 +360,8 @@ test("alerta dispara notificação quando o saldo cai", async () => {
   await toastSays("lidas");
 });
 
-test("simuladores e relatórios", async () => {
-  await page.goto("/app/simulators");
-  await expect(page).toHaveURL(/\/app\/simulators\/purchase\/bonificada/);
-  const sim = page.getByRole("form", { name: "Compra Bonificada" });
-  await sim.getByLabel("Programa").selectOption({ label: "Livelo Ana E2E" });
-  await sim.getByLabel("Pontos por Real").fill("10");
-  await sim.getByLabel("Valor da Compra").fill("1000");
-  await expect(sim).toContainText("Pontos esperados: 10.000 pontos");
-  await sim.getByRole("button", { name: /Custo extra/ }).click();
-  await sim.getByLabel("Custo extra (R$)").fill("50");
-  await sim.getByRole("button", { name: "Simular" }).click();
-  const result = page.getByRole("region", { name: "Resultado da simulação" });
-  await expect(result).toContainText("10.000 pts");
-  await expect(result).toContainText("R$ 5,00"); // CPM do custo extra: R$ 50 / 10 milheiros
-  await expect(page.getByRole("list", { name: "Simulações recentes" })).toContainText("Compra Bonificada · Livelo · 10 mil pts");
-
-  // transferência com bônus pelo menu lateral
-  await page.getByRole("navigation", { name: "Simuladores" }).getByRole("link", { name: "Transferência" }).click();
-  const tf = page.getByRole("form", { name: "Transferência" });
-  await tf.getByLabel("Programa de origem").selectOption({ label: "Livelo Ana E2E" });
-  await tf.getByLabel("Programa de destino").selectOption({ label: "LATAM Pass Ana E2E" });
-  await tf.getByLabel("Pontos a transferir").fill("1000");
-  await tf.getByLabel("Percentual de Bônus").fill("25");
-  await tf.getByRole("button", { name: "Simular" }).click();
-  await expect(result).toContainText("1.250 pts");
-  await expect(page.getByRole("list", { name: "Simulações recentes" })).toContainText("Livelo → LATAM Pass · 1 mil pts");
-  // reabrir pela lista de recentes traz os valores de volta
-  await page.getByRole("link", { name: "Compra Bonificada · Livelo · 10 mil pts" }).click();
-  await expect(page.getByRole("form", { name: "Compra Bonificada" }).getByLabel("Pontos por Real")).toHaveValue("10");
-
-  // todos os simuladores do menu abrem
-  for (const label of ["Pontos vs Cashback", "Compra de Pontos", "Passagem Aérea", "Hospedagem", "Venda", "Melhor fornecedor"]) {
-    await page.getByRole("navigation", { name: "Simuladores" }).getByRole("link", { name: label }).click();
-    await expect(page.getByRole("form", { name: label })).toBeVisible();
-  }
-  // passagem: custo pelo CPM da conta + taxas, avisa saldo insuficiente
-  await page.getByRole("navigation", { name: "Simuladores" }).getByRole("link", { name: "Passagem Aérea" }).click();
-  const fl = page.getByRole("form", { name: "Passagem Aérea" });
-  await fl.getByLabel("Programa").selectOption({ label: "LATAM Pass Ana E2E" });
-  await fl.getByLabel("Pontos (Ida)").fill("999999");
-  await expect(fl.getByLabel("Programa")).not.toHaveValue("");
-  await expect(fl.getByLabel("Pontos (Ida)")).toHaveValue("999.999");
-  await fl.getByRole("button", { name: "Simular" }).click();
-  await expect(fl.getByRole("alert")).toHaveCount(0);
-  await expect(result).toContainText("Saldo insuficiente");
-
+// Os Simuladores saíram do app (menu, telas e rotas); fica só o teste dos relatórios.
+test("relatórios", async () => {
   await page.goto("/app/reports");
   await expect(page).toHaveURL(/\/app\/reports\/overview/);
   await page.getByRole("tab", { name: "Tudo" }).click();
@@ -530,7 +486,7 @@ test("preferências e troca de senha", async () => {
   await toastSays("Preferência salva");
   await expect(page.locator("html")).toHaveAttribute("data-values", "visible");
   // canais de notificação por tipo
-  await page.getByLabel("Alertas de ofertas por push").check();
+  await page.getByLabel("Alertas de saldo por push").check();
   await toastSays("Preferência salva");
 
   await page.getByLabel("Senha atual").fill(user.password);
@@ -566,16 +522,17 @@ test("seletor de titular: titulares, todos e minhas contas", async () => {
   await pickHolder("Bruno E2E");
   await expect(page.getByText("Titular: Bruno E2E")).toBeVisible();
   await expect(page.getByRole("button", { name: /Trocar titular: Bruno E2E/ })).toBeVisible();
-  // atalhos da barra lateral: só as contas do Bruno, levando à página da conta
-  await expect(page.getByRole("link", { name: /^Bruno E2E - LATAM Pass/ }).first()).toHaveAttribute("href", /^\/app\/programs\/.+/);
-  await expect(page.getByRole("link", { name: /^Ana E2E - / })).toHaveCount(0);
+  // atalhos da barra lateral: só as contas do Bruno (titular e programa no title do link), levando à página da conta
+  await expect(page.locator('a[title^="Bruno E2E - LATAM Pass"]').first()).toHaveAttribute("href", /^\/app\/programs\/(?!programa\/).+/);
+  await expect(page.locator('a[title^="Ana E2E - "]')).toHaveCount(0);
   // extrato e relatórios também ficam no titular escolhido
   await page.goto("/app/entries");
   await expect(page.locator("main").getByText(/Titular: Bruno E2E/)).toBeVisible();
   await page.goto("/app/reports");
   await expect(page.locator("main").getByText(/Titular: Bruno E2E/)).toBeVisible();
   await pickHolder("Todos os titulares");
-  await expect(page.getByRole("link", { name: /^Ana E2E - / }).first()).toBeVisible();
+  // com todos os titulares, uma linha por programa com o saldo somado
+  await expect(page.locator('a[href^="/app/programs/programa/"]').first()).toBeVisible();
   await expect(page.locator("main").getByText(/Todos os titulares/)).toBeVisible();
 
   // marca Ana como "sou eu" e usa "Minhas contas"
@@ -644,17 +601,18 @@ test("painel: três modos pelo seletor (desktop)", async () => {
 
 test("cartões: cadastro, fatura e registro de pontos", async () => {
   await page.goto("/app/credit-cards");
-  // página única como na referência: indicadores, cartões e próximas faturas
-  await expect(page.getByLabel(/^Ação necessária/)).toBeVisible();
+  // Central de Cartões: cartões, depois indicadores e próximas faturas (os indicadores só aparecem com cartão cadastrado)
+  await expect(page.getByRole("heading", { name: "Central de Cartões" })).toBeVisible();
   await page.getByRole("button", { name: "Novo cartão" }).first().click();
   const d = page.getByRole("dialog");
-  await d.getByLabel(/Nome do cartão/).fill("Cartão E2E");
+  await d.getByLabel(/^Apelido/).fill("Cartão E2E");
   await d.getByLabel(/Conta que recebe/).selectOption({ label: "Livelo · Ana E2E" });
   await d.getByLabel(/Pontos por dólar/).fill("2,2");
-  await d.getByLabel(/Dia do fechamento/).fill("3");
-  await d.getByLabel(/Dia do vencimento/).fill("10");
-  await d.getByRole("button", { name: "Salvar" }).click();
+  await d.getByLabel(/^Fechamento \(dia\)/).fill("3");
+  await d.getByLabel(/^Vencimento \(dia\)/).fill("10");
+  await d.getByRole("button", { name: "Cadastrar cartão" }).click();
   await toastSays("Cartão cadastrado");
+  await expect(page.getByLabel(/^Ação necessária/)).toBeVisible();
 
   await page.getByRole("button", { name: "Ações de Cartão E2E" }).click();
   await page.getByRole("menuitem", { name: "Adicionar fatura" }).click();
@@ -749,7 +707,11 @@ test("celular: barra inferior e painel inferior do seletor", async () => {
   await bar.getByRole("link", { name: "Vendas" }).click();
   await expect(page).toHaveURL(/\/app\/sales/);
   await bar.getByRole("button", { name: "Mais opções do menu" }).click();
-  await page.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Cartões de Crédito" }).click();
+  // os cartões ficam no grupo "Milhas" do menu (aberto só quando a página atual é dele)
+  const mainMenu = page.getByRole("navigation", { name: "Menu principal" });
+  const milhas = mainMenu.getByRole("button", { name: "Milhas", exact: true });
+  if ((await milhas.getAttribute("aria-expanded")) !== "true") await milhas.click();
+  await mainMenu.getByRole("link", { name: "Central de Cartões" }).click();
   await expect(page).toHaveURL(/credit-cards/);
   await bar.getByRole("link", { name: "Painel" }).click();
   await expect(page).toHaveURL(/\/app$/);
@@ -778,11 +740,13 @@ test("página da conta: recorrência e credenciais", async () => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/app/programs");
   await page.locator("section", { hasText: "Ana E2E" }).getByRole("link", { name: "Livelo" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Livelo" })).toBeVisible();
-  for (const t of ["Saldo atual", "Custo do milheiro", "Pontos a receber", "Valor em reais", "Lançamentos Recentes", "Lançamentos Recorrentes", "Credenciais de acesso"]) {
+  // cabeçalho: o titular no título e o programa logo abaixo
+  const head = page.getByRole("region", { name: "Conta" });
+  await expect(head.getByRole("heading", { level: 1, name: "Ana E2E" })).toBeVisible();
+  await expect(head).toContainText("Livelo");
+  for (const t of ["Saldo atual", "CPM", "Valor investido", "Valor de mercado", "Pontos a receber", "Lançamentos Recorrentes", "Histórico de transações", "Credenciais de acesso"]) {
     await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   }
-  await expect(page.getByText("Orgânico").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Adicionar recorrência" }).click();
   const d = page.getByRole("dialog");
@@ -823,7 +787,7 @@ test("tema claro e escuro", async () => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   for (const p of ["/app", "/app/entries", "/app/credit-cards", "/app/sales"]) {
     await page.goto(p);
-    await expect(page.locator("main h1")).toBeVisible();
+    await expect(page.locator("main h1:visible").first()).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/claro${p.replace(/[/?=]/g, "_")}.png` });
   }
   await page.goto("/app/settings");
@@ -854,59 +818,61 @@ test("configurações: abas, plano, indicação e perfil público", async () => 
   await tabs.getByRole("link", { name: "Indicações", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Link de indicação" })).toHaveValue(/\/register\?ref=[A-Z2-9]{8}$/);
 
-  // Sua MilhasX nas configurações: só ativar e o endereço; o resto fica no editor
+  // Sua MilhasX nas configurações: o endereço (site e Central) e ligar a Central; o resto fica em Marketing › Site
   await tabs.getByRole("link", { name: "Sua MilhasX", exact: true }).click();
-  await page.getByLabel("Endereço da página").fill(`e2e-${Date.now()}`);
-  await page.getByRole("switch", { name: "Página pública ativa" }).click();
+  await page.getByLabel("Nome no endereço").fill(`e2e-${Date.now()}`);
+  await page.getByRole("switch", { name: "Central de Atendimento ativa" }).click();
   await page.getByRole("button", { name: "Salvar", exact: true }).click();
   await toastSays("Página atualizada");
-  await page.getByRole("link", { name: "Personalizar página" }).click();
-  await expect(page).toHaveURL(/\/editor$/);
+  await page.getByRole("link", { name: "Personalizar a Central" }).click();
+  await expect(page).toHaveURL(/\/app\/marketing\/site\?aba=central$/);
 
-  // Editor em página própria: cada mudança aparece na prévia (iframe) antes de salvar
+  // Editor da Central (aba ao lado do editor do site, que fica montado e escondido): cada mudança aparece na prévia (iframe) antes de salvar
+  const editor = page.locator("main main");
+  await expect(editor.getByRole("heading", { level: 1, name: "Central de atendimento" })).toBeVisible();
   const preview = page.frameLocator('iframe[title="Prévia da sua página"]');
-  const panel = (name: string) => page.locator("details", { has: page.locator("summary", { hasText: name }) });
+  const panel = (name: string) => editor.locator("details", { has: page.locator("summary", { hasText: name }) });
   const open = async (name: string) => { if (!(await panel(name).evaluate((d) => (d as HTMLDetailsElement).open))) await panel(name).locator("summary").click(); };
   await open("Introdução");
-  await page.getByLabel("Frase de abertura").fill("Viaje mais pagando menos");
+  await editor.getByLabel("Frase de abertura").fill("Viaje mais pagando menos");
   await expect(preview.getByText("Viaje mais pagando menos")).toBeVisible();
   await open("Cor de Fundo");
-  await page.getByRole("button", { name: "Cor #f8fafc" }).click();
+  await editor.getByRole("button", { name: "Cor #f8fafc" }).click();
   await expect(preview.locator("body [data-theme]").first()).toHaveCSS("background-color", "rgb(248, 250, 252)");
   await open("Botões");
-  const zap = page.getByRole("listitem", { name: "Botão WhatsApp" });
+  const zap = editor.getByRole("listitem", { name: "Botão WhatsApp" });
   await zap.getByLabel("Texto do botão").fill("Chama no zap");
   await zap.getByLabel("WhatsApp").fill("(11) 98888-7777");
   await zap.getByRole("button", { name: "Subir" }).click();
   await zap.getByRole("button", { name: "Subir" }).click();
   await expect(preview.locator("main a").first()).toContainText("Chama no zap");
-  await page.getByRole("button", { name: "Tablet" }).click();
+  await editor.getByRole("button", { name: "Tablet" }).click();
   await expect(page.locator('iframe[title="Prévia da sua página"]')).toHaveCSS("width", "768px");
-  await page.getByRole("button", { name: "Celular" }).click();
+  await editor.getByRole("button", { name: "Celular" }).click();
   await page.screenshot({ path: `${SHOTS}/editor_pagina_principal.png` });
 
-  await page.getByRole("tab", { name: "Captação de Viagens" }).click();
+  await editor.getByRole("tab", { name: "Captação de Viagens" }).click();
   await panel("Mensagem de conclusão").getByRole("textbox").nth(1).fill("Obrigado! Respondo ainda hoje.");
   await preview.getByRole("button", { name: /Próximo/ }).click();
   await preview.getByRole("button", { name: "Enviar solicitação" }).click();
   await expect(preview.getByText("Obrigado! Respondo ainda hoje.")).toBeVisible();
-  await page.getByRole("tab", { name: "Cotação", exact: true }).click();
-  await page.getByLabel("Botão do WhatsApp").fill("Fechar viagem");
+  await editor.getByRole("tab", { name: "Cotação", exact: true }).click();
+  await editor.getByLabel("Botão do WhatsApp").fill("Fechar viagem");
   await expect(preview.getByRole("link", { name: "Fechar viagem" })).toBeVisible();
-  await page.getByRole("tab", { name: "Reserva Confirmada" }).click();
+  await editor.getByRole("tab", { name: "Reserva Confirmada" }).click();
   await expect(preview.getByRole("heading", { name: "MX7Q2K" })).toBeVisible();
-  await page.getByRole("tab", { name: "Gestão de Milhas" }).click();
+  await editor.getByRole("tab", { name: "Gestão de Milhas" }).click();
   await expect(preview.getByRole("list", { name: "Saldos" })).toContainText("Smiles");
-  await page.getByRole("tab", { name: "Assinatura de Contrato" }).click();
-  await page.getByLabel("CNPJ ou CPF da agência").fill("12.345.678/0001-90");
+  await editor.getByRole("tab", { name: "Assinatura de Contrato" }).click();
+  await editor.getByLabel("CNPJ ou CPF da agência").fill("12.345.678/0001-90");
   await expect(preview.getByLabel("Termo", { exact: true })).toContainText("12.345.678/0001-90");
   await page.screenshot({ path: `${SHOTS}/editor_contrato.png` });
-  await page.getByRole("button", { name: "Salvar alterações" }).click();
-  await toastSays("Página salva");
+  await editor.getByRole("button", { name: "Salvar", exact: true }).click();
+  await toastSays("Central salva");
 
   // Bio pública com o que foi salvo
-  await page.getByRole("tab", { name: "Página Principal (Bio)" }).click();
-  const bio = await page.getByRole("textbox", { name: "Link da sua página" }).inputValue();
+  await editor.getByRole("tab", { name: "Página Principal (Bio)" }).click();
+  const bio = await editor.getByRole("textbox", { name: "Link da sua página" }).inputValue();
   await page.goto(bio);
   await expect(page.getByRole("link", { name: /Chama no zap/ })).toHaveAttribute("href", "https://wa.me/5511988887777");
   await expect(page.locator("body [data-theme]").first()).toHaveAttribute("data-theme", "client");
@@ -934,8 +900,8 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   // detalhe: muda de etapa e o cartão vai para a coluna
   await novos.getByRole("button", { name: /Cliente CRM E2E/ }).click();
   const det = page.getByRole("dialog");
-  await det.getByRole("navigation", { name: "Etapa do pedido" }).getByRole("button", { name: "Cotação enviada" }).click();
-  await expect(det.getByRole("navigation", { name: "Etapa do pedido" }).getByRole("button", { name: "Cotação enviada" })).toHaveAttribute("aria-pressed", "true");
+  await det.getByRole("navigation", { name: "Coluna do pedido" }).getByRole("button", { name: "Cotação enviada" }).click();
+  await expect(det.getByRole("navigation", { name: "Coluna do pedido" }).getByRole("button", { name: "Cotação enviada" })).toHaveAttribute("aria-pressed", "true");
   await expect(det.getByRole("link", { name: "Enviar cotação" })).toHaveAttribute("href", /^https:\/\/wa\.me\/5521988881111\?text=/);
   // a mensagem leva o que o cliente pediu e o link da página da cotação
   const msg = decodeURIComponent((await det.getByRole("link", { name: "Enviar cotação" }).getAttribute("href"))!.split("?text=")[1]!);
@@ -1058,14 +1024,16 @@ test("CRM: pedido, etapas, lista, dashboard e captação pela página pública",
   await page.screenshot({ path: `${SHOTS}/pagina_reserva.png`, fullPage: true });
   await page.goto("/app/crm");
 
-  // menu lateral: Sua MilhasX abre o editor da página
-  await page.locator("aside").getByRole("link", { name: "Sua MilhasX" }).click();
-  await expect(page).toHaveURL(/\/editor$/);
+  // menu lateral: Marketing › Site abre o editor do site e da Central
+  const marketing = page.locator("aside").getByRole("button", { name: "Marketing", exact: true });
+  if ((await marketing.getAttribute("aria-expanded")) !== "true") await marketing.click();
+  await page.locator("aside").getByRole("link", { name: "Site", exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/marketing\/site$/);
 });
 
 const PAGES = [
   "/app", "/app/entries", "/app/programs", "/app/programs?view=titulares",
-  "/app/sales", "/app/sales?tab=clientes", "/app/simulators", "/app/reports", "/app/notifications", "/app/settings", "/app/settings?tab=profile", "/app/settings?tab=billing", "/app/settings?tab=referrals", "/app/settings?tab=sales-profile", "/editor", "/app/upgrade", "/app/crm", "/app/crm?view=lista", "/app/crm?view=dashboard", "/app/buscador", "/app/tradutor", "/app/tradutor?de=BSB&para=GIG",
+  "/app/sales", "/app/sales?tab=clientes", "/app/reports", "/app/notifications", "/app/settings", "/app/settings?tab=profile", "/app/settings?tab=billing", "/app/settings?tab=referrals", "/app/settings?tab=sales-profile", "/app/marketing/site", "/app/upgrade", "/app/crm", "/app/crm?view=lista", "/app/crm?view=dashboard", "/app/buscador", "/app/tradutor", "/app/tradutor?de=BSB&para=GIG",
   "/app/credit-cards", "/app/management",
   "/app/management?tab=fornecedores", "/app/guides", "/app/guides/entendendo-o-cpm", "/app/news",
 ];
@@ -1075,7 +1043,7 @@ test("responsivo: celular sem rolagem lateral, extrato em lista, botão redondo"
   await page.setViewportSize({ width: 375, height: 812 });
   for (const p of PAGES) {
     await page.goto(p);
-    await expect(page.locator("main h1")).toBeVisible();
+    await expect(page.locator("main h1:visible").first()).toBeVisible();
     await noHorizontalScroll();
     await page.screenshot({ path: `${SHOTS}/mobile${p.replace(/[/?=]/g, "_")}.png`, fullPage: true });
   }
@@ -1088,10 +1056,6 @@ test("responsivo: celular sem rolagem lateral, extrato em lista, botão redondo"
 
   await page.getByRole("button", { name: "Abrir/fechar menu lateral" }).click();
   await expect(page.getByRole("navigation", { name: "Menu principal" })).toBeVisible();
-  await page.getByRole("link", { name: "Simuladores" }).click();
-  await expect(page).toHaveURL(/simulators/);
-  // nos simuladores o botão flutuante vira "Simular", como na referência
-  await expect(page.getByRole("button", { name: "Simular", exact: true }).last()).toBeVisible();
 
   await page.goto("/app/entries");
   await openNewEntry("Crédito");
@@ -1107,13 +1071,13 @@ test("responsivo: tablet e desktop", async () => {
     await page.setViewportSize({ width: w, height: h });
     for (const p of PAGES) {
       await page.goto(p);
-      await expect(page.locator("main h1")).toBeVisible();
+      await expect(page.locator("main h1:visible").first()).toBeVisible();
       await noHorizontalScroll();
       if (tag === "desktop") await page.screenshot({ path: `${SHOTS}/desktop${p.replace(/[/?=]/g, "_")}.png`, fullPage: true });
     }
   }
   await page.goto("/app/entries");
-  await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.locator("main h1:visible").first()).toBeVisible();
   await openNewEntry("Crédito");
   await page.waitForTimeout(2000);
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -1140,7 +1104,7 @@ test("painel administrativo completo", async ({ browser }) => {
   await page.goto("/app");
   await page.getByRole("button", { name: new RegExp(user.name) }).click();
   await page.getByRole("menuitem", { name: "Administração" }).click();
-  await expect(page.getByRole("heading", { name: "Indicadores" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Visão geral" })).toBeVisible();
 
   await page.goto(`/admin/users?q=${encodeURIComponent(otherEmail)}`);
   await page.getByRole("button", { name: "Desativar" }).click();
@@ -1208,7 +1172,7 @@ test("painel administrativo completo", async ({ browser }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   for (const p of ["/admin", "/admin/users", "/admin/programs", "/admin/calculators", "/admin/guides", "/admin/news", "/admin/audit", "/admin/settings"]) {
     await page.goto(p);
-    await expect(page.locator("main h1")).toBeVisible();
+    await expect(page.locator("main h1:visible").first()).toBeVisible();
     await noHorizontalScroll();
   }
   await page.setViewportSize({ width: 1280, height: 800 });

@@ -130,8 +130,8 @@ export function AdminShell({ admin, pending, children }: {
       {open && <div className="fixed inset-0 z-30 bg-[rgb(15_27_45/0.35)] lg:hidden" onClick={() => setOpen(false)} />}
 
       <div className="lg:ml-[248px]">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3.5 border-b border-line bg-bg/90 px-4 backdrop-blur-md sm:px-7">
-          <button className="grid h-10 w-10 place-items-center rounded-[10px] border border-line bg-panel lg:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu className="h-[18px] w-[18px]" /></button>
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-3.5 max-sm:gap-2 border-b border-line bg-bg/90 px-4 backdrop-blur-md sm:px-7">
+          <button className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-line bg-panel lg:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu"><Menu className="h-[18px] w-[18px]" /></button>
           <nav className="hidden min-w-0 flex-wrap items-center gap-1.5 text-sm text-muted sm:flex" aria-label="Caminho">
             {crumbs.map((c, i) => (
               <span key={i} className="flex items-center gap-1.5">
@@ -140,11 +140,15 @@ export function AdminShell({ admin, pending, children }: {
               </span>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2.5">
+          <div className="ml-auto flex min-w-0 shrink items-center gap-2.5 max-sm:gap-1.5">
             {PERIOD_PAGES.includes(path) && (
-              <DateRangePicker align="right" value={periodDays(parsePeriod(sp.get("p")))} onChange={setPeriod} />
+              // No celular, sem as setas de mês e sem a largura mínima do período (o calendário continua com tudo):
+              // o seletor inteiro não cabia em 320–375 px e a página rolava para o lado
+              <div className="min-w-0 max-sm:[&>div>button:nth-of-type(1)]:hidden max-sm:[&>div>button:nth-of-type(2)]:min-w-0 max-sm:[&>div>button:nth-of-type(3)]:hidden">
+                <DateRangePicker align="right" value={periodDays(parsePeriod(sp.get("p")))} onChange={setPeriod} />
+              </div>
             )}
-            <div className="relative">
+            <div className="relative shrink-0">
               <button onClick={() => setBell((b) => !b)} aria-expanded={bell} aria-label={`Pendências: ${pending.total}`} className="relative grid h-10 w-10 place-items-center rounded-[10px] border border-line bg-panel text-zinc-200">
                 <Bell className="h-[18px] w-[18px]" />
                 {pending.total > 0 && <em className="absolute -right-1.5 -top-1.5 rounded-full border-2 border-bg bg-red-600 px-1.5 text-[11px] font-bold not-italic text-white">{pending.total}</em>}
