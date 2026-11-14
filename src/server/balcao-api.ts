@@ -40,6 +40,25 @@ export type BalcaoProposal = {
   id: number; oferta_id: number; valor_centavos: number; total_centavos: number | null; contraproposta: boolean;
   status: "pending" | "chosen" | "rejected"; via: string | null; criada_em: string; atualizada_em: string | null;
 };
+/** A oferta para quem a abriu: as propostas pendentes e, depois da escolha, os valores da negociação. */
+export type BalcaoMyOffer = BalcaoOffer & {
+  propostas_pendentes: number;
+  negociacao: {
+    milheiro_centavos: number; total_centavos: number; taxa_centavos: number; voce_paga_centavos: number;
+    escolhida_em: string | null; pago_em: string | null; emitida_em: string | null; concluida_em: string | null;
+  } | null;
+};
+/** Proposta recebida numa oferta minha: o valor e a reputação de quem vende (sem nome, como no bot). */
+export type BalcaoReceivedProposal = BalcaoProposal & { vendedor: BalcaoBuyer };
+export type BalcaoBuyRules = {
+  pode_comprar: boolean; ofertas_abertas: number; limite_ofertas: number; intermediacao_obrigatoria: boolean;
+  taxa_milheiro_centavos: number; taxa_paga_por: "comprador" | "vendedor"; repasse_dias: number; validade_horas: number;
+  programas: { chave: string; nome: string }[];
+};
+export type BalcaoNewOffer = {
+  programa: string; milhas: number; cpfs: number; milheiro_centavos: number; urgente: boolean; intermediada: boolean;
+  observacao?: string | null;
+};
 export type BalcaoLinkInfo = { id: number; criado_em: string; referencia: string | null };
 
 type Opts = { token?: string; body?: unknown; retry?: boolean };
@@ -97,5 +116,20 @@ export const balcaoApi = {
   proposals: (token: string, status?: string | null) =>
     request<{ propostas: (BalcaoProposal & { oferta: BalcaoOffer })[] }>("GET", `/propostas${qs({ status })}`, { token, retry: true }),
   changes: (token: string, desde?: string | null) =>
-    request<{ ofertas: BalcaoOffer[]; propostas: BalcaoProposal[]; cursor: string; mais: boolean }>("GET", `/mudancas${qs({ desde })}`, { token, retry: true }),
+    request<{ ofertas: BalcaoOffer[]; propostas: BalcaoProposal[]; propostas_recebidas?: BalcaoReceivedProposal[]; cursor: string; mais: boolean }>(
+      "GET", `/mudancas${qs({ desde })}`, { token, retry: true }),
+  // quem compra (as regras são as do bot: buying.py)
+  buyRules: (token: string, programa?: string | null) =>
+    request<{ regras: BalcaoBuyRules; sugestao_centavos: number | null }>("GET", `/compra${qs({ programa })}`, { token, retry: true }),
+  // sem nova tentativa: repetir poderia abrir duas ofertas
+  createOffer: (token: string, body: BalcaoNewOffer) =>
+    request<{ oferta: BalcaoMyOffer; alertados: number }>("POST", "/minhas-ofertas", { token, body }),
+  myOffers: (token: string, status: "abertas" | "todas" = "abertas") =>
+    request<{ ofertas: BalcaoMyOffer[] }>("GET", `/minhas-ofertas${qs({ status })}`, { token, retry: true }),
+  myOffer: (token: string, id: number) =>
+    request<{ oferta: BalcaoMyOffer; propostas: BalcaoReceivedProposal[] }>("GET", `/minhas-ofertas/${id}`, { token, retry: true }),
+  cancelOffer: (token: string, id: number) =>
+    request<{ oferta: BalcaoMyOffer }>("DELETE", `/minhas-ofertas/${id}`, { token, retry: true }),
+  choose: (token: string, id: number, propostaId: number) =>
+    request<{ oferta: BalcaoMyOffer }>("POST", `/minhas-ofertas/${id}/escolher`, { token, body: { proposta_id: propostaId } }),
 };

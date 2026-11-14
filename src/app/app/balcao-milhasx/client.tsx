@@ -13,6 +13,7 @@ import { Alert, Empty, SegmentedButtons } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { DEAL_STAGE_LABELS } from "@/domain/miles-deals";
 import { useRealtimeConnection, useRealtimeEvents } from "@/lib/realtime";
+import { BuyPanel } from "./buy";
 
 type Status = {
   enabled: boolean; linked: boolean; linkedAt: string | null; syncedAt: string | null;
@@ -81,7 +82,7 @@ function LinkForm({ onLinked, canEdit }: { onLinked: (s: Status) => void; canEdi
 
 function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setStatus: (s: Status) => void; canEdit: boolean; realtime: boolean }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"ofertas" | "propostas">("ofertas");
+  const [tab, setTab] = useState<"ofertas" | "propostas" | "comprar">("ofertas");
   const [program, setProgram] = useState("");
   const [offers, setOffers] = useState<Offer[] | null>(null);
   const [more, setMore] = useState(false);
@@ -136,7 +137,10 @@ function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setS
     if (r.data.item.moved) toast(`${r.data.item.moved} negociação(ões) do CRM Milhas atualizada(s) pelo Balcão`);
   }, [lost, setStatus]);
 
-  const reload = useCallback(() => (tabRef.current === "ofertas" ? loadOffers(1) : loadMine()), [loadOffers, loadMine]);
+  const reload = useCallback(async () => {
+    if (tabRef.current === "ofertas") await loadOffers(1);
+    else if (tabRef.current === "propostas") await loadMine();
+  }, [loadOffers, loadMine]); // "comprar": a aba carrega o que é dela
   const refresh = useCallback(async (manual = false) => {
     await sync(manual);
     await reload();
@@ -200,7 +204,7 @@ function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setS
       {error && <Alert>{error}</Alert>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <SegmentedButtons items={[{ key: "ofertas", label: "Ofertas abertas" }, { key: "propostas", label: "Minhas propostas" }]} value={tab} onChange={setTab} />
+        <SegmentedButtons items={[{ key: "ofertas", label: "Ofertas abertas" }, { key: "propostas", label: "Minhas propostas" }, { key: "comprar", label: "Minhas compras" }]} value={tab} onChange={setTab} />
         {tab === "ofertas" && (
           <select className="input w-auto" value={program} onChange={(e) => setProgram(e.target.value)} aria-label="Programa">
             {PROGRAMS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
@@ -219,7 +223,8 @@ function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setS
             {more && <button type="button" className="btn-ghost" onClick={() => void loadOffers(page + 1)}>Carregar mais</button>}
           </>
         )
-      ) : mine === null ? <p className="text-sm text-muted">Carregando propostas…</p>
+      ) : tab === "comprar" ? <BuyPanel canEdit={canEdit} realtime={realtime} canBuy={m.canView} />
+        : mine === null ? <p className="text-sm text-muted">Carregando propostas…</p>
         : mine.length === 0 ? <Empty title="Nenhuma proposta ainda" icon={<Handshake className="h-5 w-5" />} />
         : <ProposalList items={mine} />}
     </div>

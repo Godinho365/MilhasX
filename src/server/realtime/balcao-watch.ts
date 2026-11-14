@@ -6,7 +6,7 @@
 // O Balcão devolve algo repetido (o cursor volta 30 s para não perder transação lenta): cada item é guardado pela
 // hora em que mudou e só sai de novo se mudou de novo.
 import { prisma, log } from "../db";
-import { balcaoApi, balcaoEnabled, BalcaoApiError, type BalcaoOffer, type BalcaoProposal } from "../balcao-api";
+import { balcaoApi, balcaoEnabled, BalcaoApiError, type BalcaoOffer, type BalcaoProposal, type BalcaoReceivedProposal } from "../balcao-api";
 import { decrypt, credentialsEnabled } from "../services/accounts";
 import { applyChanges, enrichOffers } from "../services/balcao";
 
@@ -14,6 +14,8 @@ export type BalcaoEvent = {
   type: "balcao";
   offers: Awaited<ReturnType<typeof enrichOffers>>;
   proposals: BalcaoProposal[];
+  /** Propostas novas ou mudadas nas minhas ofertas (quem compra). */
+  received: BalcaoReceivedProposal[];
   moved: number;
 };
 type Publish = (userId: string, ev: BalcaoEvent) => Promise<unknown>;
@@ -74,6 +76,7 @@ export class BalcaoWatcher {
       const token = decrypt(row.tokenEnc);
       const offers: BalcaoOffer[] = [];
       const proposals: BalcaoProposal[] = [];
+      const received: BalcaoReceivedProposal[] = [];
       for (let page = 0; page < MAX_PAGES; page++) {
         const ch = await balcaoApi.changes(token, st.cursor);
         const first = st.cursor == null;
@@ -81,14 +84,15 @@ export class BalcaoWatcher {
         if (!first) {
           offers.push(...unseen("o", ch.ofertas, st.seen, now));
           proposals.push(...unseen("p", ch.propostas, st.seen, now));
+          received.push(...unseen("r", ch.propostas_recebidas ?? [], st.seen, now));
         }
         if (!ch.mais) break;
       }
       for (const [k, t] of st.seen) if (now - t > SEEN_TTL_MS) st.seen.delete(k);
       st.failures = 0;
-      if (!offers.length && !proposals.length) return;
+      if (!offers.length && !proposals.length && !received.length) return;
       const moved = await applyChanges(row.userId, offers, proposals);
-      await this.publish(row.userId, { type: "balcao", offers: await enrichOffers(row.userId, offers, proposals), proposals, moved });
+      await this.publish(row.userId, { type: "balcao", offers: await enrichOffers(row.userId, offers, proposals), proposals, received, moved });
     } catch (e) {
       if (e instanceof BalcaoApiError && e.unlinked) {
         await prisma.balcaoLink.deleteMany({ where: { id: row.id } }).catch(() => {});

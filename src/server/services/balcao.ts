@@ -6,7 +6,7 @@
 // no bot do Balcão.
 import type { MilesDealStage } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
-import { balcaoApi, balcaoEnabled, BalcaoApiError, type BalcaoMember, type BalcaoOffer, type BalcaoProposal } from "../balcao-api";
+import { balcaoApi, balcaoEnabled, BalcaoApiError, type BalcaoMember, type BalcaoNewOffer, type BalcaoOffer, type BalcaoProposal } from "../balcao-api";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { emissionAccounts } from "./capacity";
 import { archiveDeal, createDeal, moveDeal } from "./miles-deals";
@@ -236,4 +236,49 @@ async function closeDeal(userId: string, d: { id: string; notes: string | null; 
   await prisma.milesDeal.update({ where: { id: d.id }, data: { notes: appendNote(d.notes, why) } });
   await archiveDeal(userId, d.id, true);
   d.archivedAt = new Date();
+}
+
+// ---------- Quem compra: abrir oferta, ver as propostas recebidas, escolher o vendedor e cancelar ----------
+// As regras (limite de 5 abertas, faixas, Viajante sempre com intermediação, PIX e liberação do contato) são as do
+// bot do Balcão (buying.py); aqui só se repassa e se registra quem fez o quê.
+
+export async function balcaoBuyRules(userId: string, program?: string | null) {
+  return withLink(userId, (token) => balcaoApi.buyRules(token, program));
+}
+
+export async function balcaoCreateOffer(userId: string, actorId: string, input: BalcaoNewOffer) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.createOffer(token, input);
+    await audit(prisma, actorId, "balcao.offer_create", "BalcaoOffer", String(r.oferta.id), {
+      program: input.programa, miles: input.milhas, cpmCents: input.milheiro_centavos, intermediated: r.oferta.intermediada,
+    });
+    return { offer: r.oferta, alerted: r.alertados };
+  });
+}
+
+export async function balcaoMyOffers(userId: string, all = false) {
+  return withLink(userId, async (token) => (await balcaoApi.myOffers(token, all ? "todas" : "abertas")).ofertas);
+}
+
+export async function balcaoMyOffer(userId: string, offerId: number) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.myOffer(token, offerId);
+    return { offer: r.oferta, proposals: r.propostas };
+  });
+}
+
+export async function balcaoCancelOffer(userId: string, actorId: string, offerId: number) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.cancelOffer(token, offerId);
+    await audit(prisma, actorId, "balcao.offer_cancel", "BalcaoOffer", String(offerId));
+    return r.oferta;
+  });
+}
+
+export async function balcaoChooseProposal(userId: string, actorId: string, offerId: number, proposalId: number) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.choose(token, offerId, proposalId);
+    await audit(prisma, actorId, "balcao.offer_choose", "BalcaoOffer", String(offerId), { proposalId, status: r.oferta.status });
+    return r.oferta;
+  });
 }
