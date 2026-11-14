@@ -66,16 +66,31 @@ export type BalcaoDeal = {
   milheiro_centavos: number; total_centavos: number; taxa_centavos: number; comprador_paga_centavos: number;
   escolhida_em: string | null; paga_em: string | null; emitida_em: string | null; concluida_em: string | null;
   atualizada_em: string | null; cancelada_por: "voce" | "outra_parte" | null;
-  outra_parte: BalcaoBuyer & { nome: string | null; usuario: string | null };
-  acoes: { conversar: boolean; emitida: boolean; concluida: boolean; cancelar: boolean; reclamar: boolean; avaliar: boolean };
+  outra_parte: BalcaoBuyer & { nome: string | null; usuario: string | null; telegram_id?: number | null; reputacao_url?: string | null };
+  acoes: {
+    conversar: boolean; emitida: boolean; concluida: boolean; cancelar: boolean; reclamar: boolean; avaliar: boolean;
+    cancelar_emissao: boolean; pagar: boolean;
+  };
   minha_avaliacao: { estrelas: number; comentario: string | null } | null;
   link_bot: string | null;
+  /** O PIX em aberto da intermediação (só para o comprador, aguardando o pagamento): o mesmo que o bot mandou. */
+  pix: BalcaoDealPix | null;
+  /** Quanto volta se o comprador cancelar a emissão agora (null quando não pode). */
+  cancelamento_emissao: {
+    pago_centavos: number; taxa_servico_centavos: number; taxa_intermediacao_centavos: number;
+    estorno_centavos: number; prazo_ate: string | null;
+  } | null;
 };
+export type BalcaoDealPix = {
+  id: number; valor_centavos: number; automatico: boolean; copia_e_cola: string | null; expira_em: string | null;
+  vencido: boolean; chave_pix: string | null; favorecido: string | null; criado_em: string | null;
+};
+export type BalcaoPixResult = "pago" | "pendente" | "novo" | "manual";
 export type BalcaoDealMessage = {
   id: number; negociacao_id: number; minha: boolean; via: string; texto: string | null; entregue: boolean; criada_em: string;
   arquivo: { tipo: "photo" | "document"; nome: string | null; mime: string | null; tamanho: number | null } | null;
 };
-export type BalcaoDealAction = "emitida" | "concluida" | "cancelar";
+export type BalcaoDealAction = "emitida" | "concluida" | "cancelar" | "cancelar-emissao";
 export type BalcaoLinkInfo = { id: number; criado_em: string; referencia: string | null };
 
 type Opts = { token?: string; body?: unknown; form?: FormData; retry?: boolean };
@@ -165,6 +180,14 @@ export const balcaoApi = {
   },
   dealAction: (token: string, id: number, action: BalcaoDealAction) =>
     request<{ negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/${action}`, { token }),
+  // "Já paguei": consulta o PIX; vencido gera outro (que o bot também manda no Telegram)
+  pixCheck: (token: string, id: number) =>
+    request<{ resultado: BalcaoPixResult; negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/pix/verificar`, { token }),
+  pixProof: (token: string, id: number, file: { data: Buffer; name: string; mime: string }) => {
+    const form = new FormData();
+    form.set("arquivo", new Blob([new Uint8Array(file.data)], { type: file.mime }), file.name);
+    return request<{ negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/pix/comprovante`, { token, body: null, form });
+  },
   rate: (token: string, id: number, estrelas: number, comentario?: string | null) =>
     request<{ negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/avaliacao`, { token, body: { estrelas, comentario } }),
   report: (token: string, id: number, texto: string) =>

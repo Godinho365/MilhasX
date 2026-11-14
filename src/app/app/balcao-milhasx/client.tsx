@@ -2,11 +2,11 @@
 // Balcão MilhasX: vincular com o código do bot (/milhasx), ver as ofertas abertas (com a análise de emissão das suas
 // contas) e mandar proposta: aceitar o valor do comprador ou contrapropor. Em tempo real: o servidor confere o Balcão
 // a cada 2 s e manda o que mudou pelo WebSocket (/ws), e a tela só aplica; sem o tempo real, confere a cada minuto. A
-// negociação do CRM Milhas anda sozinha (escolhido → Aguardando; recusado, expirado ou cancelado → arquivada).
+// proposta só entra no CRM Milhas quando o comprador a escolhe (em Aguardando) e anda sozinha dali em diante.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Handshake, Link2, RefreshCw, Unlink, ExternalLink, ShieldCheck, Zap, BadgeCheck, Star } from "lucide-react";
+import { Handshake, Link2, MessageCircle, RefreshCw, Unlink, ExternalLink, ShieldCheck, Zap, BadgeCheck, Star } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtPts, fmtDateTime, parseBRLToCents } from "@/lib/format";
 import { Alert, Empty, SegmentedButtons } from "@/components/ui";
@@ -14,7 +14,7 @@ import { toast, confirmDialog } from "@/components/feedback";
 import { DEAL_STAGE_LABELS } from "@/domain/miles-deals";
 import { useRealtimeConnection, useRealtimeEvents } from "@/lib/realtime";
 import { BuyPanel } from "./buy";
-import { DealsPanel } from "./deals";
+import { DealInline, DealsPanel } from "./deals";
 
 type Status = {
   enabled: boolean; linked: boolean; linkedAt: string | null; syncedAt: string | null;
@@ -22,7 +22,7 @@ type Status = {
 };
 type Deal = { id: string; number: number; stage: keyof typeof DEAL_STAGE_LABELS; archived: boolean } | null;
 type Proposal = { id: number; oferta_id: number; valor_centavos: number; contraproposta: boolean; status: "pending" | "chosen" | "rejected"; atualizada_em: string | null };
-type Analysis = { account: string; covers: boolean; profitCents: number | null; missingMiles: number; cpfShort: boolean } | null;
+type Analysis = { account: string; covers: boolean; costCpmCents: number; profitCents: number | null; missingMiles: number; cpfShort: boolean } | null;
 type Offer = {
   id: number; status: string; programa: string; programa_nome: string; milhas: number; cpfs: number; milheiro_centavos: number;
   total_centavos: number; urgente: boolean; intermediada: boolean; observacao: string | null; valida_ate: string; sua_oferta: boolean;
@@ -37,7 +37,7 @@ const PROGRAMS: [string, string][] = [
 ];
 const ROLE: Record<string, string> = { viajante: "Viajante", agente: "Agência", milheiro: "Milheiro" };
 const PROPOSAL: Record<Proposal["status"], [string, string]> = {
-  pending: ["Aguardando o comprador", "text-amber-300"], chosen: ["Escolhida: continue no bot", "text-green-300"], rejected: ["Recusada", "text-muted"],
+  pending: ["Aguardando o comprador", "text-amber-300"], chosen: ["Escolhida", "text-green-300"], rejected: ["Recusada", "text-muted"],
 };
 const OFFER_STATUS: Record<string, string> = {
   open: "Aberta", awaiting_payment: "Aguardando pagamento", matched: "Em negociação", completed: "Concluída", cancelled: "Cancelada", expired: "Expirada",
@@ -228,7 +228,7 @@ function Linked({ status, setStatus, canEdit, realtime }: { status: Status; setS
         : tab === "negociacoes" ? <DealsPanel canEdit={canEdit} realtime={realtime} />
         : mine === null ? <p className="text-sm text-muted">Carregando propostas…</p>
         : mine.length === 0 ? <Empty title="Nenhuma proposta ainda" icon={<Handshake className="h-5 w-5" />} />
-        : <ProposalList items={mine} />}
+        : <ProposalList items={mine} canEdit={canEdit} realtime={realtime} />}
     </div>
   );
 }
@@ -254,6 +254,13 @@ function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean
   const [counter, setCounter] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const a = o.analysis;
+  // lucro a um milheiro qualquer: (milheiro − custo da conta que emitiria) × milhas
+  const profitAt = (cents: number) => (a ? Math.round((o.milhas * (cents - a.costCpmCents)) / 1000) : null);
+  const counterCents = counter != null ? parseBRLToCents(counter) : null;
+  const Profit = ({ cents }: { cents: number }) => {
+    const p = profitAt(cents);
+    return p == null ? null : <b className={p >= 0 ? "text-green-300" : "text-red-300"}>{fmtBRL(p)}</b>;
+  };
   async function send(cents: number) {
     setBusy(true);
     const ok = await onPropose(o, cents);
@@ -292,11 +299,12 @@ function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean
       {o.observacao && <p className="rounded-lg bg-panel2 px-3 py-2 text-sm">{o.observacao}</p>}
       <p className="text-sm">
         {!a ? <span className="text-muted">Você não tem conta neste programa.</span>
-          : a.covers ? <>Emite com <b>{a.account}</b>{a.profitCents != null && <> · lucro <b className={a.profitCents >= 0 ? "text-green-300" : "text-red-300"}>{fmtBRL(a.profitCents)}</b></>}</>
-          : <span className="text-amber-300">Nenhuma conta cobre sozinha{a.missingMiles > 0 ? ` (faltam ${fmtPts(a.missingMiles)} milhas em ${a.account})` : a.cpfShort ? ` (faltam CPFs em ${a.account})` : ""}.</span>}
+          : a.covers ? <>Emite com <b>{a.account}</b> · lucro a {fmtBRL(o.milheiro_centavos)}: <Profit cents={o.milheiro_centavos} /></>
+          : <><span className="text-amber-300">Nenhuma conta cobre sozinha{a.missingMiles > 0 ? ` (faltam ${fmtPts(a.missingMiles)} milhas em ${a.account})` : a.cpfShort ? ` (faltam CPFs em ${a.account})` : ""}.</span>
+            {" "}<span className="text-muted">Lucro estimado pelo custo de {a.account} a {fmtBRL(o.milheiro_centavos)}:</span> <Profit cents={o.milheiro_centavos} /></>}
       </p>
       {o.myProposal && (
-        <p className="text-sm">Sua proposta: <b>{fmtBRL(o.myProposal.valor_centavos)}</b> <span className={PROPOSAL[o.myProposal.status][1]}>· {PROPOSAL[o.myProposal.status][0]}</span>
+        <p className="text-sm">Sua proposta: <b>{fmtBRL(o.myProposal.valor_centavos)}</b>{a && o.myProposal.valor_centavos !== o.milheiro_centavos && <> (lucro <Profit cents={o.myProposal.valor_centavos} />)</>} <span className={PROPOSAL[o.myProposal.status][1]}>· {PROPOSAL[o.myProposal.status][0]}</span>
           {o.deal && <> · <Link className="underline" href={`/app/crm-milhas?deal=${o.deal.id}`}>CRM Milhas #{o.deal.number}</Link></>}</p>
       )}
       <footer className="mt-auto flex flex-wrap items-center gap-2">
@@ -313,6 +321,10 @@ function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean
             <button type="button" className="btn-ghost" onClick={() => setCounter(null)}>Cancelar</button>
           </form>
         )}
+        {canPropose && counter !== null && a && counterCents != null && counterCents >= 100 && (
+          <p className="w-full text-sm">Lucro a {fmtBRL(counterCents)}: <Profit cents={counterCents} />
+            <span className="text-muted"> ({fmtBRL(counterCents - o.milheiro_centavos)} {counterCents >= o.milheiro_centavos ? "acima" : "abaixo"} do que o comprador oferece{a.covers ? "" : `; estimado pelo custo de ${a.account}`})</span></p>
+        )}
         {o.sua_oferta && <span className="text-xs text-muted">Esta oferta é sua.</span>}
         {o.link_bot && <a className="btn-ghost ml-auto" href={o.link_bot} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" />Abrir no bot</a>}
       </footer>
@@ -320,21 +332,38 @@ function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean
   );
 }
 
-function ProposalList({ items }: { items: MyProposal[] }) {
+function ProposalList({ items, canEdit, realtime }: { items: MyProposal[]; canEdit: boolean; realtime: boolean }) {
   return (
     <div className="card divide-y divide-line">
-      {items.map((p) => (
-        <div key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
-          <span className="font-medium">#{p.oferta.id} · {p.oferta.programa_nome} · {fmtPts(p.oferta.milhas)} milhas</span>
-          <span>Minha proposta {fmtBRL(p.valor_centavos)}{p.contraproposta ? " (contraproposta)" : ""}</span>
-          <span className={PROPOSAL[p.status][1]}>{PROPOSAL[p.status][0]}</span>
-          <span className="text-muted">Oferta: {OFFER_STATUS[p.oferta.status] ?? p.oferta.status}</span>
-          <span className="ml-auto flex gap-3">
-            {p.deal && <Link className="underline" href={`/app/crm-milhas?deal=${p.deal.id}`}>CRM Milhas #{p.deal.number} · {p.deal.archived ? "arquivada" : DEAL_STAGE_LABELS[p.deal.stage]}</Link>}
-            {p.oferta.link_bot && <a className="underline" href={p.oferta.link_bot} target="_blank" rel="noreferrer">Abrir no bot</a>}
-          </span>
-        </div>
-      ))}
+      {items.map((p) => <ProposalRow key={p.id} p={p} canEdit={canEdit} realtime={realtime} />)}
+    </div>
+  );
+}
+
+// etapas em que a proposta escolhida virou negociação (com conversa)
+const DEAL_STATES = ["awaiting_payment", "matched", "completed"];
+
+function ProposalRow({ p, canEdit, realtime }: { p: MyProposal; canEdit: boolean; realtime: boolean }) {
+  const hasDeal = p.status === "chosen" && DEAL_STATES.includes(p.oferta.status);
+  const [chat, setChat] = useState(hasDeal && p.oferta.status !== "completed");
+  return (
+    <div className="px-4 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium">#{p.oferta.id} · {p.oferta.programa_nome} · {fmtPts(p.oferta.milhas)} milhas</span>
+        <span>Minha proposta {fmtBRL(p.valor_centavos)}{p.contraproposta ? " (contraproposta)" : ""}</span>
+        <span className={PROPOSAL[p.status][1]}>{PROPOSAL[p.status][0]}</span>
+        <span className="text-muted">Oferta: {OFFER_STATUS[p.oferta.status] ?? p.oferta.status}</span>
+        <span className="ml-auto flex flex-wrap items-center gap-3">
+          {hasDeal && (
+            <button type="button" className={chat ? "btn-ghost" : "btn-primary"} onClick={() => setChat((v) => !v)}>
+              <MessageCircle className="h-4 w-4" />{chat ? "Fechar a negociação" : "Abrir a conversa"}
+            </button>
+          )}
+          {p.deal && <Link className="underline" href={`/app/crm-milhas?deal=${p.deal.id}`}>CRM Milhas #{p.deal.number} · {p.deal.archived ? "arquivada" : DEAL_STAGE_LABELS[p.deal.stage]}</Link>}
+          {p.oferta.link_bot && <a className="underline" href={p.oferta.link_bot} target="_blank" rel="noreferrer">Abrir no bot</a>}
+        </span>
+      </div>
+      {hasDeal && chat && <div className="mt-3"><DealInline id={p.oferta.id} canEdit={canEdit} realtime={realtime} /></div>}
     </div>
   );
 }

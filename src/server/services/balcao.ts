@@ -1,8 +1,8 @@
 // Balcão MilhasX: as ofertas de compra do Balcão (o nosso balcão no Telegram) dentro do MilhasX. A conta se vincula
 // a um membro do Balcão com o código que o bot dá (/milhasx); daí em diante dá para ver as ofertas abertas (com a
-// conta que emitiria e o lucro, como no Chat Balcões) e mandar proposta. Cada proposta vira uma negociação do CRM
-// Milhas (balcão "Balcão MilhasX", sourceRef "balcao:<oferta>"), que anda sozinha conforme o Balcão responde:
-// escolhido → "Aguardando"; recusado, expirado ou cancelado → arquivada. O resto (contato, PIX, emissão) continua
+// conta que emitiria e o lucro, como no Chat Balcões) e mandar proposta. Quando o comprador escolhe a proposta, ela
+// vira uma negociação do CRM Milhas em "Aguardando" (balcão "Balcão MilhasX", sourceRef "balcao:<oferta>"); as que já
+// existiam andam sozinhas conforme o Balcão responde: recusado, expirado ou cancelado → arquivada. O resto (contato, PIX, emissão) continua
 // no bot do Balcão.
 import type { MilesDealStage } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
@@ -141,34 +141,35 @@ export async function balcaoProposals(userId: string) {
 
 const brl = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-/** Manda (ou atualiza) a proposta e cria/atualiza a negociação no CRM Milhas, já em "Negociação". */
+/** Manda (ou atualiza) a proposta. A negociação do CRM Milhas só nasce quando o comprador escolhe esta proposta
+ *  (applyChanges); uma que já exista (de antes dessa regra) acompanha o valor novo. */
 export async function proposeBalcao(userId: string, offerId: number, cpmCents: number) {
   return withLink(userId, async (token) => {
-    const { oferta } = await balcaoApi.offer(token, offerId);
     const { proposta, mudou } = await balcaoApi.propose(token, offerId, cpmCents);
-    const ref = balcaoRef(offerId);
-    let deal = await prisma.milesDeal.findFirst({ where: { userId, sourceRef: ref }, select: dealSelect });
-    if (!deal) {
-      const analysis = analysisFor(oferta, cpmCents, await emissionAccounts(userId));
-      const notes = [
-        `Oferta #${oferta.id} do ${BALCAO_NAME}: ${oferta.milhas.toLocaleString("pt-BR")} milhas ${oferta.programa_nome}, ${oferta.cpfs} CPF(s); o comprador oferece ${brl(oferta.milheiro_centavos)} o milheiro.`,
-        `Minha proposta: ${brl(cpmCents)} o milheiro${proposta.contraproposta ? " (contraproposta)" : ""}.`,
-        oferta.link_bot ? `Continuar no bot do Balcão: ${oferta.link_bot}` : null,
-      ].filter(Boolean).join("\n");
-      const created = await createDeal(userId, {
-        buyerType: "BALCAO", customerName: BALCAO_NAME, accountId: analysis?.covers ? analysis.accountId : null,
-        points: oferta.milhas, saleCpmCents: cpmCents, passengers: oferta.cpfs, notes, sourceRef: ref,
-      });
-      await moveDeal(userId, created.id, "NEGOTIATION");
-      deal = await prisma.milesDeal.findUniqueOrThrow({ where: { id: created.id }, select: dealSelect });
-    } else if (mudou && !deal.saleId) {
+    const deal = await prisma.milesDeal.findFirst({ where: { userId, sourceRef: balcaoRef(offerId) }, select: dealSelect });
+    if (deal && mudou && !deal.saleId) {
       await prisma.milesDeal.update({
         where: { id: deal.id },
         data: { saleCpmCents: cpmCents, archivedAt: null, notes: appendNote(deal.notes, `Proposta atualizada: ${brl(cpmCents)} o milheiro.`) },
       });
     }
-    return { proposal: proposta, changed: mudou, deal: dealView(deal) };
+    return { proposal: proposta, changed: mudou, deal: dealView(deal ?? undefined) };
   });
+}
+
+/** O comprador escolheu a minha proposta: lança a negociação no CRM Milhas, em "Aguardando", com a conta que emitiria. */
+async function createChosenDeal(userId: string, oferta: BalcaoOffer, p: BalcaoProposal) {
+  const analysis = analysisFor(oferta, p.valor_centavos, await emissionAccounts(userId));
+  const notes = [
+    `Oferta #${oferta.id} do ${BALCAO_NAME}: ${oferta.milhas.toLocaleString("pt-BR")} milhas ${oferta.programa_nome}, ${oferta.cpfs} CPF(s); o comprador ofereceu ${brl(oferta.milheiro_centavos)} o milheiro.`,
+    `Minha proposta: ${brl(p.valor_centavos)} o milheiro${p.contraproposta ? " (contraproposta)" : ""}. O comprador escolheu a minha proposta.`,
+    oferta.link_bot ? `Conversa no Balcão MilhasX (aba Minhas propostas) ou no bot: ${oferta.link_bot}` : null,
+  ].filter(Boolean).join("\n");
+  const created = await createDeal(userId, {
+    buyerType: "BALCAO", customerName: BALCAO_NAME, accountId: analysis?.covers ? analysis.accountId : null,
+    points: oferta.milhas, saleCpmCents: p.valor_centavos, passengers: oferta.cpfs, notes, sourceRef: balcaoRef(oferta.id),
+  });
+  await moveDeal(userId, created.id, "AWAITING");
 }
 
 function appendNote(notes: string | null, line: string) {
@@ -192,7 +193,7 @@ export async function syncBalcao(userId: string) {
     if (membro.pode_ver_ofertas) {
       for (let page = 0; page < SYNC_PAGES; page++) {
         const ch = await balcaoApi.changes(token, cursor);
-        if (cursor) moved += await applyChanges(userId, ch.ofertas, ch.propostas);
+        if (cursor) moved += await applyChanges(userId, ch.ofertas, ch.propostas, async (id) => (await balcaoApi.offer(token, id)).oferta);
         cursor = ch.cursor;
         if (!ch.mais) break;
       }
@@ -203,14 +204,22 @@ export async function syncBalcao(userId: string) {
   });
 }
 
-export async function applyChanges(userId: string, offers: BalcaoOffer[], proposals: BalcaoProposal[]) {
+export async function applyChanges(userId: string, offers: BalcaoOffer[], proposals: BalcaoProposal[], getOffer?: (id: number) => Promise<BalcaoOffer>) {
   const refs = [...new Set([...offers.map((o) => o.id), ...proposals.map((p) => p.oferta_id)])].map(balcaoRef);
   if (!refs.length) return 0;
-  const deals = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs }, saleId: null }, select: dealSelect });
-  const dealBy = new Map(deals.map((d) => [d.sourceRef!, d]));
+  const all = await prisma.milesDeal.findMany({ where: { userId, sourceRef: { in: refs } }, select: dealSelect });
+  const known = new Set(all.map((d) => d.sourceRef!));
+  const dealBy = new Map(all.filter((d) => !d.saleId).map((d) => [d.sourceRef!, d]));
   let moved = 0;
   for (const p of proposals) {
-    const d = dealBy.get(balcaoRef(p.oferta_id));
+    const ref = balcaoRef(p.oferta_id);
+    if (p.status === "chosen" && !known.has(ref) && getOffer) {
+      // escolhida: só agora entra no CRM Milhas (uma vez só por oferta)
+      const oferta = offers.find((o) => o.id === p.oferta_id) ?? await getOffer(p.oferta_id).catch(() => null);
+      if (oferta) { await createChosenDeal(userId, oferta, p); known.add(ref); moved++; }
+      continue;
+    }
+    const d = dealBy.get(ref);
     if (!d || d.archivedAt || !OPEN.includes(d.stage)) continue;
     if (p.status === "chosen") {
       await prisma.milesDeal.update({ where: { id: d.id }, data: { notes: appendNote(d.notes, "O comprador escolheu a sua proposta: continue a negociação no bot do Balcão.") } });
@@ -326,6 +335,27 @@ export async function balcaoDealAction(userId: string, actorId: string, dealId: 
   return withLink(userId, async (token) => {
     const r = await balcaoApi.dealAction(token, dealId, action);
     await audit(prisma, actorId, `balcao.deal_${action}`, "BalcaoDeal", String(dealId), { status: r.negociacao.status });
+    return r.negociacao;
+  });
+}
+
+/** "Já paguei" do PIX da intermediação: pago libera a negociação; vencido vira um PIX novo. */
+export async function balcaoPixCheck(userId: string, actorId: string, dealId: number) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.pixCheck(token, dealId);
+    await audit(prisma, actorId, "balcao.deal_pix_check", "BalcaoDeal", String(dealId), { resultado: r.resultado });
+    return { result: r.resultado, deal: r.negociacao };
+  });
+}
+
+/** Comprovante do PIX (chave manual do balcão): vai para os admins conferirem no bot. */
+export async function balcaoPixProof(userId: string, actorId: string, dealId: number, file: { data: Buffer; name: string; mime: string }) {
+  const check = FILE_TYPES[file.mime];
+  if (!check || !check(file.data)) throw new DomainError(400, "Envie o comprovante em PDF ou imagem (JPG, PNG ou WEBP)");
+  if (file.data.length > DEAL_FILE_MAX) throw new DomainError(413, "Arquivo grande demais: até 10 MB");
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.pixProof(token, dealId, file);
+    await audit(prisma, actorId, "balcao.deal_pix_proof", "BalcaoDeal", String(dealId), {});
     return r.negociacao;
   });
 }

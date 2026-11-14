@@ -3,12 +3,13 @@
 // acompanhar as propostas recebidas ao vivo, escolher o vendedor e cancelar. As regras (limite de 5 abertas, faixas,
 // Viajante sempre com intermediação) são as do bot: a tela só ajuda a preencher, e o Balcão confere de novo.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BadgeCheck, ChevronDown, ChevronUp, ExternalLink, Plus, ShieldCheck, ShoppingCart, Star, X, Zap } from "lucide-react";
+import { BadgeCheck, ChevronDown, ChevronUp, ExternalLink, MessageCircle, Plus, ShieldCheck, ShoppingCart, Star, X, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtPts, fmtDateTime, parseBRLToCents } from "@/lib/format";
 import { Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { useRealtimeEvents } from "@/lib/realtime";
+import { DealInline } from "./deals";
 
 type Person = { perfil: string | null; verificado: boolean; negociacoes: number; intermediacoes: number; nota: number | null; avaliacoes: number };
 type Deal = {
@@ -30,6 +31,8 @@ type Rules = {
   programas: { chave: string; nome: string }[];
 };
 
+// etapas em que já existe negociação (vendedor escolhido)
+const DEAL_STATES = ["awaiting_payment", "matched", "completed"];
 const STATUS: Record<string, [string, string]> = {
   open: ["Aberta", "bg-green-400/15 text-green-300"],
   awaiting_payment: ["Aguardando o seu PIX", "bg-amber-400/15 text-amber-300"],
@@ -145,7 +148,7 @@ export function BuyPanel({ canEdit, realtime, canBuy }: { canEdit: boolean; real
         : (
           <div className="space-y-3">
             {active.map((o) => (
-              <MyOfferCard key={o.id} o={o} canEdit={canEdit} expanded={open === o.id} proposals={proposals[o.id]}
+              <MyOfferCard key={o.id} o={o} canEdit={canEdit} realtime={realtime} expanded={open === o.id} proposals={proposals[o.id]}
                 onToggle={() => { const next = open === o.id ? null : o.id; setOpen(next); if (next) void loadProposals(next); }}
                 onCancel={() => void cancel(o)} onChoose={(p) => void choose(o, p)} />
             ))}
@@ -171,12 +174,15 @@ export function BuyPanel({ canEdit, realtime, canBuy }: { canEdit: boolean; real
   );
 }
 
-function MyOfferCard({ o, canEdit, expanded, proposals, onToggle, onCancel, onChoose }: {
-  o: MyOffer; canEdit: boolean; expanded: boolean; proposals: Received[] | undefined;
+function MyOfferCard({ o, canEdit, realtime, expanded, proposals, onToggle, onCancel, onChoose }: {
+  o: MyOffer; canEdit: boolean; realtime: boolean; expanded: boolean; proposals: Received[] | undefined;
   onToggle: () => void; onCancel: () => void; onChoose: (p: Received) => void;
 }) {
   const [label, tone] = STATUS[o.status] ?? [o.status, ""];
   const d = o.negociacao;
+  const hasDeal = !!d && DEAL_STATES.includes(o.status);
+  // negociação em andamento: a conversa já vem aberta no cartão
+  const [chat, setChat] = useState(o.status === "matched" || o.status === "awaiting_payment");
   return (
     <article className="card p-4">
       <header className="flex flex-wrap items-start justify-between gap-2">
@@ -198,10 +204,10 @@ function MyOfferCard({ o, canEdit, expanded, proposals, onToggle, onCancel, onCh
       {o.observacao && <p className="mt-2 rounded-lg bg-panel2 px-3 py-2 text-sm">{o.observacao}</p>}
 
       {o.status === "awaiting_payment" && d && (
-        <Alert kind="info">Pague o PIX de <b>{fmtBRL(d.voce_paga_centavos)}</b> ({fmtBRL(d.total_centavos)} das milhas + {fmtBRL(d.taxa_centavos)} de taxa) que o bot do Balcão te mandou. Assim que o pagamento cair, o contato do vendedor é liberado.</Alert>
+        <Alert kind="info">Pague o PIX de <b>{fmtBRL(d.voce_paga_centavos)}</b> ({fmtBRL(d.total_centavos)} das milhas + {fmtBRL(d.taxa_centavos)} de taxa) aqui embaixo, pelo QR Code ou copia e cola (é o mesmo que o bot te mandou). Assim que o pagamento cair, a conversa e o contato do vendedor são liberados.</Alert>
       )}
       {o.status === "matched" && (
-        <Alert kind="info">Negociação liberada: converse com o vendedor na aba Negociações (ou pelo bot no Telegram, é a mesma conversa) e mande o voo e os dados dos passageiros.</Alert>
+        <Alert kind="info">Negociação liberada: converse com o vendedor aqui embaixo (ou pelo bot no Telegram, é a mesma conversa) e mande o voo e os dados dos passageiros.</Alert>
       )}
 
       <footer className="mt-3 flex flex-wrap items-center gap-2">
@@ -212,8 +218,14 @@ function MyOfferCard({ o, canEdit, expanded, proposals, onToggle, onCancel, onCh
           </button>
         )}
         {o.status === "open" && canEdit && <button type="button" className="btn-ghost text-red-300" onClick={onCancel}><X className="h-4 w-4" />Cancelar oferta</button>}
+        {hasDeal && (
+          <button type="button" className={chat ? "btn-ghost" : "btn-primary"} onClick={() => setChat((v) => !v)}>
+            <MessageCircle className="h-4 w-4" />{chat ? "Fechar a negociação" : "Abrir a conversa"}
+          </button>
+        )}
         {o.link_bot && <a className="btn-ghost ml-auto" href={o.link_bot} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" />Abrir no bot</a>}
       </footer>
+      {hasDeal && chat && <div className="mt-3"><DealInline id={o.id} canEdit={canEdit} realtime={realtime} /></div>}
 
       {expanded && o.status === "open" && (
         <div className="mt-3 divide-y divide-line rounded-lg border border-line">
