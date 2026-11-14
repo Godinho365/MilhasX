@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { requirePageAdmin } from "@/server/session";
 import { userDetail } from "@/server/services/admin";
 import { effectivePlan, PLANS } from "@/domain/plans";
-import { contactText, mailLink, waLink, waPhone } from "@/domain/admin-contact";
+import { contactText, emailSentState, isEmailReason, mailLink, waLink, waPhone } from "@/domain/admin-contact";
+import { lastAdminEmails } from "@/server/services/admin-email";
 import { fmtBRL, fmtDateTime, fmtDay, fmtPts } from "@/lib/format";
 import { Panel, Pill } from "../../dashboard-ui";
 import { ContactButtons, UserActions } from "./actions";
@@ -29,6 +30,9 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ id
   const text = contactText(reason, u.name, { plan: u.planRequest ? PLANS[u.planRequest].name : undefined, days: eff.trialDaysLeft });
   const ini = u.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
   const phone = waPhone(u.phone);
+  // "Enviar e-mail" pelo MilhasX só para conta ativa de cliente, sem pedido de exclusão, e com mensagem pronta
+  const canEmail = isEmailReason(reason) && u.role === "USER" && u.status === "ACTIVE" && !u.deletionRequestedAt;
+  const emailSentAt = canEmail ? (await lastAdminEmails([u.id])).get(u.id) : null;
 
   return (
     <>
@@ -45,7 +49,7 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ id
             {u.deletionRequestedAt && <Pill tone="red">Pediu exclusão em {fmtDay(u.deletionRequestedAt)}</Pill>}
           </p>
         </div>
-        <ContactButtons userId={u.id} wa={waLink(u.phone, text)} mail={mailLink(u.email, "MilhasX", text)} reason={reason} />
+        <ContactButtons userId={u.id} wa={waLink(u.phone, text)} mail={mailLink(u.email, "MilhasX", text)} reason={reason} send={canEmail ? { sent: emailSentState(emailSentAt) } : null} />
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">

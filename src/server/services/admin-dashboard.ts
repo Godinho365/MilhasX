@@ -188,12 +188,18 @@ export async function recoveryData(now = new Date()) {
     select: { targetId: true, createdAt: true, meta: true },
     orderBy: { createdAt: "desc" },
   });
-  const lastContact = new Map<string, { at: Date; channel: string }>();
-  for (const c of contacts) if (c.targetId && !lastContact.has(c.targetId)) lastContact.set(c.targetId, { at: c.createdAt, channel: (c.meta as { channel?: string } | null)?.channel ?? "" });
+  const lastContact = new Map<string, { at: Date; channel: string; sent: boolean }>();
+  const lastEmail = new Map<string, Date>(); // último e-mail mandado pelo próprio MilhasX (bloqueia o reenvio por 24 h)
+  for (const c of contacts) {
+    if (!c.targetId) continue;
+    const m = (c.meta ?? {}) as { channel?: string; sent?: boolean };
+    if (!lastContact.has(c.targetId)) lastContact.set(c.targetId, { at: c.createdAt, channel: m.channel ?? "", sent: m.sent === true });
+    if (m.sent === true && !lastEmail.has(c.targetId)) lastEmail.set(c.targetId, c.createdAt);
+  }
   const byId = new Map(rawUsers.map((u) => [u.id, u]));
   return items.map((i) => {
     const u = byId.get(i.userId)!;
-    return { ...i, user: { name: u.name, email: u.email, phone: u.phone }, lastActivity: last.get(i.userId) ?? null, contact: lastContact.get(i.userId) ?? null };
+    return { ...i, user: { name: u.name, email: u.email, phone: u.phone }, lastActivity: last.get(i.userId) ?? null, contact: lastContact.get(i.userId) ?? null, emailSentAt: lastEmail.get(i.userId) ?? null };
   });
 }
 

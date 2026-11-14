@@ -5,6 +5,8 @@ import { Mail, MessageCircle } from "lucide-react";
 import { refreshSafe } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { toast, confirmDialog } from "@/components/feedback";
+import { CONTACT_LABELS, isEmailReason, type EmailSentState } from "@/domain/admin-contact";
+import { SendEmailButton } from "../../send-email-button";
 
 type PlanCode = "PESSOAL" | "PRO" | "GESTOR";
 const PLAN_NAMES: Record<PlanCode, string> = { PESSOAL: "Pessoal", PRO: "PRO", GESTOR: "Gestor" };
@@ -64,8 +66,14 @@ export function UserActions({ u, self }: { self: boolean; u: { id: string; email
   );
 }
 
-/** Botões de WhatsApp e e-mail que também registram o contato na auditoria. */
-export function ContactButtons({ userId, wa, mail, reason, compact = false }: { userId: string; wa: string | null; mail: string; reason: string; compact?: boolean }) {
+/**
+ * Botões de WhatsApp e e-mail que também registram o contato na auditoria. Com `send` (motivo com mensagem pronta),
+ * aparece também o "Enviar e-mail", que o próprio MilhasX manda; o mailto fica como alternativa.
+ */
+export function ContactButtons({ userId, wa, mail, reason, compact = false, send = null }: {
+  userId: string; wa: string | null; mail: string; reason: string; compact?: boolean;
+  send?: { sent: EmailSentState | null } | null;
+}) {
   const router = useRouter();
   function log(channel: "whatsapp" | "email") {
     // Não bloqueia a abertura do link: registra em paralelo
@@ -73,10 +81,17 @@ export function ContactButtons({ userId, wa, mail, reason, compact = false }: { 
   }
   const cls = compact ? "btn-ghost h-8 px-2.5 text-xs" : "btn-ghost";
   return (
-    <span className="inline-flex flex-wrap gap-1.5">
+    // Na tabela (compact) os botões ficam numa linha: a tabela rola dentro do cartão no celular
+    <span className={`inline-flex gap-1.5 ${compact ? "flex-nowrap" : "flex-wrap"}`}>
       {wa ? <a className={`${cls} text-green-400`} href={wa} target="_blank" rel="noreferrer" onClick={() => log("whatsapp")}><MessageCircle className="h-4 w-4" />WhatsApp</a>
         : <span className={`${cls} cursor-not-allowed opacity-50`} title="Sem telefone válido no cadastro"><MessageCircle className="h-4 w-4" />WhatsApp</span>}
-      <a className={cls} href={mail} onClick={() => log("email")}><Mail className="h-4 w-4" />E-mail</a>
+      {send && isEmailReason(reason) ? (
+        <>
+          <SendEmailButton compact={compact} path={`/api/admin/users/${userId}/email`} body={{ reason }} label="Enviar e-mail" sent={send.sent}
+            confirm={{ title: "Enviar e-mail pelo MilhasX?", body: `Vai a mensagem pronta de “${CONTACT_LABELS[reason]}”, com o visual do MilhasX e o botão para a conta. Dá para mandar de novo só depois de 24 h.` }} />
+          <a className={compact ? "btn-ghost h-8 w-8 px-0 text-xs" : cls} href={mail} onClick={() => log("email")} title="Abrir no seu app de e-mail" aria-label="Abrir no seu app de e-mail"><Mail className="h-4 w-4" />{!compact && "App de e-mail"}</a>
+        </>
+      ) : <a className={cls} href={mail} onClick={() => log("email")}><Mail className="h-4 w-4" />E-mail</a>}
     </span>
   );
 }

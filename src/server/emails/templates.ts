@@ -121,6 +121,76 @@ export function trialEndingEmail(p: { appName: string; name: string; appUrl: str
   };
 }
 
+/**
+ * Recuperação do cadastro (botão do admin em Leads): para quem pediu o código e não criou a conta.
+ * Só acompanhamento do cadastro, uma mensagem avulsa: nada de lista de marketing. O link não leva o e-mail da pessoa.
+ */
+export function signupRecoveryEmail(p: { appName: string; link: string }): EmailContent {
+  return {
+    subject: `Falta pouco para concluir o seu cadastro no ${p.appName}`,
+    preheader: "Você começou a criar a sua conta e parou na confirmação do e-mail. Leva menos de um minuto para terminar.",
+    heading: "Seu cadastro ficou pela metade",
+    paragraphs: [
+      `Olá! Você começou a criar uma conta no ${p.appName} com este e-mail, mas o cadastro parou na confirmação do código.`,
+      "O código que enviamos já venceu, mas terminar é rápido: abra o cadastro, preencha os dados e peça um código novo.",
+    ],
+    button: { label: "Concluir meu cadastro", url: p.link },
+    note: "Ficou alguma dúvida ou teve algum problema com o código? É só responder este e-mail. Se não foi você que começou este cadastro, pode ignorar esta mensagem: nenhuma conta foi criada.",
+    reason: `alguém começou um cadastro no ${p.appName} com este endereço e não concluiu`,
+  };
+}
+
+/** Contato da administração com quem já tem conta (Recuperação, Leads e ficha do usuário), no lugar do mailto. */
+export function accountFollowUpEmail(p: {
+  appName: string; appUrl: string; name: string; reason: "request" | "checkout" | "trial" | "risk"; plan?: string | null; days?: number | null;
+}): EmailContent {
+  const oi = hello(p.name);
+  const billing = { label: "Ver planos", url: `${p.appUrl}/app/settings?tab=billing` };
+  const base = { note: `Esta mensagem foi enviada pela equipe do ${p.appName}. Para falar com a gente, é só responder este e-mail.`, reason: `você tem uma conta no ${p.appName}` };
+  switch (p.reason) {
+    case "request":
+      return {
+        ...base,
+        subject: `Seu pedido de plano no ${p.appName}`,
+        preheader: "A ativação do plano que você pediu ainda não foi concluída. Podemos ajudar?",
+        heading: "Vamos concluir a ativação do seu plano?",
+        paragraphs: [`${oi} Vimos que você pediu o plano${p.plan ? ` **${p.plan}**` : ""} e a ativação ainda não foi concluída.`, "Se ficou alguma dúvida sobre os planos ou o pagamento, responda este e-mail que a gente ajuda."],
+        button: billing,
+      };
+    case "checkout":
+      return {
+        ...base,
+        subject: `Sua assinatura do ${p.appName} não foi concluída`,
+        preheader: "O pagamento da assinatura não foi concluído. Podemos ajudar?",
+        heading: "O pagamento não foi concluído",
+        paragraphs: [`${oi} Você começou a assinatura${p.plan ? ` do plano **${p.plan}**` : ""} e o pagamento não foi concluído.`, "Se aconteceu algum problema no pagamento ou ficou alguma dúvida, responda este e-mail que a gente ajuda."],
+        button: { label: "Concluir a assinatura", url: billing.url },
+      };
+    case "trial": {
+      const d = p.days ?? null;
+      const over = d !== null && d < 0;
+      const when = d === null ? "está acabando" : over ? "acabou" : d === 0 ? "acaba hoje" : d === 1 ? "acaba amanhã" : `acaba em ${d} dias`;
+      return {
+        ...base,
+        subject: `Seu teste grátis do ${p.appName} ${when}`,
+        preheader: "Quer ajuda para escolher o plano ou tirar alguma dúvida?",
+        heading: `Seu teste grátis ${when}`,
+        paragraphs: [`${oi} O seu teste grátis do plano **Gestor** ${when}.`, "Quer ajuda para escolher o plano ou tirar alguma dúvida? É só responder este e-mail."],
+        button: billing,
+      };
+    }
+    case "risk":
+      return {
+        ...base,
+        subject: `Está tudo certo com a sua conta no ${p.appName}?`,
+        preheader: "Faz alguns dias que você não aparece por aqui. Precisa de ajuda?",
+        heading: "Sentimos a sua falta",
+        paragraphs: [`${oi} Faz alguns dias que você não usa o ${p.appName}. Está tudo certo com a sua conta?`, "Se precisar de ajuda para organizar seus pontos e milhas, é só responder este e-mail."],
+        button: { label: "Acessar minha conta", url: `${p.appUrl}/app` },
+      };
+  }
+}
+
 /** Mensagem avulsa no modelo padrão (ex.: teste de envio). */
 export function plainEmail(p: { subject: string; text: string; reason: string }): EmailContent {
   const paragraphs = p.text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
