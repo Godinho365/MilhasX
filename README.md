@@ -40,7 +40,10 @@ Se o e-mail já existir, a conta é promovida a administrador. O painel fica em 
 npm test
 ```
 
-Testes de ponta a ponta pela interface (Playwright), que fazem um build de produção próprio na porta 3200:
+Testes de ponta a ponta pela interface (Playwright), que fazem um build de produção próprio na porta 3200. Eles usam um
+banco próprio (`E2E_DATABASE_URL`, ou o `TEST_DATABASE_URL` com `_e2e` no lugar de `_test`), criado, migrado e semeado
+sozinho, e se recusam a rodar num banco sem "e2e" no nome: nunca gravam no banco do `.env` (no servidor, o de produção).
+
 
 ```
 npx playwright install chromium   # só na primeira vez
