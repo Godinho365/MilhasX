@@ -90,7 +90,7 @@ export function saleFinancials(s: { origin: string; items: ItemForMath[] }) {
   const priced = s.items.reduce((t, i) => t + i.salePriceCents, 0);
   // Valor cobrado só pelos pontos (sem taxa de embarque e outros custos repassados): base do preço por milheiro
   const pointsValueCents = s.items.filter((i) => i.issuedWith === "POINTS").reduce((t, i) => t + i.salePriceCents, 0);
-  // ROE: resultado sobre o que foi investido na emissão (custo dos pontos ou valor pago); custos repassados ficam de fora
+  // ROI: resultado sobre o que foi investido na emissão (custo dos pontos ou valor pago); custos repassados ficam de fora
   const investedCents = parts.reduce((t, p, k) => t + p.pointsCostCents + s.items[k].cashCostCents, 0);
   const milesCostCents = parts.reduce((t, p) => t + p.pointsCostCents, 0); // só o custo dos pontos usados
   return { totalCents, costCents, resultCents, pricedCents: priced, pointsValueCents, investedCents, milesCostCents, marginPct: priced > 0 ? Math.round((resultCents / priced) * 1000) / 10 : null, roePct: pct(resultCents, investedCents) };
