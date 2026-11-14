@@ -10,6 +10,7 @@ import { Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { useRealtimeEvents } from "@/lib/realtime";
 import QRCode from "qrcode";
+import { ClosedSection, useHidden } from "./closed";
 
 type Person = { perfil: string | null; verificado: boolean; negociacoes: number; nota: number | null; avaliacoes: number; nome: string | null; usuario: string | null; telegram_id?: number | null; reputacao_url?: string | null };
 export type Deal = {
@@ -47,6 +48,7 @@ export function DealsPanel({ canEdit, realtime, focus }: { canEdit: boolean; rea
   const [openId, setOpenId] = useState<number | null>(focus ?? null);
   const [unread, setUnread] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const { hidden, setHidden } = useHidden("negociacoes");
   const openRef = useRef(openId);
   openRef.current = openId;
   const [incoming, setIncoming] = useState<{ deal?: Deal; messages: Msg[]; n: number }>({ messages: [], n: 0 });
@@ -102,18 +104,19 @@ export function DealsPanel({ canEdit, realtime, focus }: { canEdit: boolean; rea
     <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
       <nav className="space-y-2" aria-label="Negociações">
         {active.map((d) => <DealRow key={d.id} d={d} active={d.id === openId} unread={unread[d.id] ?? 0} onClick={() => { setOpenId(d.id); setUnread((u) => ({ ...u, [d.id]: 0 })); }} />)}
-        {closed.length > 0 && (
-          <details className="pt-1" open={!active.length}>
-            <summary className="cursor-pointer text-xs text-muted">Encerradas ({closed.length})</summary>
-            <div className="mt-2 space-y-2">{closed.map((d) => <DealRow key={d.id} d={d} active={d.id === openId} unread={0} onClick={() => setOpenId(d.id)} />)}</div>
-          </details>
-        )}
+        {!active.length && <p className="text-sm text-muted">Nenhuma negociação em andamento.</p>}
+        <ClosedSection kind="negociacoes" items={closed} idOf={dealKey} numberOf={dealKey} done={dealDone} labels={{ ok: "Concluídas", nao: "Canceladas" }}
+          hidden={hidden} setHidden={setHidden} canEdit={canEdit} openId={openId}
+          render={(list, action) => list.map((d) => <ClosedDealRow key={d.id} d={d} active={d.id === openId} action={action(d)} onClick={() => setOpenId(d.id)} />)} />
       </nav>
       {open ? <DealDetail key={open.id} id={open.id} summary={open} canEdit={canEdit} incoming={incoming} onChanged={(d) => setDeals((l) => l?.map((x) => (x.id === d.id ? d : x)) ?? l)} />
         : <p className="text-sm text-muted">Escolha uma negociação.</p>}
     </div>
   );
 }
+
+const dealKey = (d: Deal) => d.id;
+const dealDone = (d: Deal) => d.status === "completed";
 
 function DealRow({ d, active, unread, onClick }: { d: Deal; active: boolean; unread: number; onClick: () => void }) {
   const [label, tone] = STATUS[d.status] ?? [d.status, ""];
@@ -126,6 +129,21 @@ function DealRow({ d, active, unread, onClick }: { d: Deal; active: boolean; unr
       <span className="block text-xs text-muted">{fmtPts(d.milhas)} milhas · {fmtBRL(d.milheiro_centavos)} · você {d.papel === "comprador" ? "compra" : "vende"}</span>
       <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs ${tone}`}>{d.status === "matched" && d.emitida_em ? "Emitida" : label}</span>
     </button>
+  );
+}
+
+// Encerrada: cartão compacto (uma linha), com o botão de limpar ao lado
+function ClosedDealRow({ d, active, action, onClick }: { d: Deal; active: boolean; action: React.ReactNode; onClick: () => void }) {
+  const [label, tone] = STATUS[d.status] ?? [d.status, ""];
+  return (
+    <div className={`card flex items-center gap-1 pr-1 text-xs ${active ? "ring-1 ring-accent" : ""}`}>
+      <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left">
+        <b className="shrink-0">#{d.id}</b>
+        <span className="min-w-0 truncate text-muted">{d.programa_nome} · {fmtPts(d.milhas)} · {d.papel === "comprador" ? "compra" : "venda"}</span>
+        <span className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 ${tone}`}>{label}</span>
+      </button>
+      {action}
+    </div>
   );
 }
 
