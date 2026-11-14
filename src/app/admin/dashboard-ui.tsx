@@ -26,13 +26,13 @@ export function Kpi({ label, value, hint, delta, inverse, icon, href, tone }: { 
         {icon && <span className={hl ? "text-[#C7D2E3]" : "text-zinc-500"}>{icon}</span>}
       </div>
       <div className="mb-0.5 mt-2 flex flex-wrap items-baseline gap-2">
-        <p className={`text-2xl font-bold tabular-nums tracking-tight ${hl ? "text-[rgb(var(--gold))]" : ""}`}>{value}</p>
+        <p className={`min-w-0 text-2xl font-bold tabular-nums tracking-tight max-sm:text-xl ${hl ? "text-[rgb(var(--gold))]" : ""}`}>{value}</p>
         {delta && <DeltaBadge d={delta} inverse={inverse} />}
       </div>
       {hint && <p className={`text-xs ${hl ? "text-[#C7D2E3]" : "text-muted"}`}>{hint}</p>}
     </>
   );
-  const cls = `block rounded-card border px-[18px] py-4 shadow-[0_1px_2px_rgb(15_27_45/0.04)] ${hl ? "border-0 bg-gradient-to-br from-[#102A50] to-[#1B3B6F]" : tone === "warn" ? "border-[#E6A51C88] bg-[#FFFBEF]" : "border-line bg-panel"}`;
+  const cls = `block min-w-0 rounded-card border px-[18px] py-4 max-sm:px-3.5 shadow-[0_1px_2px_rgb(15_27_45/0.04)] ${hl ? "border-0 bg-gradient-to-br from-[#102A50] to-[#1B3B6F]" : tone === "warn" ? "border-[#E6A51C88] bg-[#FFFBEF]" : "border-line bg-panel"}`;
   return href ? <Link href={href} className={`${cls} transition hover:-translate-y-px hover:shadow-[0_6px_18px_rgb(15_27_45/0.07)]`}>{body}</Link> : <div className={cls}>{body}</div>;
 }
 
