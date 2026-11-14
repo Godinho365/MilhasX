@@ -12,6 +12,10 @@ import * as offers from "@/app/api/balcao/offers/route";
 import * as proposal from "@/app/api/balcao/offers/[id]/proposal/route";
 import * as proposals from "@/app/api/balcao/proposals/route";
 import * as sync from "@/app/api/balcao/sync/route";
+import * as buyRules from "@/app/api/balcao/buy/route";
+import * as myOffers from "@/app/api/balcao/my-offers/route";
+import * as myOffer from "@/app/api/balcao/my-offers/[id]/route";
+import * as choose from "@/app/api/balcao/my-offers/[id]/choose/route";
 import * as members from "@/app/api/team/members/route";
 import * as inviteRoute from "@/app/api/team/members/[id]/invite/route";
 import * as acceptRoute from "@/app/api/auth/invite/[token]/route";
@@ -23,6 +27,7 @@ process.env.CREDENTIALS_KEY ||= randomBytes(32).toString("base64");
 const SECRET = "segredo-de-servico";
 const BASE = "http://balcao-bot:8080";
 
+const SELLER_REP = { perfil: "milheiro", verificado: true, negociacoes: 12, intermediacoes: 3, nota: 4.9, avaliacoes: 10, membro_desde: null };
 type Member = { nome: string; usuario: string; perfil: string; pode_ver_ofertas: boolean; pode_vender: boolean; plano_vence_em: null };
 
 /** Balcão falso, com as mesmas regras e respostas da API de parceiro de lá (bot/partner_api.py). */
@@ -33,11 +38,13 @@ function fakeBalcao() {
     tokens: new Map<string, Member>(),
     member: { nome: "Rafa Milheiro", usuario: "rafa", perfil: "milheiro", pode_ver_ofertas: true, pode_vender: true, plano_vence_em: null } as Member,
     offers: new Map<number, BalcaoOffer & { v: number }>(),
-    props: new Map<number, BalcaoProposal & { v: number }>(),
+    props: new Map<number, BalcaoProposal & { v: number; received?: boolean }>(),
     calls: [] as { method: string; path: string; secret: string | null; auth: string | null; body: any }[],
     down: 0, // próximas N chamadas sem resposta (rede)
     fail500: 0, // próximas N chamadas com erro 500
     limited: false,
+    mine: new Set<number>(), // ofertas abertas por este membro (quem compra)
+    chosenCents: new Map<number, number>(),
   };
   const offer = (id: number, o: Partial<BalcaoOffer> = {}) => {
     s.offers.set(id, {
@@ -56,7 +63,7 @@ function fakeBalcao() {
     new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
   const err = (status: number, codigo: string, mensagem: string, headers?: Record<string, string>) => res(status, { erro: { codigo, mensagem } }, headers);
   // como lá: cada mudança tem a sua hora (atualizada_em)
-  const clean = ({ v, ...x }: { v: number } & Record<string, unknown>) => ({ ...x, atualizada_em: `2026-11-13T12:00:00.${String(v).padStart(3, "0")}Z` });
+  const clean = ({ v, received: _r, ...x }: { v: number; received?: boolean } & Record<string, unknown>) => ({ ...x, atualizada_em: `2026-11-13T12:00:00.${String(v).padStart(3, "0")}Z` });
 
   const fetch = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
@@ -94,7 +101,47 @@ function fakeBalcao() {
     if (method === "GET" && path === "/mudancas") {
       const since = Number(u.searchParams.get("desde") ?? -1);
       const pick = <T extends { v: number }>(xs: Iterable<T>) => (since < 0 ? [] : [...xs].filter((x) => x.v > since).map(clean));
-      return res(200, { ofertas: pick(s.offers.values()), propostas: pick(s.props.values()), cursor: String(seq), mais: false });
+      return res(200, {
+        ofertas: pick(s.offers.values()), propostas: pick([...s.props.values()].filter((p) => !p.received)),
+        propostas_recebidas: pick([...s.props.values()].filter((p) => p.received)).map((p) => ({ ...p, vendedor: SELLER_REP })),
+        cursor: String(seq), mais: false,
+      });
+    }
+    // quem compra (as regras de lá: limite de 5 abertas, Viajante sempre com intermediação)
+    const myJson = (o: BalcaoOffer & { v: number }) => ({
+      ...clean(o), sua_oferta: true,
+      propostas_pendentes: [...s.props.values()].filter((p) => p.oferta_id === o.id && p.received && p.status === "pending").length,
+      negociacao: o.status === "open" ? null : { milheiro_centavos: s.chosenCents.get(o.id) ?? o.milheiro_centavos, total_centavos: 0, taxa_centavos: o.intermediada ? 1000 : 0, voce_paga_centavos: 0, escolhida_em: null, pago_em: null, emitida_em: null, concluida_em: null },
+    });
+    if (method === "GET" && path === "/compra") {
+      return res(200, { regras: { pode_comprar: true, ofertas_abertas: s.mine.size, limite_ofertas: 5, intermediacao_obrigatoria: m.perfil === "viajante", taxa_milheiro_centavos: 25, taxa_paga_por: "comprador", repasse_dias: 3, validade_horas: 24, programas: [{ chave: "latam", nome: "Latam Pass" }] }, sugestao_centavos: u.searchParams.get("programa") ? 2100 : null });
+    }
+    if (method === "POST" && path === "/minhas-ofertas") {
+      const open = [...s.mine].filter((id) => s.offers.get(id)!.status === "open").length;
+      if (open >= 5) return err(409, "limite_ofertas", "Você já tem 5 ofertas abertas. Cancele alguma antes de abrir outra.");
+      if (body.milhas < 1000) return err(400, "milhas_invalidas", "Quantidade de milhas inválida: de 1.000 a 5.000.000.");
+      const id = 100 + s.mine.size;
+      offer(id, { programa: body.programa, milhas: body.milhas, cpfs: body.cpfs, milheiro_centavos: body.milheiro_centavos, urgente: body.urgente, intermediada: m.perfil === "viajante" || body.intermediada, observacao: body.observacao ?? null, sua_oferta: true });
+      s.mine.add(id);
+      return res(201, { oferta: myJson(s.offers.get(id)!), alertados: 2 });
+    }
+    if (method === "GET" && path === "/minhas-ofertas") {
+      const all = u.searchParams.get("status") === "todas";
+      return res(200, { ofertas: [...s.mine].map((id) => s.offers.get(id)!).filter((o) => all || o.status === "open").map(myJson) });
+    }
+    const own = path.match(/^\/minhas-ofertas\/(\d+)(\/escolher)?$/);
+    if (own) {
+      const o = s.mine.has(Number(own[1])) ? s.offers.get(Number(own[1])) : undefined;
+      if (!o) return err(404, "oferta_nao_encontrada", "Oferta não encontrada.");
+      if (method === "GET") return res(200, { oferta: myJson(o), propostas: [...s.props.values()].filter((p) => p.oferta_id === o.id && p.received && p.status === "pending").map((p) => ({ ...clean(p), vendedor: SELLER_REP })) });
+      if (o.status !== "open") return err(409, "oferta_indisponivel", "Essa oferta não está mais aberta.");
+      if (method === "DELETE") { set(o.id, "cancelled"); return res(200, { oferta: myJson(o) }); }
+      const p = s.props.get(body?.proposta_id);
+      if (!p || p.oferta_id !== o.id) return err(404, "proposta_nao_encontrada", "Proposta não encontrada.");
+      Object.assign(p, { status: "chosen", v: ++seq });
+      s.chosenCents.set(o.id, p.valor_centavos);
+      set(o.id, o.intermediada ? "awaiting_payment" : "matched");
+      return res(200, { oferta: myJson(o) });
     }
     const one = path.match(/^\/ofertas\/(\d+)(\/proposta)?$/);
     const o = one ? s.offers.get(Number(one[1])) : undefined;
@@ -114,7 +161,13 @@ function fakeBalcao() {
     }
     return err(405, "metodo", "Método não permitido");
   };
-  return { s, fetch, offer, set, setProp };
+  /** Um milheiro de lá manda proposta numa oferta deste membro. */
+  const receive = (offerId: number, cents: number) => {
+    const id = s.props.size + 1;
+    s.props.set(id, { id, oferta_id: offerId, valor_centavos: cents, total_centavos: null, contraproposta: true, status: "pending", via: null, criada_em: "", atualizada_em: null, received: true, v: ++seq });
+    return id;
+  };
+  return { s, fetch, offer, set, setProp, receive };
 }
 
 let c: Client;
@@ -376,5 +429,68 @@ describe("Balcão MilhasX em tempo real", () => {
     b.s.tokens.clear();
     await w.tick(Date.now() + 60_000);
     expect(await prisma.balcaoLink.count({ where: { userId } })).toBe(0);
+  });
+});
+
+describe("Balcão MilhasX: quem compra", () => {
+  const NEW = { programa: "latam", milhas: 85_000, cpfs: 2, milheiro_centavos: 1850, urgente: false, intermediada: false, observacao: "GRU-LIS" };
+
+  it("abre oferta, vê a proposta recebida ao vivo, escolhe o vendedor e cancela; tudo auditado", async () => {
+    await enable();
+    await link();
+    const rules = await c.call(buyRules.GET, "GET", "/api/balcao/buy?programa=latam");
+    expect(rules.status).toBe(200);
+    expect(rules.data.item).toMatchObject({ regras: { limite_ofertas: 5, intermediacao_obrigatoria: false }, sugestao_centavos: 2100 });
+
+    // validação daqui (antes de ir ao Balcão) e a de lá (repassada)
+    expect((await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", { ...NEW, programa: "xpto" })).status).toBe(400);
+    expect((await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", { ...NEW, milhas: 500 })).status).toBe(400);
+
+    const created = await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW);
+    expect(created.status).toBe(201);
+    const oid = created.data.item.offer.id as number;
+    expect(created.data.item).toMatchObject({ alerted: 2, offer: { status: "open", milhas: 85_000, sua_oferta: true } });
+    expect(b.s.calls.find((x) => x.method === "POST" && x.path === "/api/parceiro/v1/minhas-ofertas")!.body).toMatchObject({ programa: "latam", milheiro_centavos: 1850 });
+
+    // vigia: a proposta recebida sai no evento, com a reputação de quem vende
+    const sent: BalcaoEvent[] = [];
+    const w = new BalcaoWatcher(async (_u, ev) => { sent.push(ev); });
+    await w.tick();
+    const pid = b.receive(oid, 1900);
+    await w.tick();
+    expect(sent.at(-1)!.received.map((p) => p.id)).toEqual([pid]);
+    expect(sent.at(-1)!.received[0]!.vendedor).toMatchObject({ nota: 4.9 });
+
+    const view = await c.call(myOffer.GET, "GET", "/x", undefined, { id: String(oid) });
+    expect(view.data.item.offer.propostas_pendentes).toBe(1);
+    expect(view.data.item.proposals[0]).toMatchObject({ id: pid, valor_centavos: 1900, vendedor: { perfil: "milheiro" } });
+    const list = await c.call(myOffers.GET, "GET", "/api/balcao/my-offers");
+    expect(list.data.items.map((o: { id: number }) => o.id)).toEqual([oid]);
+
+    const chosen = await c.call(choose.POST, "POST", "/x", { proposalId: pid }, { id: String(oid) });
+    expect(chosen.status).toBe(200);
+    expect(chosen.data.item).toMatchObject({ status: "matched", negociacao: { milheiro_centavos: 1900 } });
+    const again = await c.call(choose.POST, "POST", "/x", { proposalId: pid }, { id: String(oid) });
+    expect(again.status).toBe(409);
+
+    const second = (await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW)).data.item.offer.id as number;
+    const cancelled = await c.call(myOffer.DELETE, "DELETE", "/x", undefined, { id: String(second) });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.data.item.status).toBe("cancelled");
+    expect((await c.call(myOffer.DELETE, "DELETE", "/x", undefined, { id: String(second) })).status).toBe(409);
+    expect((await c.call(myOffer.GET, "GET", "/x", undefined, { id: "999" })).status).toBe(404);
+
+    const actions = (await prisma.auditLog.findMany({ where: { action: { startsWith: "balcao.offer_" } }, orderBy: { createdAt: "asc" } })).map((a) => a.action);
+    expect(actions).toEqual(["balcao.offer_create", "balcao.offer_choose", "balcao.offer_create", "balcao.offer_cancel"]);
+  });
+
+  it("o limite de 5 ofertas abertas é o do Balcão; sem vínculo, nada vai para lá", async () => {
+    await enable();
+    expect((await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW)).status).toBe(409); // sem vínculo
+    await link();
+    for (let i = 0; i < 5; i++) expect((await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW)).status).toBe(201);
+    const r = await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW);
+    expect(r.status).toBe(409);
+    expect(r.data.erro).toContain("5 ofertas abertas");
   });
 });
