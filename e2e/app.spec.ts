@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { useE2eDatabase } from "./db";
 
 // Um usuário novo por execução: o fluxo inteiro roda pela interface, do cadastro à exclusão.
 const stamp = Date.now();
@@ -1117,7 +1118,7 @@ test("responsivo: tablet e desktop", async () => {
 
 test("painel administrativo completo", async ({ browser }) => {
   // Promove o usuário de teste com o mesmo código do script do operador (npm run admin:create)
-  if (!process.env.DATABASE_URL) process.loadEnvFile(".env");
+  useE2eDatabase(); // banco do E2E, nunca o do .env
   const { createAdmin } = await import("../scripts/create-admin-lib");
   const { prisma } = await import("../src/server/db");
   await createAdmin({ email: user.email, name: user.name });
