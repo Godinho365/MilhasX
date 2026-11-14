@@ -8,7 +8,7 @@ import { Eye, EyeOff, Search, Trash2, Undo2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast, confirmDialog } from "@/components/feedback";
 
-export type HiddenKind = "negociacoes" | "propostas";
+export type HiddenKind = "negociacoes" | "propostas" | "compras";
 type Hidden = Record<HiddenKind, number[]>;
 
 const FIRST = 5; // quantas aparecem ao abrir
@@ -46,7 +46,7 @@ export function ClosedSection<T>({ kind, items, idOf, numberOf, done, labels, re
   canEdit: boolean;
   openId?: number | null; // a que está aberta: se for uma encerrada, o bloco já abre
 }) {
-  const noun = kind === "negociacoes" ? "negociações" : "propostas";
+  const noun = kind === "negociacoes" ? "negociações" : kind === "propostas" ? "propostas" : "ofertas";
   const [open, setOpen] = useState(() => openId != null && items.some((t) => idOf(t) === openId));
   const [filter, setFilter] = useState<Filter>("todas");
   const [shown, setShown] = useState(FIRST);

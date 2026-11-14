@@ -376,24 +376,27 @@ export async function balcaoReportDeal(userId: string, actorId: string, dealId: 
   });
 }
 
-/** Encerradas que a conta limpou da lista (Negociações e Minhas propostas). Só somem do MilhasX; no Balcão continuam. */
-export type BalcaoHidden = { negociacoes: number[]; propostas: number[] };
+/** Encerradas que a conta limpou da lista (Negociações, Minhas propostas e Minhas compras). Só somem do MilhasX; no
+ *  Balcão continuam. */
+export type BalcaoHidden = { negociacoes: number[]; propostas: number[]; compras: number[] };
+const HIDDEN_FIELD = { negociacoes: "hiddenDeals", propostas: "hiddenProposals", compras: "hiddenOffers" } as const;
+const hiddenSelect = { hiddenDeals: true, hiddenProposals: true, hiddenOffers: true } as const;
+const hiddenView = (r: { hiddenDeals: number[]; hiddenProposals: number[]; hiddenOffers: number[] } | null): BalcaoHidden =>
+  ({ negociacoes: r?.hiddenDeals ?? [], propostas: r?.hiddenProposals ?? [], compras: r?.hiddenOffers ?? [] });
 const HIDDEN_MAX = 2000; // guarda as mais recentes (ids maiores), para a lista não crescer sem fim
 
 export async function balcaoHidden(userId: string): Promise<BalcaoHidden> {
-  const row = await prisma.balcaoLink.findUnique({ where: { userId }, select: { hiddenDeals: true, hiddenProposals: true } });
-  return { negociacoes: row?.hiddenDeals ?? [], propostas: row?.hiddenProposals ?? [] };
+  return hiddenView(await prisma.balcaoLink.findUnique({ where: { userId }, select: hiddenSelect }));
 }
 
 export async function balcaoSetHidden(userId: string, kind: keyof BalcaoHidden, ids: number[], hide: boolean): Promise<BalcaoHidden> {
-  const field = kind === "negociacoes" ? "hiddenDeals" : "hiddenProposals";
+  const field = HIDDEN_FIELD[kind];
   return prisma.$transaction(async (tx) => {
-    const row = await tx.balcaoLink.findUnique({ where: { userId }, select: { hiddenDeals: true, hiddenProposals: true } });
+    const row = await tx.balcaoLink.findUnique({ where: { userId }, select: hiddenSelect });
     if (!row) throw new DomainError(409, "Vincule sua conta do Balcão primeiro");
     const set = new Set(row[field]);
     for (const id of ids) if (hide) set.add(id); else set.delete(id);
     const next = [...set].sort((a, b) => b - a).slice(0, HIDDEN_MAX);
-    const saved = await tx.balcaoLink.update({ where: { userId }, data: { [field]: next }, select: { hiddenDeals: true, hiddenProposals: true } });
-    return { negociacoes: saved.hiddenDeals, propostas: saved.hiddenProposals };
+    return hiddenView(await tx.balcaoLink.update({ where: { userId }, data: { [field]: next }, select: hiddenSelect }));
   });
 }
