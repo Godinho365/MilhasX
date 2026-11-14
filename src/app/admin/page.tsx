@@ -21,11 +21,11 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
   const period = parsePeriod((await searchParams).p);
   const [d, pl] = await Promise.all([adminDashboard(period), pendingLists()]);
   const { revenue: rv, growth: g, health: h, window: w } = d;
-  const vs = `vs. ${w.label} anteriores`;
+  const vs = "vs. período anterior";
 
   return (
     <>
-      <PageHeader title="Visão geral" subtitle={`Indicadores do MilhasX com dados reais · últimos ${w.label} (${fmtDay(w.from)} a ${fmtDay(w.to)}), comparados aos ${w.label} anteriores`}>
+      <PageHeader title="Visão geral" subtitle={`Indicadores do MilhasX com dados reais · ${w.label} (${fmtDay(w.from)} a ${fmtDay(w.to)}), comparados ao período anterior`}>
         <Link className="btn-ghost h-9 bg-panel" href="/admin/reports"><Download className="h-4 w-4" />Relatórios</Link>
       </PageHeader>
 
@@ -51,7 +51,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
               </table>
             )}
           </Panel>
-          <Panel title="Funil do teste ao plano pago" subtitle={`Quem se cadastrou nos últimos ${w.label}`}>
+          <Panel title="Funil do teste ao plano pago" subtitle={`Quem se cadastrou ${w.phrase}`}>
             <ol className="space-y-3">
               {d.funnel.map((s, i) => (
                 <li key={s.key}>
@@ -104,7 +104,7 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
       </Section>
 
       {/* ---------- Uso por recurso ---------- */}
-      <Section title="Uso por recurso" subtitle={`Registros criados nos últimos ${w.label} · ${d.programs} programas ativos`}>
+      <Section title="Uso por recurso" subtitle={`Registros criados ${w.phrase} · ${d.programs} programas ativos`}>
         <div className="grid gap-3 lg:grid-cols-2">
           <Panel title="No período">
             <HBar unit="" data={d.usage.map((u) => ({ name: u.label, value: u.cur }))} />

@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, BadgeCheck, BarChart3, Bell, BookOpen, Calculator, Calendar, ChevronRight, Hourglass, LayoutDashboard,
+  AlertTriangle, ArrowLeft, BadgeCheck, BarChart3, Bell, BookOpen, Calculator, ChevronRight, Hourglass, LayoutDashboard,
   LogOut, Menu, Newspaper, Plane, RotateCcw, ScrollText, Settings, Shield, Target, Ticket, TicketPercent, TrendingUp, UserX, Users, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { DateRangePicker, type DayRange } from "@/components/date-range";
+import { parsePeriod, periodDays } from "@/domain/admin-metrics";
 import { BrandMark } from "@/components/brand";
 
 type Item = { label: string; href: string; icon: React.ComponentType<{ className?: string }> };
@@ -40,7 +42,6 @@ export const ADMIN_NAV: { group: string; items: Item[] }[] = [
 
 // Páginas que leem o período (?p=) mostram o seletor no topo
 const PERIOD_PAGES = ["/admin", "/admin/leads", "/admin/conversion", "/admin/reports", "/admin/subscriptions"];
-const PERIODS = [["7d", "Últimos 7 dias"], ["30d", "Últimos 30 dias"], ["90d", "Últimos 90 dias"], ["12m", "Últimos 12 meses"]] as const;
 const PEND_ICONS: Record<string, Item["icon"]> = { "badge-check": BadgeCheck, "alert-triangle": AlertTriangle, "user-x": UserX, hourglass: Hourglass, "rotate-ccw": RotateCcw, shield: Shield };
 
 const activeHref = (path: string) => {
@@ -73,9 +74,12 @@ export function AdminShell({ admin, pending, children }: {
   }, []);
   useEffect(() => { setOpen(false); setBell(false); }, [path]);
 
-  function setPeriod(p: string) {
+  // Período do calendário vai para a URL (?p=AAAA-MM-DD_AAAA-MM-DD ou "all") e volta para a 1ª página das listas
+  function setPeriod(r: DayRange) {
     const q = new URLSearchParams(sp.toString());
-    q.set("p", p);
+    q.set("p", r ? `${r.from}_${r.to}` : "all");
+    q.delete("page");
+    q.delete("mpage");
     router.push(`${path}?${q}`);
   }
   async function logout() {
@@ -138,12 +142,7 @@ export function AdminShell({ admin, pending, children }: {
           </nav>
           <div className="ml-auto flex items-center gap-2.5">
             {PERIOD_PAGES.includes(path) && (
-              <label className="flex h-10 items-center gap-1.5 rounded-[10px] border border-line bg-panel pl-2.5 pr-1 text-muted">
-                <Calendar className="h-4 w-4" />
-                <select className="max-w-[140px] cursor-pointer bg-transparent py-2 pr-1 text-[13px] font-semibold text-zinc-50 outline-none" value={sp.get("p") ?? "30d"} onChange={(e) => setPeriod(e.target.value)} aria-label="Período de análise">
-                  {PERIODS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </select>
-              </label>
+              <DateRangePicker align="right" value={periodDays(parsePeriod(sp.get("p")))} onChange={setPeriod} />
             )}
             <div className="relative">
               <button onClick={() => setBell((b) => !b)} aria-expanded={bell} aria-label={`Pendências: ${pending.total}`} className="relative grid h-10 w-10 place-items-center rounded-[10px] border border-line bg-panel text-zinc-200">

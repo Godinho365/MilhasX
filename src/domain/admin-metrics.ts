@@ -11,19 +11,74 @@ export const PERIODS = [
   { key: "90d", label: "90 dias", days: 90 },
   { key: "12m", label: "12 meses", days: 365 },
 ] as const;
-export type PeriodKey = (typeof PERIODS)[number]["key"];
+type PresetKey = (typeof PERIODS)[number]["key"];
+/** Período do admin na URL (?p=): os últimos N dias, "all" (todo o período) ou dias escolhidos no calendário ("AAAA-MM-DD_AAAA-MM-DD", horário de Brasília). */
+export type PeriodKey = PresetKey | "all" | `${string}_${string}`;
 export type Bucket = "day" | "week" | "month";
 
-export const parsePeriod = (v: string | undefined | null): PeriodKey => (PERIODS.some((p) => p.key === v) ? (v as PeriodKey) : "30d");
+const RANGE_RE = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/;
+const validDay = (d: string) => !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d);
+/** Começo do histórico do MilhasX: "todo o período" parte daqui. */
+export const ALL_FROM_DAY = "2024-01-01";
 
-export type PeriodWindow = { key: PeriodKey; label: string; days: number; from: Date; to: Date; prevFrom: Date; prevTo: Date; bucket: Bucket };
+export function parsePeriod(v: string | undefined | null): PeriodKey {
+  if (PERIODS.some((p) => p.key === v)) return v as PresetKey;
+  if (v === "all") return "all";
+  const m = v ? RANGE_RE.exec(v) : null;
+  if (m && validDay(m[1]!) && validDay(m[2]!) && m[1]! <= m[2]!) return v as PeriodKey;
+  return "30d";
+}
 
-/** Período atual (os últimos N dias até agora) e o período anterior de mesmo tamanho. */
+export type PeriodWindow = { key: PeriodKey; label: string; phrase: string; days: number; from: Date; to: Date; prevFrom: Date; prevTo: Date; bucket: Bucket };
+
+const brMidnight = (day: string) => new Date(`${day}T00:00:00-03:00`); // Brasília não tem horário de verão desde 2019
+const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
+const MONTH_NAMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+
+/** Nome do período escolhido no calendário: "novembro de 2026", "14/11/2026" ou "01/11 a 14/11/2026". */
+export function rangeText(from: string, to: string) {
+  const lastOfMonth = new Date(Date.parse(`${nextDay(to)}T00:00:00Z`)).getUTCDate() === 1;
+  if (from.slice(0, 7) === to.slice(0, 7) && from.endsWith("-01") && lastOfMonth) return `${MONTH_NAMES[Number(from.slice(5, 7)) - 1]} de ${from.slice(0, 4)}`;
+  if (from === to) return `${ddmm(from)}/${from.slice(0, 4)}`;
+  return `${ddmm(from)}${from.slice(0, 4) === to.slice(0, 4) ? "" : `/${from.slice(0, 4)}`} a ${ddmm(to)}/${to.slice(0, 4)}`;
+}
+
+const bucketOf = (days: number): Bucket => (days <= 31 ? "day" : days <= 92 ? "week" : "month");
+
+/**
+ * Janela do período e o período anterior de mesmo tamanho (para as comparações).
+ * `label` é o nome ("últimos 30 dias", "novembro de 2026", "todo o período") e `phrase` já vem com a preposição
+ * ("nos últimos 30 dias", "em novembro de 2026", "de 01/11 a 14/11/2026").
+ */
 export function periodWindow(key: PeriodKey, now = new Date()): PeriodWindow {
-  const p = PERIODS.find((x) => x.key === key)!;
-  const to = now;
-  const from = new Date(now.getTime() - p.days * DAY);
-  return { key, label: p.label, days: p.days, from, to, prevFrom: new Date(from.getTime() - p.days * DAY), prevTo: from, bucket: p.days <= 31 ? "day" : p.days <= 92 ? "week" : "month" };
+  const preset = PERIODS.find((x) => x.key === key);
+  if (preset) {
+    const from = new Date(now.getTime() - preset.days * DAY);
+    return { key, label: `últimos ${preset.label}`, phrase: `nos últimos ${preset.label}`, days: preset.days, from, to: now, prevFrom: new Date(from.getTime() - preset.days * DAY), prevTo: from, bucket: bucketOf(preset.days) };
+  }
+  const m = key === "all" ? null : RANGE_RE.exec(key);
+  const fromDay = m ? m[1]! : ALL_FROM_DAY;
+  const from = brMidnight(fromDay);
+  const end = m ? brMidnight(nextDay(m[2]!)) : now;
+  const to = end > now && now > from ? now : end; // "este mês" vai até agora
+  const days = Math.max(1, Math.round((end.getTime() - from.getTime()) / DAY));
+  const span = to.getTime() - from.getTime();
+  const label = m ? rangeText(m[1]!, m[2]!) : "todo o período";
+  return {
+    key, label, phrase: m && m[1] !== m[2] && !/ de \d{4}$/.test(label) ? `de ${label}` : `em ${label}`, days, from, to,
+    prevFrom: m ? new Date(from.getTime() - span) : from, prevTo: from,
+    bucket: bucketOf(Math.ceil(span / DAY)),
+  };
+}
+
+/** Dias (AAAA-MM-DD) do período para o seletor de calendário; null = todo o período. */
+export function periodDays(key: PeriodKey, now = new Date()): { from: string; to: string } | null {
+  if (key === "all") return null;
+  const m = RANGE_RE.exec(key);
+  if (m) return { from: m[1]!, to: m[2]! };
+  const days = PERIODS.find((x) => x.key === key)!.days;
+  return { from: brDay(new Date(now.getTime() - (days - 1) * DAY)), to: brDay(now) };
 }
 
 export const inRange = (d: Date | null | undefined, from: Date, to: Date) => !!d && d >= from && d < to;

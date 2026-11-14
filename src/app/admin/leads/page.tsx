@@ -22,7 +22,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
 
   return (
     <>
-      <PageHeader title="Leads" subtitle={`Quem chegou nos últimos ${w.label}: contas criadas e cadastros que pararam no código do e-mail.`}>
+      <PageHeader title="Leads" subtitle={`Quem chegou ${w.phrase}: contas criadas e cadastros que pararam no código do e-mail.`}>
         <a className="btn-ghost h-9 bg-panel" href={`/api/admin/export?kind=leads&p=${period}`}>Exportar CSV</a>
       </PageHeader>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -33,7 +33,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-[1.3fr_1fr]">
-        <Panel title="Funil comercial" subtitle={`Últimos ${w.label}`}>
+        <Panel title="Funil comercial" subtitle={w.label[0]!.toUpperCase() + w.label.slice(1)}>
           <div className="grid gap-3 sm:grid-cols-5">
             {d.funnel.map((s, i) => (
               <div key={s.key} className="rounded-xl border border-line p-3">

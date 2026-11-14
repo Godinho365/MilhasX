@@ -22,7 +22,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
 
   return (
     <>
-      <PageHeader title="Assinaturas" subtitle={`Mercado Pago, planos ativados pela administração e pedidos de plano · últimos ${d.window.label}`}>
+      <PageHeader title="Assinaturas" subtitle={`Mercado Pago, planos ativados pela administração e pedidos de plano · ${d.window.label}`}>
         <a className="btn-ghost h-9 bg-panel" href="/api/admin/export?kind=subscriptions">Exportar CSV</a>
       </PageHeader>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
