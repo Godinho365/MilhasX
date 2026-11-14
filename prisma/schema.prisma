@@ -337,6 +337,7 @@ model BalcaoLink {
   syncedAt       DateTime?
   hiddenDeals     Int[]     @default([]) // negociações encerradas que a conta limpou da lista (só some daqui; no Balcão continua)
   hiddenProposals Int[]     @default([]) // propostas encerradas limpas da lista
+  hiddenOffers    Int[]     @default([]) // ofertas de compra encerradas limpas da lista (Minhas compras)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }

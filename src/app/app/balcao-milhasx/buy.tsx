@@ -10,6 +10,7 @@ import { Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { useRealtimeEvents } from "@/lib/realtime";
 import { DealInline } from "./deals";
+import { ClosedSection, useHidden } from "./closed";
 
 type Person = { perfil: string | null; verificado: boolean; negociacoes: number; intermediacoes: number; nota: number | null; avaliacoes: number };
 type Deal = {
@@ -60,6 +61,7 @@ export function BuyPanel({ canEdit, realtime, canBuy }: { canEdit: boolean; real
   const [proposals, setProposals] = useState<Record<number, Received[]>>({});
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { hidden, setHidden } = useHidden("compras");
   const openRef = useRef(open);
   openRef.current = open;
 
@@ -125,7 +127,7 @@ export function BuyPanel({ canEdit, realtime, canBuy }: { canEdit: boolean; real
   }
 
   const active = useMemo(() => offers?.filter((o) => ["open", "awaiting_payment", "matched"].includes(o.status)) ?? null, [offers]);
-  const past = useMemo(() => offers?.filter((o) => !["open", "awaiting_payment", "matched"].includes(o.status)).slice(0, 10) ?? [], [offers]);
+  const past = useMemo(() => offers?.filter((o) => !["open", "awaiting_payment", "matched"].includes(o.status))?? [], [offers]);
   const full = !!rules && rules.ofertas_abertas >= rules.limite_ofertas;
 
   return (
@@ -155,24 +157,30 @@ export function BuyPanel({ canEdit, realtime, canBuy }: { canEdit: boolean; real
           </div>
         )}
 
-      {past.length > 0 && (
-        <details className="card px-4 py-3 text-sm">
-          <summary className="cursor-pointer text-muted">Ofertas encerradas ({past.length})</summary>
-          <div className="mt-2 divide-y divide-line">
-            {past.map((o) => (
+      <ClosedSection kind="compras" items={past} idOf={offerKey} numberOf={offerKey} done={offerDone} labels={{ ok: "Concluídas", nao: "Canceladas/expiradas" }}
+        hidden={hidden} setHidden={setHidden} canEdit={canEdit}
+        render={(list, action) => (
+          <div className="card divide-y divide-line px-4 text-sm">
+            {list.map((o) => (
               <div key={o.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
                 <span className="font-medium">#{o.id} · {o.programa_nome} · {fmtPts(o.milhas)} milhas</span>
                 <span>{fmtBRL(o.negociacao?.milheiro_centavos ?? o.milheiro_centavos)} o milheiro</span>
                 <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS[o.status]?.[1] ?? ""}`}>{STATUS[o.status]?.[0] ?? o.status}</span>
                 <span className="text-xs text-muted">{fmtDateTime(o.criada_em)}</span>
+                <span className="ml-auto flex items-center gap-2">
+                  {o.link_bot && <a className="text-xs underline" href={o.link_bot} target="_blank" rel="noreferrer">Abrir no bot</a>}
+                  {action(o)}
+                </span>
               </div>
             ))}
           </div>
-        </details>
-      )}
+        )} />
     </div>
   );
 }
+
+const offerKey = (o: MyOffer) => o.id;
+const offerDone = (o: MyOffer) => o.status === "completed";
 
 function MyOfferCard({ o, canEdit, realtime, expanded, proposals, onToggle, onCancel, onChoose }: {
   o: MyOffer; canEdit: boolean; realtime: boolean; expanded: boolean; proposals: Received[] | undefined;

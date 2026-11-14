@@ -473,10 +473,11 @@ describe("Balcão MilhasX", () => {
     expect((await c.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo: "negociacoes", ids: [1], ocultar: true })).status).toBe(409);
     await link();
     const calls = b.s.calls.length;
-    expect((await c.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [], propostas: [] });
+    expect((await c.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [], propostas: [], compras: [] });
     const hide = (tipo: string, ids: number[], ocultar: boolean) => c.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo, ids, ocultar });
-    expect((await hide("negociacoes", [21, 20, 20, 12], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [] });
-    expect((await hide("propostas", [7], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [7] });
+    expect((await hide("negociacoes", [21, 20, 20, 12], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [], compras: [] });
+    expect((await hide("propostas", [7], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [7], compras: [] });
+    expect((await hide("compras", [30, 31], true)).data.item.compras).toEqual([31, 30]);
     expect((await hide("negociacoes", [20], false)).data.item.negociacoes).toEqual([21, 12]);
     expect((await hide("negociacoes", [], true)).status).toBe(400);
     expect((await hide("outra", [1], true)).status).toBe(400);
@@ -486,7 +487,7 @@ describe("Balcão MilhasX", () => {
     const inv = await c.call(inviteRoute.POST, "POST", `/api/team/members/${mid}/invite`, { role: "CUSTOM", permissions: ["chat:view"] }, { id: mid });
     const bia = new Client();
     await bia.call(acceptRoute.POST, "POST", "/api/auth/invite/x", { name: "Bia Souza", password: "senha-da-bia-1" }, { token: inv.data.item.link.split("/convite/")[1] });
-    expect((await bia.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [21, 12], propostas: [7] });
+    expect((await bia.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [21, 12], propostas: [7], compras: [31, 30] });
     expect((await bia.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo: "propostas", ids: [7], ocultar: false })).status).toBe(403);
   });
 });
