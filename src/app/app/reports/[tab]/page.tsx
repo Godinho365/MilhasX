@@ -223,7 +223,7 @@ async function Sales({ f }: { f: ReportFilter }) {
         <Stat label="Lucro" value={fmtBRL(r.totals.profitCents)} hint="no período" accent />
         <Stat label="Margem" value={`${r.totals.marginPct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`} hint="média no período" />
         <Stat label="Pontos vendidos" value={fmtPts(r.totals.points)} hint={`${r.totals.count} ${r.totals.count === 1 ? "venda" : "vendas"}`} />
-        <Stat label="ROE" value={r.totals.roePct == null ? "-" : `${r.totals.roePct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} hint="resultado ÷ custo investido" />
+        <Stat label="ROI" value={r.totals.roePct == null ? "-" : `${r.totals.roePct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} hint="resultado ÷ custo investido" />
         <Stat label="Lucro por CPF" value={r.totals.profitPerCpfCents == null ? "-" : fmtBRL(r.totals.profitPerCpfCents)} hint="média por CPF emitido" accent />
         <Stat label="CPFs emitidos" value={fmtPts(r.totals.cpfs)} hint="passageiros emitidos com pontos" />
         <Stat label="CPFs livres" value={r.totals.cpfsFree == null ? "-" : fmtPts(r.totals.cpfsFree)} hint={r.totals.cpfsFree == null ? "nenhuma conta com limite de CPFs" : `hoje, em ${r.totals.cpfAccounts} ${r.totals.cpfAccounts === 1 ? "conta" : "contas"}`} />
@@ -265,7 +265,7 @@ async function Potential({ f }: { f: ReportFilter }) {
           <div className="overflow-x-auto">
             <table className="table-base">
               <thead>
-                <tr><th>Programa</th><th className="text-right">Saldo</th><th className="text-right">Custo atual</th><th className="text-right">Venda média</th><th className="text-right">Lucro/milheiro</th><th className="text-right">Milhas/CPF</th><th className="text-right">CPFs livres</th><th className="text-right">Emissões</th><th className="text-right">Lucro/CPF</th><th>Gargalo</th><th className="text-right">ROE</th><th className="text-right">Margem</th><th className="text-right">Potencial</th></tr>
+                <tr><th>Programa</th><th className="text-right">Saldo</th><th className="text-right">Custo atual</th><th className="text-right">Venda média</th><th className="text-right">Lucro/milheiro</th><th className="text-right">Milhas/CPF</th><th className="text-right">CPFs livres</th><th className="text-right">Emissões</th><th className="text-right">Lucro/CPF</th><th>Gargalo</th><th className="text-right">ROI</th><th className="text-right">Margem</th><th className="text-right">Potencial</th></tr>
               </thead>
               <tbody>
                 {p.rows.map((r) => (

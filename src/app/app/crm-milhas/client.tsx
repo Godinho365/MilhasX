@@ -467,12 +467,12 @@ function Emission({ deal: initial }: { deal: DealView }) {
 
 /* ---------------- Milheiro sugerido ---------------- */
 
-/** Preço do milheiro: o mínimo sem prejuízo (custo da conta), a sua média de venda e metas de ROE; clicar preenche. */
+/** Preço do milheiro: o mínimo sem prejuízo (custo da conta), a sua média de venda e metas de ROI; clicar preenche. */
 function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCents, onPick }: { costCpmCents: number; avgSaleCpmCents: number | null; points: number; cpfs: number; currentCpmCents: number | null; onPick: (cpmCents: number) => void }) {
   const options = priceOptions({ costCpmCents, avgSaleCpmCents, points, cpfs });
   const roe = currentCpmCents ? roeOf(currentCpmCents, costCpmCents) : null;
   const profit = currentCpmCents ? Math.round(((currentCpmCents - costCpmCents) * points) / 1000) : 0;
-  // margem = lucro ÷ valor da venda (o ROE divide pelo custo)
+  // margem = lucro ÷ valor da venda (o ROI divide pelo custo)
   const margin = currentCpmCents ? ((currentCpmCents - costCpmCents) / currentCpmCents) * 100 : null;
   const milesPerCpf = cpfs > 0 && points > 0 ? Math.round(points / cpfs) : null;
   const pct = (v: number | null) => (v == null ? "-" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`);
@@ -482,13 +482,13 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
         <h3 className="mr-auto text-sm font-semibold">Milheiro sugerido</h3>
         {roe != null && (
           <span className={`text-xs ${roe < 0 ? "text-red-300" : "text-muted"}`}>
-            O seu: ROE <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · margem <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(margin)}</b> · lucro {fmtBRL(profit)}{cpfs > 1 && <> · <b className={profit < 0 ? "text-red-300" : "text-zinc-100"}>{fmtBRL(Math.round(profit / cpfs))}</b>/CPF</>}
+            O seu: ROI <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(roe)}</b> · margem <b className={roe < 0 ? "text-red-300" : "text-zinc-100"}>{pct(margin)}</b> · lucro {fmtBRL(profit)}{cpfs > 1 && <> · <b className={profit < 0 ? "text-red-300" : "text-zinc-100"}>{fmtBRL(Math.round(profit / cpfs))}</b>/CPF</>}
           </span>
         )}
       </div>
       <p className="text-xs text-muted">
         Custo da conta {fmtBRL(costCpmCents)} o milheiro.
-        {milesPerCpf != null && <> Venda de <b className="text-zinc-100">{milesPerCpf.toLocaleString("pt-BR")}</b> milhas por CPF ({cpfs} {cpfs === 1 ? "CPF" : "CPFs"}).</>} ROE = lucro ÷ custo dos pontos; margem = lucro ÷ valor da venda. Clique para usar o preço.
+        {milesPerCpf != null && <> Venda de <b className="text-zinc-100">{milesPerCpf.toLocaleString("pt-BR")}</b> milhas por CPF ({cpfs} {cpfs === 1 ? "CPF" : "CPFs"}).</>} ROI = lucro ÷ custo dos pontos; margem = lucro ÷ valor da venda. Clique para usar o preço.
       </p>
       <div className="grid gap-2 sm:grid-cols-5">
         {options.map((o) => (
@@ -501,7 +501,7 @@ function PriceHelper({ costCpmCents, avgSaleCpmCents, points, cpfs, currentCpmCe
           >
             <span className="block text-muted">{o.label}</span>
             <span className="block text-sm font-semibold tabular-nums">{fmtBRL(o.cpmCents)}</span>
-            {!o.key.startsWith("roe") && <span className="block tabular-nums text-muted">ROE {pct(o.roePct)}</span>}
+            {!o.key.startsWith("roe") && <span className="block tabular-nums text-muted">ROI {pct(o.roePct)}</span>}
             <span className={`block tabular-nums ${o.profitCents > 0 ? "text-green-300" : "text-muted"}`}>{fmtBRL(o.profitCents)}{o.profitPerCpfCents != null && cpfs > 1 ? ` · ${fmtBRL(o.profitPerCpfCents)}/CPF` : ""}</span>
           </button>
         ))}

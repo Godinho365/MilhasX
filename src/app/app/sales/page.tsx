@@ -63,7 +63,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
               <Stat icon={<DollarSign className="h-4 w-4" />} label="Custo total" value={fmtBRL(cost)} hint="milhas, emissões pagas e taxas repassadas" />
               <Stat icon={<Receipt className="h-4 w-4" />} label="Custo das milhas" value={fmtBRL(milesCost)} hint={pts > 0 && milesCost > 0 ? `milheiro médio ${fmtBRL(Math.round((milesCost * 1000) / pts))}` : "custo dos pontos usados"} />
               <Stat icon={<Plane className="h-4 w-4" />} label="Total de milhas" value={fmtPts(pts)} hint={soldCpfs > 0 ? `média por emissão: ${fmtPts(Math.round(pts / soldCpfs))}` : undefined} />
-              <Stat icon={<Activity className="h-4 w-4" />} label="Performance (ROE)" value={invested > 0 ? pctFmt((result / invested) * 100) : "-"} hint={[priced > 0 && `margem ${pctFmt((result / priced) * 100)}`, cpfs > 0 && `lucro por CPF ${fmtBRL(Math.round(result / cpfs))} (${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"})`].filter(Boolean).join(" · ")} />
+              <Stat icon={<Activity className="h-4 w-4" />} label="Performance (ROI)" value={invested > 0 ? pctFmt((result / invested) * 100) : "-"} hint={[priced > 0 && `margem ${pctFmt((result / priced) * 100)}`, cpfs > 0 && `lucro por CPF ${fmtBRL(Math.round(result / cpfs))} (${cpfs} ${cpfs === 1 ? "CPF" : "CPFs"})`].filter(Boolean).join(" · ")} />
             </div>
           )}
           <SalesClient

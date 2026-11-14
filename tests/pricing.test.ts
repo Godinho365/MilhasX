@@ -1,9 +1,9 @@
-// Milheiro sugerido por ROE (lucro ÷ custo dos pontos).
+// Milheiro sugerido por ROI (lucro ÷ custo dos pontos).
 import { describe, it, expect } from "vitest";
 import { priceForRoe, priceOptions, roeOf } from "@/domain/pricing";
 
 describe("milheiro sugerido", () => {
-  it("preço para um ROE e ROE de um preço", () => {
+  it("preço para um ROI e ROI de um preço", () => {
     expect(priceForRoe(2353, 10)).toBe(2588); // R$ 23,53 + 10% = R$ 25,88
     expect(roeOf(2532, 2353)).toBe(7.6);
     expect(roeOf(2353, 2353)).toBe(0);
@@ -17,7 +17,7 @@ describe("milheiro sugerido", () => {
     expect(o.find((x) => x.key === "roe20")).toMatchObject({ cpmCents: 2824, profitCents: 18840 });
   });
 
-  it("sem média de venda, mostra só o mínimo e as metas de ROE", () => {
+  it("sem média de venda, mostra só o mínimo e as metas de ROI", () => {
     expect(priceOptions({ costCpmCents: 2000, avgSaleCpmCents: null, points: 10_000, cpfs: 2 }).map((x) => x.key)).toEqual(["zero", "roe10", "roe15", "roe20"]);
   });
 });

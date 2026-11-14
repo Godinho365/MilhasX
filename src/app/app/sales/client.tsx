@@ -157,7 +157,7 @@ export function SalesClient({ sales, accounts, suppliers, customers, cards, sp, 
                   {on("custoMilhas") && <th className="text-right" title="Custo dos pontos usados">Custo milhas</th>}
                   <th className="text-right">Lucro</th>
                   {on("margem") && <th className="text-right" title="Lucro ÷ preço de venda">Margem</th>}
-                  {on("roe") && <th className="text-right" title="Lucro ÷ custo investido">ROE</th>}
+                  {on("roe") && <th className="text-right" title="Lucro ÷ custo investido">ROI</th>}
                   {on("lucroCpf") && <th className="text-right">Lucro/CPF</th>}
                   {on("pgto") && <th>Pgto cliente</th>}
                   <th className="w-16 text-right">Ações</th>
@@ -356,7 +356,7 @@ function SaleDetails({ sale: s, onClose }: { sale: SaleView; onClose: () => void
           <div><p className="text-xs text-muted">Total</p><p className="font-semibold tabular-nums">{fmtBRL(s.totalCents)}</p></div>
           <div><p className="text-xs text-muted">Custo</p><p className="font-semibold tabular-nums">{fmtBRL(s.costCents)}</p></div>
           <div><p className="text-xs text-muted">Resultado</p><p className={`font-semibold tabular-nums ${s.resultCents >= 0 ? "text-ok" : "text-bad"}`}>{fmtBRL(s.resultCents)}{s.marginPct != null && <span className="block text-xs font-normal text-muted">{s.marginPct.toLocaleString("pt-BR")}%</span>}</p></div>
-          <div><p className="text-xs text-muted">ROE</p><p className="font-semibold tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</p></div>
+          <div><p className="text-xs text-muted">ROI</p><p className="font-semibold tabular-nums">{s.roePct == null ? "-" : `${s.roePct.toLocaleString("pt-BR")}%`}</p></div>
           <div><p className="text-xs text-muted">Lucro por CPF</p><p className="font-semibold tabular-nums">{s.cpfs > 0 ? fmtBRL(Math.round(s.resultCents / s.cpfs)) : "-"}<span className="block text-xs font-normal text-muted">{s.cpfs} {s.cpfs === 1 ? "CPF" : "CPFs"}</span></p></div>
         </div>
         {s.refund && (
@@ -542,7 +542,7 @@ const COLUMNS = [
   { key: "custo", label: "Custo total", on: true },
   { key: "custoMilhas", label: "Custo milhas", on: false },
   { key: "margem", label: "Margem", on: true },
-  { key: "roe", label: "ROE", on: true },
+  { key: "roe", label: "ROI", on: true },
   { key: "lucroCpf", label: "Lucro/CPF", on: true },
   { key: "pgto", label: "Pgto cliente", on: true },
 ] as const;
@@ -695,7 +695,7 @@ function PartnerDialog({ sale: s, partners, onClose }: { sale: SaleView; partner
             </select>
           </Field>
         )}
-        <p className="text-xs text-muted">A comissão é calculada agora e sai do lucro, da margem e do ROE da venda. Se a venda for editada, ela é recalculada.</p>
+        <p className="text-xs text-muted">A comissão é calculada agora e sai do lucro, da margem e do ROI da venda. Se a venda for editada, ela é recalculada.</p>
       </div>
     </Modal>
   );
