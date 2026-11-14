@@ -1,7 +1,8 @@
 import { defineConfig } from "@playwright/test";
-import { useE2eDatabase } from "./e2e/db";
+import { disabledIntegrationsEnv, useE2eDatabase } from "./e2e/db";
 
 // Nunca o banco do .env (no servidor é o de produção): banco próprio, criado e preparado no globalSetup.
+// As integrações reais do .env (Turnstile, e-mail, Google, push, Balcão) também ficam desligadas no servidor de teste.
 const DATABASE_URL = useE2eDatabase();
 
 // Testes de ponta a ponta pela interface. Precisa do banco no ar e dos programas do seed
@@ -25,7 +26,7 @@ export default defineConfig({
   webServer: {
     command: "npx next build && npx next start -p 3200",
     url: "http://localhost:3200/login",
-    env: { NEXT_DIST_DIR: ".next-e2e", APP_URL: "http://localhost:3200", DATABASE_URL },
+    env: { ...disabledIntegrationsEnv(), NEXT_DIST_DIR: ".next-e2e", APP_URL: "http://localhost:3200", DATABASE_URL },
     reuseExistingServer: false,
     timeout: 400_000,
   },

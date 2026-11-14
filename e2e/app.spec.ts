@@ -1,5 +1,6 @@
-import { test, expect, type Page, type Locator } from "@playwright/test";
+import { test, expect, type Browser, type Page, type Locator } from "@playwright/test";
 import { useE2eDatabase } from "./db";
+import { CONSENT_COOKIE, encodeConsent, newConsent } from "../src/domain/consent";
 
 // Um usuário novo por execução: o fluxo inteiro roda pela interface, do cadastro à exclusão.
 const stamp = Date.now();
@@ -10,8 +11,15 @@ test.describe.configure({ mode: "serial" });
 
 let page: Page;
 
+/** Página nova já com a escolha de cookies feita ("só os necessários"): o aviso fixo no rodapé cobria os campos. */
+async function freshPage(browser: Browser) {
+  const p = await browser.newPage();
+  await p.context().addCookies([{ name: CONSENT_COOKIE, value: encodeConsent(newConsent({ analytics: false, marketing: false })), url: "http://localhost:3200" }]);
+  return p;
+}
+
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
+  page = await freshPage(browser);
   // Depois de cada navegação, espera a página ficar ociosa (JS carregado e hidratado) antes de interagir
   const goto = page.goto.bind(page);
   page.goto = async (url, opts) => {
@@ -81,7 +89,7 @@ test("cadastro, saída e login", async () => {
 });
 
 test("recuperação de senha responde sem revelar a conta", async ({ browser }) => {
-  const p = await browser.newPage();
+  const p = await freshPage(browser);
   await p.goto("/forgot-password");
   await p.getByLabel("E-mail").fill("ninguem@exemplo.test");
   await p.getByRole("button", { name: "Enviar link" }).click();
@@ -1124,7 +1132,7 @@ test("painel administrativo completo", async ({ browser }) => {
   await createAdmin({ email: user.email, name: user.name });
 
   // um segundo usuário para ativar/desativar
-  const other = await browser.newPage();
+  const other = await freshPage(browser);
   const otherEmail = `e2e-outro-${stamp}@exemplo.test`;
   expect((await other.request.post("/api/auth/register", { data: { name: "Outro E2E", email: otherEmail, password: "senha-e2e-123" } })).status()).toBe(201);
 
