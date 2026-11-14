@@ -375,3 +375,25 @@ export async function balcaoReportDeal(userId: string, actorId: string, dealId: 
     return r.reclamacao;
   });
 }
+
+/** Encerradas que a conta limpou da lista (Negociações e Minhas propostas). Só somem do MilhasX; no Balcão continuam. */
+export type BalcaoHidden = { negociacoes: number[]; propostas: number[] };
+const HIDDEN_MAX = 2000; // guarda as mais recentes (ids maiores), para a lista não crescer sem fim
+
+export async function balcaoHidden(userId: string): Promise<BalcaoHidden> {
+  const row = await prisma.balcaoLink.findUnique({ where: { userId }, select: { hiddenDeals: true, hiddenProposals: true } });
+  return { negociacoes: row?.hiddenDeals ?? [], propostas: row?.hiddenProposals ?? [] };
+}
+
+export async function balcaoSetHidden(userId: string, kind: keyof BalcaoHidden, ids: number[], hide: boolean): Promise<BalcaoHidden> {
+  const field = kind === "negociacoes" ? "hiddenDeals" : "hiddenProposals";
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.balcaoLink.findUnique({ where: { userId }, select: { hiddenDeals: true, hiddenProposals: true } });
+    if (!row) throw new DomainError(409, "Vincule sua conta do Balcão primeiro");
+    const set = new Set(row[field]);
+    for (const id of ids) if (hide) set.add(id); else set.delete(id);
+    const next = [...set].sort((a, b) => b - a).slice(0, HIDDEN_MAX);
+    const saved = await tx.balcaoLink.update({ where: { userId }, data: { [field]: next }, select: { hiddenDeals: true, hiddenProposals: true } });
+    return { negociacoes: saved.hiddenDeals, propostas: saved.hiddenProposals };
+  });
+}

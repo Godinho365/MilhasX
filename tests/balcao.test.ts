@@ -17,6 +17,7 @@ import * as myOffers from "@/app/api/balcao/my-offers/route";
 import * as myOffer from "@/app/api/balcao/my-offers/[id]/route";
 import * as choose from "@/app/api/balcao/my-offers/[id]/choose/route";
 import * as dealsRoute from "@/app/api/balcao/deals/route";
+import * as hiddenRoute from "@/app/api/balcao/hidden/route";
 import * as dealRoute from "@/app/api/balcao/deals/[id]/route";
 import * as dealMsg from "@/app/api/balcao/deals/[id]/messages/route";
 import * as dealFiles from "@/app/api/balcao/deals/[id]/files/route";
@@ -465,6 +466,28 @@ describe("Balcão MilhasX", () => {
     expect((await bia.call(proposal.PUT, "PUT", "/api/balcao/offers/1/proposal", { cpmCents: 2500 }, { id: "1" })).status).toBe(403);
     expect((await bia.call(balcao.DELETE, "DELETE", "/api/balcao")).status).toBe(403);
     expect(await prisma.balcaoLink.count()).toBe(1);
+  });
+
+  it("limpar encerradas: some só da lista daqui, volta quando pedir, a equipe vê o mesmo e quem só vê não limpa", async () => {
+    await enable();
+    expect((await c.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo: "negociacoes", ids: [1], ocultar: true })).status).toBe(409);
+    await link();
+    const calls = b.s.calls.length;
+    expect((await c.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [], propostas: [] });
+    const hide = (tipo: string, ids: number[], ocultar: boolean) => c.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo, ids, ocultar });
+    expect((await hide("negociacoes", [21, 20, 20, 12], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [] });
+    expect((await hide("propostas", [7], true)).data.item).toEqual({ negociacoes: [21, 20, 12], propostas: [7] });
+    expect((await hide("negociacoes", [20], false)).data.item.negociacoes).toEqual([21, 12]);
+    expect((await hide("negociacoes", [], true)).status).toBe(400);
+    expect((await hide("outra", [1], true)).status).toBe(400);
+    expect(b.s.calls.length).toBe(calls); // nada vai para o Balcão
+
+    const mid = (await c.call(members.POST, "POST", "/api/team/members", { name: "Bia", email: "bia@x.test" })).data.id as string;
+    const inv = await c.call(inviteRoute.POST, "POST", `/api/team/members/${mid}/invite`, { role: "CUSTOM", permissions: ["chat:view"] }, { id: mid });
+    const bia = new Client();
+    await bia.call(acceptRoute.POST, "POST", "/api/auth/invite/x", { name: "Bia Souza", password: "senha-da-bia-1" }, { token: inv.data.item.link.split("/convite/")[1] });
+    expect((await bia.call(hiddenRoute.GET, "GET", "/api/balcao/hidden")).data.item).toEqual({ negociacoes: [21, 12], propostas: [7] });
+    expect((await bia.call(hiddenRoute.POST, "POST", "/api/balcao/hidden", { tipo: "propostas", ids: [7], ocultar: false })).status).toBe(403);
   });
 });
 

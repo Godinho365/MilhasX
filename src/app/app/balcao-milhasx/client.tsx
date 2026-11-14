@@ -15,6 +15,7 @@ import { DEAL_STAGE_LABELS } from "@/domain/miles-deals";
 import { useRealtimeConnection, useRealtimeEvents } from "@/lib/realtime";
 import { BuyPanel } from "./buy";
 import { DealInline, DealsPanel } from "./deals";
+import { ClosedSection, useHidden } from "./closed";
 
 type Status = {
   enabled: boolean; linked: boolean; linkedAt: string | null; syncedAt: string | null;
@@ -332,10 +333,28 @@ function OfferCard({ o, canPropose, onPropose }: { o: Offer; canPropose: boolean
   );
 }
 
+// Em andamento: aguardando o comprador numa oferta ainda aberta, ou escolhida com a negociação correndo. O resto
+// (recusada, oferta cancelada/expirada/fechada com outro, negociação concluída) vai para as encerradas.
+const proposalActive = (p: MyProposal) =>
+  (p.status === "pending" && p.oferta.status === "open") || (p.status === "chosen" && ["awaiting_payment", "matched"].includes(p.oferta.status));
+const proposalKey = (p: MyProposal) => p.id;
+const proposalNumber = (p: MyProposal) => p.oferta.id;
+const proposalDone = (p: MyProposal) => p.status === "chosen" && p.oferta.status === "completed";
+
 function ProposalList({ items, canEdit, realtime }: { items: MyProposal[]; canEdit: boolean; realtime: boolean }) {
+  const { hidden, setHidden } = useHidden("propostas");
+  const active = items.filter(proposalActive);
+  const closed = items.filter((p) => !proposalActive(p));
   return (
-    <div className="card divide-y divide-line">
-      {items.map((p) => <ProposalRow key={p.id} p={p} canEdit={canEdit} realtime={realtime} />)}
+    <div className="space-y-3">
+      {active.length ? (
+        <div className="card divide-y divide-line">
+          {active.map((p) => <ProposalRow key={p.id} p={p} canEdit={canEdit} realtime={realtime} />)}
+        </div>
+      ) : <p className="text-sm text-muted">Nenhuma proposta em andamento.</p>}
+      <ClosedSection kind="propostas" items={closed} idOf={proposalKey} numberOf={proposalNumber} done={proposalDone} labels={{ ok: "Concluídas", nao: "Não fechadas" }}
+        hidden={hidden} setHidden={setHidden} canEdit={canEdit}
+        render={(list, action) => <div className="card divide-y divide-line">{list.map((p) => <ProposalRow key={p.id} p={p} canEdit={canEdit} realtime={realtime} action={action(p)} />)}</div>} />
     </div>
   );
 }
@@ -343,7 +362,7 @@ function ProposalList({ items, canEdit, realtime }: { items: MyProposal[]; canEd
 // etapas em que a proposta escolhida virou negociação (com conversa)
 const DEAL_STATES = ["awaiting_payment", "matched", "completed"];
 
-function ProposalRow({ p, canEdit, realtime }: { p: MyProposal; canEdit: boolean; realtime: boolean }) {
+function ProposalRow({ p, canEdit, realtime, action }: { p: MyProposal; canEdit: boolean; realtime: boolean; action?: React.ReactNode }) {
   const hasDeal = p.status === "chosen" && DEAL_STATES.includes(p.oferta.status);
   const [chat, setChat] = useState(hasDeal && p.oferta.status !== "completed");
   return (
@@ -361,6 +380,7 @@ function ProposalRow({ p, canEdit, realtime }: { p: MyProposal; canEdit: boolean
           )}
           {p.deal && <Link className="underline" href={`/app/crm-milhas?deal=${p.deal.id}`}>CRM Milhas #{p.deal.number} · {p.deal.archived ? "arquivada" : DEAL_STAGE_LABELS[p.deal.stage]}</Link>}
           {p.oferta.link_bot && <a className="underline" href={p.oferta.link_bot} target="_blank" rel="noreferrer">Abrir no bot</a>}
+          {action}
         </span>
       </div>
       {hasDeal && chat && <div className="mt-3"><DealInline id={p.oferta.id} canEdit={canEdit} realtime={realtime} /></div>}
