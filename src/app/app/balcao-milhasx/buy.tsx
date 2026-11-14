@@ -201,7 +201,7 @@ function MyOfferCard({ o, canEdit, expanded, proposals, onToggle, onCancel, onCh
         <Alert kind="info">Pague o PIX de <b>{fmtBRL(d.voce_paga_centavos)}</b> ({fmtBRL(d.total_centavos)} das milhas + {fmtBRL(d.taxa_centavos)} de taxa) que o bot do Balcão te mandou. Assim que o pagamento cair, o contato do vendedor é liberado.</Alert>
       )}
       {o.status === "matched" && (
-        <Alert kind="info">Negociação liberada: o contato do vendedor está no seu Telegram. Mande o voo e os dados dos passageiros por lá. A conversa por aqui chega na próxima etapa.</Alert>
+        <Alert kind="info">Negociação liberada: converse com o vendedor na aba Negociações (ou pelo bot no Telegram, é a mesma conversa) e mande o voo e os dados dos passageiros.</Alert>
       )}
 
       <footer className="mt-3 flex flex-wrap items-center gap-2">

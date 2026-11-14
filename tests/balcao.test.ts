@@ -16,6 +16,14 @@ import * as buyRules from "@/app/api/balcao/buy/route";
 import * as myOffers from "@/app/api/balcao/my-offers/route";
 import * as myOffer from "@/app/api/balcao/my-offers/[id]/route";
 import * as choose from "@/app/api/balcao/my-offers/[id]/choose/route";
+import * as dealsRoute from "@/app/api/balcao/deals/route";
+import * as dealRoute from "@/app/api/balcao/deals/[id]/route";
+import * as dealMsg from "@/app/api/balcao/deals/[id]/messages/route";
+import * as dealFiles from "@/app/api/balcao/deals/[id]/files/route";
+import * as dealFile from "@/app/api/balcao/deals/[id]/messages/[mid]/file/route";
+import * as dealAct from "@/app/api/balcao/deals/[id]/actions/[action]/route";
+import * as dealRate from "@/app/api/balcao/deals/[id]/rating/route";
+import * as dealReport from "@/app/api/balcao/deals/[id]/report/route";
 import * as members from "@/app/api/team/members/route";
 import * as inviteRoute from "@/app/api/team/members/[id]/invite/route";
 import * as acceptRoute from "@/app/api/auth/invite/[token]/route";
@@ -44,6 +52,10 @@ function fakeBalcao() {
     fail500: 0, // próximas N chamadas com erro 500
     limited: false,
     mine: new Set<number>(), // ofertas abertas por este membro (quem compra)
+    msgsSeen: 0,
+    deals: new Map<number, { id: number; papel: "comprador" | "vendedor"; status: string; emitida_em: string | null; rated: number | null; v: number }>(),
+    msgs: [] as Record<string, any>[],
+    files: new Map<number, { data: Buffer; mime: string; name: string }>(),
     chosenCents: new Map<number, number>(),
   };
   const offer = (id: number, o: Partial<BalcaoOffer> = {}) => {
@@ -68,7 +80,7 @@ function fakeBalcao() {
   const fetch = async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
     const h = new Headers(init.headers);
-    const body = init.body ? JSON.parse(String(init.body)) : null;
+    const body = typeof init.body === "string" ? JSON.parse(init.body) : null;
     s.calls.push({ method: init.method ?? "GET", path: u.pathname + u.search, secret: h.get("x-partner-secret"), auth: h.get("authorization"), body });
     if (s.down > 0) { s.down--; throw new TypeError("fetch failed"); }
     if (s.fail500 > 0) { s.fail500--; return err(500, "erro_interno", "Erro interno no Balcão"); }
@@ -104,8 +116,43 @@ function fakeBalcao() {
       return res(200, {
         ofertas: pick(s.offers.values()), propostas: pick([...s.props.values()].filter((p) => !p.received)),
         propostas_recebidas: pick([...s.props.values()].filter((p) => p.received)).map((p) => ({ ...p, vendedor: SELLER_REP })),
+        negociacoes: since < 0 ? [] : [...s.deals.values()].filter((d) => d.v > since).map(dealJson),
+        mensagens: since < 0 ? [] : s.msgs.filter((m) => s.deals.get(m.negociacao_id)!.v > since && m.id > (s.msgsSeen ?? 0)),
         cursor: String(seq), mais: false,
       });
+    }
+    // a negociação (as regras de lá: só o vendedor emite, só o comprador conclui, conversa só em andamento)
+    const dealM = path.match(/^\/negociacoes(?:\/(\d+))?(?:\/(mensagens|emitida|concluida|cancelar|avaliacao|reclamacao))?(?:\/(\d+)\/arquivo)?$/);
+    if (dealM) {
+      if (!dealM[1]) return res(200, { negociacoes: [...s.deals.values()].map(dealJson) });
+      const d = s.deals.get(Number(dealM[1]));
+      if (!d) return err(404, "negociacao_nao_encontrada", "Negociação não encontrada.");
+      const what = dealM[2];
+      if (!what && method === "GET") return res(200, { negociacao: dealJson(d), mensagens: s.msgs.filter((x) => x.negociacao_id === d.id) });
+      if (what === "mensagens" && dealM[3]) {
+        const f = s.files.get(Number(dealM[3]));
+        return f ? new Response(new Uint8Array(f.data), { status: 200, headers: { "content-type": f.mime, "content-disposition": `inline; filename="${f.name}"` } }) : err(404, "arquivo_nao_encontrado", "Arquivo não encontrado.");
+      }
+      if (what === "mensagens") {
+        if (d.status !== "matched") return err(409, "conversa_fechada", "A conversa só funciona com a negociação em andamento.");
+        const isForm = init.body instanceof FormData;
+        const texto = isForm ? ((init.body as FormData).get("texto") as string | null) : body?.texto;
+        const arq = isForm ? ((init.body as FormData).get("arquivo") as File | null) : null;
+        const id = s.msgs.length + 1;
+        const m = { id, negociacao_id: d.id, minha: true, via: "milhasx", texto: texto ?? null, entregue: true, criada_em: "2026-11-14T12:00:00Z",
+          arquivo: arq ? { tipo: arq.type === "application/pdf" ? "document" : "photo", nome: arq.name, mime: arq.type, tamanho: arq.size } : null };
+        if (arq) s.files.set(id, { data: Buffer.from(await arq.arrayBuffer()), mime: arq.type, name: arq.name });
+        s.msgs.push(m);
+        d.v = ++seq;
+        return res(201, { mensagem: m });
+      }
+      if (what === "emitida") { if (d.papel !== "vendedor") return err(403, "so_vendedor", "Só o vendedor pode marcar a emissão."); d.emitida_em = "2026-11-14T12:00:00Z"; }
+      if (what === "concluida") { if (d.papel !== "comprador") return err(403, "so_comprador", "Só o comprador pode concluir a negociação."); d.status = "completed"; }
+      if (what === "cancelar") { if (d.emitida_em) return err(409, "ja_emitida", "A passagem já foi emitida: não dá mais para desistir."); d.status = "cancelled"; }
+      if (what === "avaliacao") { if (d.status !== "completed") return err(409, "etapa_invalida", "Essa ação não está disponível nesta etapa da negociação."); d.rated = body.estrelas; }
+      if (what === "reclamacao") return res(201, { reclamacao: { id: 7, criada_em: "2026-11-14T12:00:00Z" } });
+      d.v = ++seq;
+      return res(200, { negociacao: dealJson(d) });
     }
     // quem compra (as regras de lá: limite de 5 abertas, Viajante sempre com intermediação)
     const myJson = (o: BalcaoOffer & { v: number }) => ({
@@ -161,13 +208,29 @@ function fakeBalcao() {
     }
     return err(405, "metodo", "Método não permitido");
   };
+  const dealJson = (d: { id: number; papel: string; status: string; emitida_em: string | null; rated: number | null; v: number }) => ({
+    id: d.id, papel: d.papel, status: d.status, programa: "latam", programa_nome: "Latam Pass", milhas: 50_000, cpfs: 1, intermediada: false,
+    observacao: null, milheiro_centavos: 2000, total_centavos: 100_000, taxa_centavos: 0, comprador_paga_centavos: 100_000,
+    escolhida_em: "2026-11-14T10:00:00Z", paga_em: null, emitida_em: d.emitida_em, concluida_em: d.status === "completed" ? "2026-11-14T13:00:00Z" : null,
+    atualizada_em: `2026-11-14T12:00:00.${String(d.v).padStart(3, "0")}Z`, cancelada_por: d.status === "cancelled" ? "voce" : null,
+    outra_parte: { ...SELLER_REP, nome: "Rafa", usuario: "rafa" },
+    acoes: { conversar: d.status === "matched", emitida: d.papel === "vendedor" && d.status === "matched" && !d.emitida_em, concluida: d.papel === "comprador" && d.status === "matched", cancelar: d.status === "matched" && !d.emitida_em, reclamar: true, avaliar: d.status === "completed" && d.rated == null },
+    minha_avaliacao: d.rated ? { estrelas: d.rated, comentario: null } : null, link_bot: "https://t.me/BalcaoBot",
+  });
+  /** Uma negociação em andamento em que este membro é comprador ou vendedor. */
+  const deal = (id: number, papel: "comprador" | "vendedor") => { s.deals.set(id, { id, papel, status: "matched", emitida_em: null, rated: null, v: ++seq }); };
+  /** A outra parte responde pelo bot. */
+  const reply = (dealId: number, texto: string) => {
+    s.msgs.push({ id: s.msgs.length + 1, negociacao_id: dealId, minha: false, via: "bot", texto, entregue: true, criada_em: "2026-11-14T12:01:00Z", arquivo: null });
+    s.deals.get(dealId)!.v = ++seq;
+  };
   /** Um milheiro de lá manda proposta numa oferta deste membro. */
   const receive = (offerId: number, cents: number) => {
     const id = s.props.size + 1;
     s.props.set(id, { id, oferta_id: offerId, valor_centavos: cents, total_centavos: null, contraproposta: true, status: "pending", via: null, criada_em: "", atualizada_em: null, received: true, v: ++seq });
     return id;
   };
-  return { s, fetch, offer, set, setProp, receive };
+  return { s, fetch, offer, set, setProp, receive, deal, reply };
 }
 
 let c: Client;
@@ -492,5 +555,76 @@ describe("Balcão MilhasX: quem compra", () => {
     const r = await c.call(myOffers.POST, "POST", "/api/balcao/my-offers", NEW);
     expect(r.status).toBe(409);
     expect(r.data.erro).toContain("5 ofertas abertas");
+  });
+});
+
+describe("Balcão MilhasX: a negociação", () => {
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+  const upload = (id: number, data: Buffer, mime: string, q = "nome=reserva.png") =>
+    dealFiles.POST(new Request(`http://localhost:3100/api/balcao/deals/${id}/files?${q}`, {
+      method: "POST", body: new Uint8Array(data), headers: { "content-type": mime, cookie: (c as any).cookie ?? "", origin: "http://localhost:3100" },
+    }), { params: Promise.resolve({ id: String(id) }) });
+
+  it("conversa (texto e arquivo, nos dois sentidos), etapas, avaliação e reclamação; ao vivo pelo vigia", async () => {
+    await enable();
+    await link();
+    b.deal(500, "comprador");
+    b.deal(501, "vendedor");
+    const list = await c.call(dealsRoute.GET, "GET", "/api/balcao/deals?todas=1");
+    expect(list.data.items.map((d: { id: number }) => d.id)).toEqual([500, 501]);
+
+    const w = new BalcaoWatcher(async (_u, ev) => { sent.push(ev); });
+    const sent: BalcaoEvent[] = [];
+    await w.tick();
+
+    // texto daqui; resposta pelo bot chega no evento (com a negociação atualizada)
+    const t = await c.call(dealMsg.POST, "POST", "/x", { text: "Oi! Voo GRU-LIS dia 10/03." }, { id: "500" });
+    expect(t.status).toBe(201);
+    expect(t.data.item).toMatchObject({ minha: true, via: "milhasx" });
+    expect((await c.call(dealMsg.POST, "POST", "/x", { text: "   " }, { id: "500" })).status).toBe(400);
+    b.reply(500, "Manda os dados do passageiro.");
+    await w.tick();
+    const ev = sent.at(-1)!;
+    expect(ev.messages.map((m) => m.texto)).toContain("Manda os dados do passageiro.");
+    expect(ev.deals.map((d) => d.id)).toContain(500);
+    const detail = await c.call(dealRoute.GET, "GET", "/x", undefined, { id: "500" });
+    expect(detail.data.item.messages.map((m: { texto: string }) => m.texto)).toEqual(["Oi! Voo GRU-LIS dia 10/03.", "Manda os dados do passageiro."]);
+
+    // arquivo: o tipo é conferido pelo conteúdo (não pela extensão), e volta pelo MilhasX
+    const bad = await upload(500, Buffer.from("MZ executável"), "image/png");
+    expect(bad.status).toBe(400);
+    expect((await upload(500, PNG, "application/x-msdownload")).status).toBe(400);
+    const up = await upload(500, PNG, "image/png", "nome=reserva.png&texto=Segue%20o%20print");
+    expect(up.status).toBe(201);
+    const fm = (await up.json()).item;
+    expect(fm).toMatchObject({ texto: "Segue o print", arquivo: { tipo: "photo", nome: "reserva.png" } });
+    const dl = await dealFile.GET(new Request(`http://localhost:3100/x`, { headers: { cookie: (c as any).cookie ?? "" } }), { params: Promise.resolve({ id: "500", mid: String(fm.id) }) });
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toBe("image/png");
+    expect(dl.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await dl.arrayBuffer()).equals(PNG)).toBe(true);
+
+    // etapas: quem pode é o Balcão que decide (o erro de lá volta igual)
+    const wrong = await c.call(dealAct.POST, "POST", "/x", undefined, { id: "500", action: "emitida" });
+    expect(wrong.status).toBe(403);
+    expect(wrong.data.erro).toContain("Só o vendedor");
+    expect((await c.call(dealAct.POST, "POST", "/x", undefined, { id: "500", action: "xpto" })).status).toBe(404);
+    const issued = await c.call(dealAct.POST, "POST", "/x", undefined, { id: "501", action: "emitida" });
+    expect(issued.status).toBe(200);
+    expect(issued.data.item.emitida_em).toBeTruthy();
+    expect((await c.call(dealAct.POST, "POST", "/x", undefined, { id: "501", action: "cancelar" })).status).toBe(409);
+    const done = await c.call(dealAct.POST, "POST", "/x", undefined, { id: "500", action: "concluida" });
+    expect(done.data.item).toMatchObject({ status: "completed", acoes: { avaliar: true } });
+    expect((await c.call(dealMsg.POST, "POST", "/x", { text: "oi" }, { id: "500" })).status).toBe(409);
+
+    expect((await c.call(dealRate.POST, "POST", "/x", { stars: 6 }, { id: "500" })).status).toBe(400);
+    const rated = await c.call(dealRate.POST, "POST", "/x", { stars: 5, comment: "Rápido!" }, { id: "500" });
+    expect(rated.data.item.minha_avaliacao).toMatchObject({ estrelas: 5 });
+    expect((await c.call(dealReport.POST, "POST", "/x", { text: "curto" }, { id: "501" })).status).toBe(400);
+    expect((await c.call(dealReport.POST, "POST", "/x", { text: "O comprador sumiu depois da emissão." }, { id: "501" })).status).toBe(201);
+    expect((await c.call(dealRoute.GET, "GET", "/x", undefined, { id: "abc" })).status).toBe(404);
+
+    const actions = (await prisma.auditLog.findMany({ where: { action: { startsWith: "balcao.deal_" } }, orderBy: { createdAt: "asc" } })).map((a) => a.action);
+    expect(actions).toEqual(["balcao.deal_emitida", "balcao.deal_concluida", "balcao.deal_rate", "balcao.deal_report"]);
   });
 });
