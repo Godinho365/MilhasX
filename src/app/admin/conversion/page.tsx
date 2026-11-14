@@ -32,7 +32,7 @@ export default async function AdminConversion({ searchParams }: { searchParams: 
 
   return (
     <>
-      <PageHeader title="Conversão" subtitle={`Do cadastro ao plano pago · quem se cadastrou nos últimos ${w.label}, comparado aos ${w.label} anteriores`} />
+      <PageHeader title="Conversão" subtitle={`Do cadastro ao plano pago · quem se cadastrou ${w.phrase}, comparado ao período anterior`} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {f.map((s, i) => (
           <Kpi key={s.key} tone={i === f.length - 1 ? "hl" : undefined} label={s.label} value={fmtPts(s.count)} delta={s.delta} hint={i === 0 ? `${s.prev} no período anterior` : `${pct(s.pctOfPrev)} da etapa anterior · ${pct(s.pctOfFirst)} do total`} />

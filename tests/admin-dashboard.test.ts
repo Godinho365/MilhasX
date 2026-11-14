@@ -4,7 +4,7 @@ import { prisma } from "@/server/db";
 import { adminDashboard } from "@/server/services/admin-dashboard";
 import { listUsers, userFilterCounts } from "@/server/services/admin";
 import {
-  parsePeriod, periodWindow, delta, bucketKey, bucketKeys, seriesByBucket, revenue, churn, funnel, trialFunnel, trialConversion,
+  parsePeriod, periodWindow, periodDays, rangeText, delta, bucketKey, bucketKeys, seriesByBucket, revenue, churn, funnel, trialFunnel, trialConversion,
   activation, nextRenewal, expiring, atRisk, type AdminUser, type AdminSub,
 } from "@/domain/admin-metrics";
 
@@ -36,6 +36,41 @@ describe("período e comparação", () => {
     expect(w.bucket).toBe("day");
     expect(periodWindow("90d", NOW).bucket).toBe("week");
     expect(periodWindow("12m", NOW).bucket).toBe("month");
+  });
+
+  it("aceita dias do calendário e todo o período na URL", () => {
+    expect(parsePeriod("2026-11-01_2026-11-30")).toBe("2026-11-01_2026-11-30");
+    expect(parsePeriod("all")).toBe("all");
+    expect(parsePeriod("2026-11-30_2026-11-01")).toBe("30d"); // invertido
+    expect(parsePeriod("2026-02-30_2026-03-01")).toBe("30d"); // dia que não existe
+    expect(parsePeriod("2026-11-01")).toBe("30d");
+  });
+
+  it("monta a janela dos dias escolhidos no horário de Brasília, até agora quando o fim é futuro", () => {
+    const w = periodWindow("2026-10-01_2026-10-31", NOW);
+    expect(w.from).toEqual(new Date("2026-10-01T03:00:00Z"));
+    expect(w.to).toEqual(new Date("2026-11-01T03:00:00Z"));
+    expect(w.prevTo).toEqual(w.from);
+    expect(w.prevFrom).toEqual(new Date(w.from.getTime() - 31 * DAY));
+    expect(w.label).toBe("outubro de 2026");
+    expect(w.phrase).toBe("em outubro de 2026");
+    expect(w.bucket).toBe("day");
+    const mes = periodWindow("2026-11-01_2026-11-30", NOW);
+    expect(mes.to).toEqual(NOW);
+    expect(periodWindow("2026-11-01_2026-11-13", NOW).phrase).toBe("de 01/11 a 13/11/2026");
+    expect(periodWindow("2026-11-13_2026-11-13", NOW).phrase).toBe("em 13/11/2026");
+    const tudo = periodWindow("all", NOW);
+    expect(tudo.label).toBe("todo o período");
+    expect(tudo.to).toEqual(NOW);
+    expect(tudo.bucket).toBe("month");
+    expect(periodWindow("30d", NOW).phrase).toBe("nos últimos 30 dias");
+  });
+
+  it("devolve os dias do período para o calendário", () => {
+    expect(periodDays("2026-11-01_2026-11-30", NOW)).toEqual({ from: "2026-11-01", to: "2026-11-30" });
+    expect(periodDays("all", NOW)).toBeNull();
+    expect(periodDays("7d", NOW)).toEqual({ from: "2026-11-07", to: "2026-11-13" });
+    expect(rangeText("2025-12-20_x".slice(0, 10), "2026-01-05")).toBe("20/12/2025 a 05/01/2026");
   });
 
   it("calcula a variação, sem dividir por zero", () => {
