@@ -4,6 +4,8 @@ import { leadsData, LEAD_FILTERS } from "@/server/services/admin-leads";
 import { parsePeriod, LEAD_STATUS_LABEL, type LeadStatus } from "@/domain/admin-metrics";
 import { contactText, mailLink, waLink } from "@/domain/admin-contact";
 import { PageHeader } from "@/components/stat";
+import { Pagination } from "@/components/pagination";
+import { pageHref, pageParam } from "@/lib/paging";
 import { fmtBRL, fmtDay, fmtPts } from "@/lib/format";
 import { Chips, Kpi, Panel, Pill, Section, TableCard } from "../dashboard-ui";
 import { ContactButtons } from "../users/[id]/actions";
@@ -11,10 +13,10 @@ import { ContactButtons } from "../users/[id]/actions";
 const pct = (n: number, d: number) => (d ? `${(Math.round((n / d) * 1000) / 10).toLocaleString("pt-BR")}%` : "—");
 const TONE: Record<LeadStatus, "zinc" | "green" | "red" | "amber" | "blue"> = { unfinished: "red", trial: "amber", trial_over: "zinc", asked: "blue", paid: "green", free: "zinc" };
 
-export default async function AdminLeads({ searchParams }: { searchParams: Promise<{ p?: string; s?: string }> }) {
+export default async function AdminLeads({ searchParams }: { searchParams: Promise<{ p?: string; s?: string; page?: string }> }) {
   const sp = await searchParams;
   const period = parsePeriod(sp.p);
-  const d = await leadsData(period, sp.s ?? null);
+  const d = await leadsData(period, sp.s ?? null, undefined, pageParam(sp.page));
   const w = d.window;
   const accounts = d.funnel[1]!.count;
   const href = (s: string | null) => `/admin/leads?${new URLSearchParams({ ...(sp.p ? { p: sp.p } : {}), ...(s ? { s } : {}) })}`;
@@ -45,18 +47,18 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
             ))}
           </div>
         </Panel>
-        <Panel title="Desempenho por origem" subtitle={`utm_source do anúncio ou indicação · ${d.tracked} de ${accounts} com origem`}>
+        <Panel className="min-w-0" title="Desempenho por origem" subtitle={`utm_source do anúncio ou indicação · ${d.tracked} de ${accounts} com origem`}>
           {d.origins.length === 0 ? <p className="py-4 text-center text-sm text-muted">Sem contas no período.</p> : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto"><table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-muted"><th className="pb-1 font-medium">Origem</th><th className="pb-1 text-right font-medium">Leads</th><th className="pb-1 text-right font-medium">Pagaram</th><th className="pb-1 text-right font-medium">Conversão</th><th className="pb-1 text-right font-medium">MRR</th></tr></thead>
               <tbody>{d.origins.slice(0, 10).map((o) => <tr key={o.origin} className="border-t border-line"><td className="py-1.5 font-medium">{o.origin}</td><td className="text-right tabular-nums">{o.leads}</td><td className="text-right tabular-nums">{o.paid}</td><td className="text-right tabular-nums">{pct(o.paid, o.leads)}</td><td className="text-right tabular-nums">{fmtBRL(o.mrrCents)}</td></tr>)}</tbody>
-            </table>
+            </table></div>
           )}
-          <p className="mt-3 text-xs text-muted">A origem vem dos parâmetros utm_* do link (ex.: <code>?utm_source=instagram&amp;utm_campaign=black</code>) e só é guardada quando a pessoa aceita os cookies de marketing.</p>
+          <p className="mt-3 break-words text-xs text-muted">A origem vem dos parâmetros utm_* do link (ex.: <code>?utm_source=instagram&amp;utm_campaign=black</code>) e só é guardada quando a pessoa aceita os cookies de marketing.</p>
         </Panel>
       </div>
 
-      <Section title="Lista de leads" subtitle="Do mais recente para o mais antigo">
+      <Section id="lista" title="Lista de leads" subtitle="Do mais recente para o mais antigo">
         <Chips active={d.filter ?? "all"} items={[{ key: "all", label: "Todos", href: href(null), n: d.total }, ...LEAD_FILTERS.map((f) => ({ key: f, label: LEAD_STATUS_LABEL[f], href: href(f), n: d.counts[f] }))]} />
         <TableCard colSpan={5} minW={880} empty={d.list.length === 0 && "Nenhum lead aqui."} head={<><th>Lead</th><th>Origem</th><th>Situação</th><th>Chegou</th><th className="text-right">Chamar</th></>}>
           {d.list.map((l) => {
@@ -75,7 +77,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
             );
           })}
         </TableCard>
-        {d.list.length >= 300 && <p className="mt-2 text-xs text-muted">Mostrando os 300 mais recentes. Use os filtros ou o CSV para ver todos.</p>}
+        <Pagination {...d.paging} href={pageHref("/admin/leads", sp, "page", "lista")} noun={["lead", "leads"]} />
       </Section>
     </>
   );

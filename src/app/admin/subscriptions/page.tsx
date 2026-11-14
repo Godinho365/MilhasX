@@ -4,6 +4,8 @@ import { subscriptionsOverview, SUB_STATUSES } from "@/server/services/admin-bil
 import { parsePeriod } from "@/domain/admin-metrics";
 import { PLANS, planPriceCents, type PlanCode, type PlanInterval } from "@/domain/plans";
 import { PageHeader } from "@/components/stat";
+import { Pagination } from "@/components/pagination";
+import { pageHref, pageParam } from "@/lib/paging";
 import { fmtBRL, fmtDay, fmtPts } from "@/lib/format";
 import { Chips, Kpi, Pill, Section, TableCard } from "../dashboard-ui";
 import { RequestActions } from "./client";
@@ -13,10 +15,10 @@ const STATUS: Record<string, { label: string; tone: "green" | "amber" | "red" | 
 };
 const planName = (p: string, i: string | null) => `${PLANS[p as PlanCode].name}${p === "PESSOAL" ? "" : i === "ANUAL" ? " anual" : " mensal"}`;
 
-export default async function AdminSubscriptions({ searchParams }: { searchParams: Promise<{ p?: string; s?: string }> }) {
+export default async function AdminSubscriptions({ searchParams }: { searchParams: Promise<{ p?: string; s?: string; page?: string; mpage?: string }> }) {
   const sp = await searchParams;
   const period = parsePeriod(sp.p);
-  const d = await subscriptionsOverview(period, sp.s ?? null);
+  const d = await subscriptionsOverview(period, sp.s ?? null, undefined, pageParam(sp.page), pageParam(sp.mpage));
   const href = (s: string | null) => `/admin/subscriptions?${new URLSearchParams({ ...(sp.p ? { p: sp.p } : {}), ...(s ? { s } : {}) })}`;
   const total = Object.values(d.counts).reduce((a, b) => a + b, 0);
 
@@ -49,7 +51,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
         </Section>
       </section>
 
-      <Section title="Mercado Pago" subtitle="Assinaturas criadas no checkout, das mais recentes para as mais antigas">
+      <Section id="mercado-pago" title="Mercado Pago" subtitle="Assinaturas criadas no checkout, das mais recentes para as mais antigas">
         <Chips active={d.status ?? "all"} items={[{ key: "all", label: "Todas", href: href(null), n: total }, ...SUB_STATUSES.map((s) => ({ key: s, label: STATUS[s]!.label, href: href(s), n: d.counts[s] }))]} />
         <TableCard colSpan={6} empty={d.list.length === 0 && "Nenhuma assinatura aqui."} head={<><th>Usuário</th><th>Plano</th><th className="text-right">Valor</th><th>Status</th><th>Criada</th><th>Atualizada</th></>}>
           {d.list.map((s) => (
@@ -63,9 +65,10 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             </tr>
           ))}
         </TableCard>
+        <Pagination {...d.listPaging} href={pageHref("/admin/subscriptions", sp, "page", "mercado-pago")} noun={["assinatura", "assinaturas"]} />
       </Section>
 
-      <Section title="Ativados pela administração" subtitle="Planos pagos sem assinatura ativa no Mercado Pago (cortesias e ativações manuais)">
+      <Section id="ativados" title="Ativados pela administração" subtitle="Planos pagos sem assinatura ativa no Mercado Pago (cortesias e ativações manuais)">
         <TableCard colSpan={3} empty={d.manual.length === 0 && "Nenhum plano ativado à mão."} head={<><th>Usuário</th><th>Plano</th><th className="text-right">Preço de tabela</th></>}>
           {d.manual.map((u) => (
             <tr key={u.id}>
@@ -75,6 +78,7 @@ export default async function AdminSubscriptions({ searchParams }: { searchParam
             </tr>
           ))}
         </TableCard>
+        <Pagination {...d.manualPaging} href={pageHref("/admin/subscriptions", sp, "mpage", "ativados")} noun={["plano", "planos"]} />
       </Section>
     </>
   );

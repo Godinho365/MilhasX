@@ -3,6 +3,7 @@ import { fmtDateTime } from "@/lib/format";
 import { listAudit } from "@/server/services/admin";
 import { PageHeader } from "@/components/stat";
 import { Pagination } from "@/components/pagination";
+import { pageHref, pageParam } from "@/lib/paging";
 import { Chips, Pill } from "../dashboard-ui";
 
 // Filtros rápidos pelo prefixo da ação e a cor de cada grupo
@@ -16,7 +17,7 @@ const toneOf = (action: string) => GROUPS.find((g) => action.startsWith(g.prefix
 
 export default async function AdminAudit({ searchParams }: { searchParams: Promise<{ action?: string; page?: string }> }) {
   const sp = await searchParams;
-  const data = await listAudit({ action: sp.action, page: Number(sp.page) || 1 });
+  const data = await listAudit({ action: sp.action, page: pageParam(sp.page) });
   return (
     <>
       <PageHeader title="Auditoria" subtitle={`${data.total.toLocaleString("pt-BR")} ${data.total === 1 ? "registro" : "registros"}${sp.action ? ` com "${sp.action}"` : ""}`}>
@@ -35,7 +36,7 @@ export default async function AdminAudit({ searchParams }: { searchParams: Promi
           </tbody>
         </table>
       </div>
-      <Pagination page={data.page} pages={data.pages} total={data.total} pageSize={50} href={(p) => `/admin/audit?${new URLSearchParams({ ...(sp.action ? { action: sp.action } : {}), page: String(p) })}`} />
+      <Pagination {...data} href={pageHref("/admin/audit", sp)} noun={["registro", "registros"]} />
     </>
   );
 }

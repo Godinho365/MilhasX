@@ -3,6 +3,8 @@ import { listPrivacyRequests, PRIVACY_STATUSES, PRIVACY_DEADLINE_DAYS } from "@/
 import { protocolOf } from "@/server/services/privacy";
 import { PRIVACY_REQUEST_KINDS } from "@/domain/privacy";
 import { PageHeader } from "@/components/stat";
+import { Pagination } from "@/components/pagination";
+import { pageHref, pageParam } from "@/lib/paging";
 import { fmtDateTime, fmtDay } from "@/lib/format";
 import { Chips, TableCard } from "../dashboard-ui";
 import { PrivacyStatus } from "./client";
@@ -10,9 +12,9 @@ import { PrivacyStatus } from "./client";
 const LABELS = { NEW: "Novos", IN_PROGRESS: "Em andamento", DONE: "Concluídos" } as const;
 const kindLabel = (k: string) => PRIVACY_REQUEST_KINDS.find((x) => x.key === k)?.label ?? k;
 
-export default async function AdminPrivacy({ searchParams }: { searchParams: Promise<{ s?: string }> }) {
+export default async function AdminPrivacy({ searchParams }: { searchParams: Promise<{ s?: string; page?: string }> }) {
   const sp = await searchParams;
-  const d = await listPrivacyRequests(sp.s ?? null);
+  const d = await listPrivacyRequests(sp.s ?? null, pageParam(sp.page));
   const now = Date.now();
   const total = Object.values(d.counts).reduce((a, b) => a + b, 0);
   return (
@@ -39,6 +41,7 @@ export default async function AdminPrivacy({ searchParams }: { searchParams: Pro
           );
         })}
       </TableCard>
+      <Pagination {...d.paging} href={pageHref("/admin/privacy", sp)} noun={["pedido", "pedidos"]} />
     </>
   );
 }

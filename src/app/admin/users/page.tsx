@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { requirePageAdmin } from "@/server/session";
-import { listUsers, userFilterCounts, USER_FILTERS } from "@/server/services/admin";
+import { listUsersPage, userFilterCounts, USER_FILTERS } from "@/server/services/admin";
 import { PageHeader } from "@/components/stat";
+import { Pagination } from "@/components/pagination";
+import { pageHref, pageParam } from "@/lib/paging";
 import { UserRow } from "./client";
 import { effectivePlan } from "@/domain/plans";
 import { Chips } from "../dashboard-ui";
@@ -11,12 +13,13 @@ const FILTER_LABELS: Record<(typeof USER_FILTERS)[number] | "all", string> = {
   all: "Todos", paid: "Pagantes", trial: "Em teste", request: "Pediram plano", deletion: "Pediram exclusão", disabled: "Desativados", admin: "Admins",
 };
 
-export default async function AdminUsers({ searchParams }: { searchParams: Promise<{ q?: string; f?: string }> }) {
+export default async function AdminUsers({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; page?: string }> }) {
   const admin = await requirePageAdmin();
   const sp = await searchParams;
   const q = sp.q?.trim() || undefined;
   const f = (USER_FILTERS as readonly string[]).includes(sp.f ?? "") ? sp.f! : "all";
-  const [users, counts] = await Promise.all([listUsers(q, f === "all" ? null : f), userFilterCounts()]);
+  const [res, counts] = await Promise.all([listUsersPage(q, f === "all" ? null : f, pageParam(sp.page)), userFilterCounts()]);
+  const users = res.items;
   const href = (key: string) => `/admin/users?${new URLSearchParams({ ...(q ? { q } : {}), ...(key !== "all" ? { f: key } : {}) })}`;
   return (
     <>
@@ -41,7 +44,7 @@ export default async function AdminUsers({ searchParams }: { searchParams: Promi
           </tbody>
         </table>
       </div>
-      {users.length >= 200 && <p className="mt-2 text-xs text-muted">Mostrando os 200 cadastros mais recentes. Use a busca ou os filtros para achar os demais.</p>}
+      <Pagination {...res} href={pageHref("/admin/users", sp)} noun={["usuário", "usuários"]} />
     </>
   );
 }

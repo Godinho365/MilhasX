@@ -1,5 +1,6 @@
 // Admin › Leads: quem chegou no período (contas criadas e cadastros não concluídos), de onde veio e em que pé está.
 import { prisma } from "../db";
+import { paginate } from "@/lib/paging";
 import { notifyPrefs, type PlanCode } from "@/domain/plans";
 import {
   periodWindow, leadFunnel, leadOrigin, leadStatus, type AdminUser, type LeadStatus, type PeriodKey,
@@ -7,7 +8,10 @@ import {
 
 export const LEAD_FILTERS = ["unfinished", "trial", "trial_over", "asked", "paid", "free"] as const;
 
-export async function leadsData(period: PeriodKey, filter: string | null, now = new Date(), limit = 300) {
+export const LEADS_PAGE_SIZE = 50;
+
+/** `page` é a página da lista (de LEADS_PAGE_SIZE); "all" devolve a lista inteira (CSV). */
+export async function leadsData(period: PeriodKey, filter: string | null, now = new Date(), page: number | "all" = 1, pageSize = LEADS_PAGE_SIZE) {
   const w = periodWindow(period, now);
   const inWin = { gte: w.from, lt: w.to };
   const [rawUsers, codes, requestLogs] = await Promise.all([
@@ -78,6 +82,13 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
     tracked: rows.filter((r) => r.origin !== "Direto / sem origem").length,
     funnel: leadFunnel({ started: rows.length + unfinished.length, accounts: rows.length, used: rows.filter((r) => r.used).length, asked: rows.filter((r) => r.status === "asked" || r.status === "paid").length, paid: counts.paid }),
     origins: [...byOrigin.values()].sort((a, b) => b.leads - a.leads),
-    list: (st ? all.filter((r) => r.status === st) : all).slice(0, limit),
+    ...list(st ? all.filter((r) => r.status === st) : all, page, pageSize),
   };
+}
+
+/** Lista da tela: `list` é a página pedida e `paging` diz onde ela está no total do filtro. */
+function list<T>(rows: T[], page: number | "all", pageSize: number) {
+  if (page === "all") return { list: rows, paging: { page: 1, pages: 1, total: rows.length, pageSize: Math.max(rows.length, 1) } };
+  const { items, ...paging } = paginate(rows, page, pageSize);
+  return { list: items, paging };
 }
