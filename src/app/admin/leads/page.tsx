@@ -2,13 +2,14 @@ import Link from "next/link";
 import { Mail, MailCheck, Target, TrendingUp, UserX } from "lucide-react";
 import { leadsData, LEAD_FILTERS } from "@/server/services/admin-leads";
 import { parsePeriod, LEAD_STATUS_LABEL, type LeadStatus } from "@/domain/admin-metrics";
-import { contactText, mailLink, waLink } from "@/domain/admin-contact";
+import { contactText, emailSentState, isEmailReason, mailLink, signupRecoveryOpen, waLink, SIGNUP_RECOVERY_MAX_DAYS } from "@/domain/admin-contact";
 import { PageHeader } from "@/components/stat";
 import { Pagination } from "@/components/pagination";
 import { pageHref, pageParam } from "@/lib/paging";
 import { fmtBRL, fmtDay, fmtPts } from "@/lib/format";
 import { Chips, Kpi, Panel, Pill, Section, TableCard } from "../dashboard-ui";
 import { ContactButtons } from "../users/[id]/actions";
+import { SendEmailButton } from "../send-email-button";
 
 const pct = (n: number, d: number) => (d ? `${(Math.round((n / d) * 1000) / 10).toLocaleString("pt-BR")}%` : "—");
 const TONE: Record<LeadStatus, "zinc" | "green" | "red" | "amber" | "blue"> = { unfinished: "red", trial: "amber", trial_over: "zinc", asked: "blue", paid: "green", free: "zinc" };
@@ -21,6 +22,7 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
   const accounts = d.funnel[1]!.count;
   const href = (s: string | null) => `/admin/leads?${new URLSearchParams({ ...(sp.p ? { p: sp.p } : {}), ...(s ? { s } : {}) })}`;
   const top = Math.max(d.funnel[0]!.count, 1);
+  const now = new Date();
 
   return (
     <>
@@ -66,13 +68,22 @@ export default async function AdminLeads({ searchParams }: { searchParams: Promi
             const text = l.userId ? contactText(reason, l.name, { days: l.trialDaysLeft }) : "Oi! Aqui é da equipe MilhasX. Vi que você começou o cadastro e não concluiu. Posso te ajudar?";
             return (
               <tr key={l.key}>
-                <td>{l.userId ? <Link href={`/admin/users/${l.userId}`} className="font-semibold hover:underline">{l.name}</Link> : <span className="font-semibold text-muted">Sem conta</span>}<span className="block text-xs text-muted">{l.email}{l.userId && ` · ${l.method}`}{l.marketing && " · aceita marketing"}</span></td>
+                <td>{l.userId ? <Link href={`/admin/users/${l.userId}`} className="font-semibold hover:underline">{l.name}</Link> : <span className="font-semibold text-muted">Sem conta</span>}<span className="block text-xs text-muted [overflow-wrap:anywhere]">{l.email}{l.userId && ` · ${l.method}`}{l.marketing && " · aceita marketing"}</span></td>
                 <td>{l.origin}{l.campaign && <span className="block text-xs text-muted">{l.campaign}</span>}</td>
                 <td><Pill tone={TONE[l.status]}>{LEAD_STATUS_LABEL[l.status]}{l.status === "trial" && ` · ${l.trialDaysLeft}d`}</Pill>{l.userId && !l.used && l.status !== "paid" && <span className="mt-1 block text-xs text-muted">ainda não lançou nada</span>}</td>
                 <td className="text-muted">{fmtDay(l.createdAt)}</td>
                 <td className="text-right">{l.userId
-                  ? <ContactButtons compact userId={l.userId} reason={reason} wa={waLink(l.phone, text)} mail={mailLink(l.email, "MilhasX", text)} />
-                  : <a className="btn-ghost h-8 px-2.5 text-xs" href={mailLink(l.email, "Seu cadastro no MilhasX", text)}><Mail className="h-4 w-4" />E-mail</a>}</td>
+                  ? <ContactButtons compact userId={l.userId} reason={reason} wa={waLink(l.phone, text)} mail={mailLink(l.email, "MilhasX", text)} send={isEmailReason(reason) ? { sent: emailSentState(l.emailSentAt, now) } : null} />
+                  : (
+                    <span className="inline-flex flex-nowrap gap-1.5">
+                      {l.codeId && (
+                        <SendEmailButton compact path="/api/admin/leads/recovery-email" body={{ codeId: l.codeId }} label="Enviar e-mail de recuperação" sent={emailSentState(l.emailSentAt, now)}
+                          disabledReason={signupRecoveryOpen(l.createdAt, now) ? null : `O cadastro parou há mais de ${SIGNUP_RECOVERY_MAX_DAYS} dias: o e-mail de recuperação só vale até ${SIGNUP_RECOVERY_MAX_DAYS} dias`}
+                          confirm={{ title: "Enviar e-mail de recuperação?", body: "O MilhasX manda para este lead uma mensagem com o visual da marca e o link para concluir o cadastro. Dá para mandar de novo só depois de 24 h." }} />
+                      )}
+                      <a className="btn-ghost h-8 w-8 px-0 text-xs" href={mailLink(l.email, "Seu cadastro no MilhasX", text)} title="Abrir no seu app de e-mail" aria-label="Abrir no seu app de e-mail"><Mail className="h-4 w-4" /></a>
+                    </span>
+                  )}</td>
               </tr>
             );
           })}

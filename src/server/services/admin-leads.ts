@@ -1,5 +1,6 @@
 // Admin › Leads: quem chegou no período (contas criadas e cadastros não concluídos), de onde veio e em que pé está.
 import { prisma } from "../db";
+import { lastAdminEmails, leadRef } from "./admin-email";
 import { paginate } from "@/lib/paging";
 import { notifyPrefs, type PlanCode } from "@/domain/plans";
 import {
@@ -27,7 +28,7 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
       orderBy: { createdAt: "desc" },
     }),
     // Pediram o código de cadastro no período (o e-mail é tudo o que se tem de quem não concluiu)
-    prisma.emailCode.findMany({ where: { purpose: "signup", createdAt: inWin }, select: { email: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+    prisma.emailCode.findMany({ where: { purpose: "signup", createdAt: inWin }, select: { id: true, email: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
     prisma.auditLog.findMany({ where: { action: { in: ["billing.plan_request", "billing.checkout"] }, createdAt: { gte: w.from } }, select: { actorId: true } }),
   ]);
   const asked = new Set(requestLogs.map((l) => l.actorId).filter((x): x is string => !!x));
@@ -37,8 +38,9 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
   // Quem pediu código e não tem conta com esse e-mail (nem antes do período)
   const codeEmails = [...new Set(codes.map((c) => c.email))];
   const existing = new Set((await prisma.user.findMany({ where: { email: { in: codeEmails } }, select: { email: true } })).map((u) => u.email));
-  const unfinishedMap = new Map<string, Date>();
-  for (const c of codes) if (!existing.has(c.email) && !unfinishedMap.has(c.email)) unfinishedMap.set(c.email, c.createdAt);
+  // O código mais recente de cada e-mail: o id dele identifica o lead no botão "Enviar e-mail de recuperação"
+  const unfinishedMap = new Map<string, { at: Date; codeId: string }>();
+  for (const c of codes) if (!existing.has(c.email) && !unfinishedMap.has(c.email)) unfinishedMap.set(c.email, { at: c.createdAt, codeId: c.id });
 
   const rows = rawUsers.map((u) => {
     const au: AdminUser = { ...u, plan: u.plan as PlanCode, planRequest: u.planRequest as PlanCode | null };
@@ -46,7 +48,7 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
     const { origin, campaign } = leadOrigin(u);
     const sub = u.subscriptions.find((s) => s.status === "AUTHORIZED");
     return {
-      key: u.id, userId: u.id as string | null, name: u.name, email: u.email, phone: u.phone, createdAt: u.createdAt, status, origin, campaign,
+      key: u.id, userId: u.id as string | null, codeId: null as string | null, name: u.name, email: u.email, phone: u.phone, createdAt: u.createdAt, status, origin, campaign,
       method: u.googleId ? "Google" : "E-mail",
       marketing: notifyPrefs(u.preference?.notifications).marketing.email,
       used: !!u.entries[0],
@@ -54,8 +56,8 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
       mrrCents: sub ? Math.round(sub.amountCents / (sub.interval === "ANUAL" ? 12 : 1)) : 0,
     };
   });
-  const unfinished = [...unfinishedMap].map(([email, at]) => ({
-    key: `code:${email}`, userId: null, name: "", email, phone: null as string | null, createdAt: at, status: "unfinished" as LeadStatus, origin: "—", campaign: null as string | null,
+  const unfinished = [...unfinishedMap].map(([email, { at, codeId }]) => ({
+    key: `code:${email}`, userId: null, codeId, name: "", email, phone: null as string | null, createdAt: at, status: "unfinished" as LeadStatus, origin: "—", campaign: null as string | null,
     method: "E-mail", marketing: false, used: false, trialDaysLeft: 0, mrrCents: 0,
   }));
   const all = [...rows, ...unfinished].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -82,8 +84,15 @@ export async function leadsData(period: PeriodKey, filter: string | null, now = 
     tracked: rows.filter((r) => r.origin !== "Direto / sem origem").length,
     funnel: leadFunnel({ started: rows.length + unfinished.length, accounts: rows.length, used: rows.filter((r) => r.used).length, asked: rows.filter((r) => r.status === "asked" || r.status === "paid").length, paid: counts.paid }),
     origins: [...byOrigin.values()].sort((a, b) => b.leads - a.leads),
-    ...list(st ? all.filter((r) => r.status === st) : all, page, pageSize),
+    ...(await withEmailSent(list(st ? all.filter((r) => r.status === st) : all, page, pageSize), page === "all")),
   };
+}
+
+/** Na página da tela, quando o MilhasX mandou e-mail para cada lead (o CSV não precisa). */
+async function withEmailSent<T extends { userId: string | null; email: string }, P>(l: { list: T[]; paging: P }, skip: boolean) {
+  const ref = (r: T) => r.userId ?? leadRef(r.email);
+  const sent = skip ? new Map<string, Date>() : await lastAdminEmails(l.list.map(ref));
+  return { ...l, list: l.list.map((r) => ({ ...r, emailSentAt: sent.get(ref(r)) ?? null })) };
 }
 
 /** Lista da tela: `list` é a página pedida e `paging` diz onde ela está no total do filtro. */

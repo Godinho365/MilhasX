@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { recoveryData } from "@/server/services/admin-dashboard";
-import { contactText, mailLink, waLink, CONTACT_LABELS } from "@/domain/admin-contact";
+import { contactText, emailSentState, mailLink, waLink, CONTACT_LABELS } from "@/domain/admin-contact";
 import { PLANS } from "@/domain/plans";
 import { PageHeader } from "@/components/stat";
 import { Pagination } from "@/components/pagination";
@@ -24,14 +24,15 @@ export default async function AdminRecovery({ searchParams }: { searchParams: Pr
   const tab = TABS.some((t) => t.key === sp.t) ? sp.t! : "all";
   const hideContacted = sp.c === "0";
   const all = await recoveryData();
-  const weekAgo = Date.now() - 7 * 86400_000;
+  const now = new Date();
+  const weekAgo = now.getTime() - 7 * 86400_000;
   const pg = paginate(all.filter((i) => (tab === "all" || i.kind === tab) && !(hideContacted && i.contact && i.contact.at.getTime() > weekAgo)), pageParam(sp.page), 50);
   const rows = pg.items;
   const href = (t: string, c = hideContacted) => `/admin/recovery?${new URLSearchParams({ ...(t !== "all" ? { t } : {}), ...(c ? { c: "0" } : {}) })}`;
 
   return (
     <>
-      <PageHeader title="Recuperação" subtitle="Quem está perto de virar cliente ou de ir embora. Chame pelo WhatsApp ou e-mail com a mensagem pronta; o contato fica registrado." />
+      <PageHeader title="Recuperação" subtitle="Quem está perto de virar cliente ou de ir embora. Chame pelo WhatsApp ou mande o e-mail pronto pelo próprio MilhasX; o contato fica registrado." />
       <div className="flex flex-wrap items-start justify-between gap-2">
         <Chips active={tab} items={TABS.map((t) => ({ key: t.key, label: t.label, href: href(t.key), n: t.key === "all" ? all.length : all.filter((i) => i.kind === t.key).length }))} />
         <Link href={href(tab, !hideContacted)} className={`mb-3 rounded-full border px-3 py-1 text-xs font-medium ${hideContacted ? "border-[rgb(var(--brand))] text-[rgb(var(--brand))]" : "border-line bg-panel text-muted"}`}>
@@ -46,8 +47,8 @@ export default async function AdminRecovery({ searchParams }: { searchParams: Pr
               <td><Link href={`/admin/users/${i.userId}`} className="font-semibold hover:underline">{i.user.name}</Link><span className="block text-xs text-muted">{i.user.email}</span></td>
               <td><Pill tone={TONE[i.kind]}>{CONTACT_LABELS[i.kind]}</Pill><span className="mt-1 block text-xs text-muted">{i.detail}</span></td>
               <td className="text-muted">{i.lastActivity ? fmtDay(i.lastActivity) : "Nunca"}</td>
-              <td className="text-muted">{i.contact ? <>{fmtDateTime(i.contact.at)}<span className="block text-xs">{i.contact.channel === "whatsapp" ? "WhatsApp" : "E-mail"}</span></> : "—"}</td>
-              <td className="text-right"><ContactButtons compact userId={i.userId} reason={i.kind} wa={waLink(i.user.phone, text)} mail={mailLink(i.user.email, SUBJECT[i.kind], text)} /></td>
+              <td className="text-muted">{i.contact ? <>{fmtDateTime(i.contact.at)}<span className="block text-xs">{i.contact.channel === "whatsapp" ? "WhatsApp" : i.contact.sent ? "E-mail enviado pelo MilhasX" : "E-mail"}</span></> : "—"}</td>
+              <td className="text-right"><ContactButtons compact userId={i.userId} reason={i.kind} wa={waLink(i.user.phone, text)} mail={mailLink(i.user.email, SUBJECT[i.kind], text)} send={{ sent: emailSentState(i.emailSentAt, now) }} /></td>
             </tr>
           );
         })}
