@@ -59,22 +59,39 @@ export type BalcaoNewOffer = {
   programa: string; milhas: number; cpfs: number; milheiro_centavos: number; urgente: boolean; intermediada: boolean;
   observacao?: string | null;
 };
+/** A negociação vista por uma das partes (o contato da outra só depois de liberada, como no bot). */
+export type BalcaoDeal = {
+  id: number; papel: "comprador" | "vendedor"; status: BalcaoOffer["status"]; programa: string; programa_nome: string;
+  milhas: number; cpfs: number; intermediada: boolean; observacao: string | null;
+  milheiro_centavos: number; total_centavos: number; taxa_centavos: number; comprador_paga_centavos: number;
+  escolhida_em: string | null; paga_em: string | null; emitida_em: string | null; concluida_em: string | null;
+  atualizada_em: string | null; cancelada_por: "voce" | "outra_parte" | null;
+  outra_parte: BalcaoBuyer & { nome: string | null; usuario: string | null };
+  acoes: { conversar: boolean; emitida: boolean; concluida: boolean; cancelar: boolean; reclamar: boolean; avaliar: boolean };
+  minha_avaliacao: { estrelas: number; comentario: string | null } | null;
+  link_bot: string | null;
+};
+export type BalcaoDealMessage = {
+  id: number; negociacao_id: number; minha: boolean; via: string; texto: string | null; entregue: boolean; criada_em: string;
+  arquivo: { tipo: "photo" | "document"; nome: string | null; mime: string | null; tamanho: number | null } | null;
+};
+export type BalcaoDealAction = "emitida" | "concluida" | "cancelar";
 export type BalcaoLinkInfo = { id: number; criado_em: string; referencia: string | null };
 
-type Opts = { token?: string; body?: unknown; retry?: boolean };
+type Opts = { token?: string; body?: unknown; form?: FormData; retry?: boolean };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function request<T>(method: string, path: string, opts: Opts = {}): Promise<T> {
   const url = `${balcaoApiUrl()}/api/parceiro/v1${path}`;
   const headers: Record<string, string> = { "x-partner-secret": process.env.BALCAO_API_SECRET?.trim() ?? "" };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
-  if (opts.body !== undefined) headers["content-type"] = "application/json";
+  if (opts.body !== undefined && !opts.form) headers["content-type"] = "application/json";
   const where = path.split("?")[0]; // para o log: sem a query (filtros e cursor)
   let res: Response | null = null;
   for (let attempt = 0; ; attempt++) {
     try {
       res = await fetch(url, {
-        method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        method, headers, body: opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch {
@@ -116,7 +133,10 @@ export const balcaoApi = {
   proposals: (token: string, status?: string | null) =>
     request<{ propostas: (BalcaoProposal & { oferta: BalcaoOffer })[] }>("GET", `/propostas${qs({ status })}`, { token, retry: true }),
   changes: (token: string, desde?: string | null) =>
-    request<{ ofertas: BalcaoOffer[]; propostas: BalcaoProposal[]; propostas_recebidas?: BalcaoReceivedProposal[]; cursor: string; mais: boolean }>(
+    request<{
+      ofertas: BalcaoOffer[]; propostas: BalcaoProposal[]; propostas_recebidas?: BalcaoReceivedProposal[];
+      negociacoes?: BalcaoDeal[]; mensagens?: BalcaoDealMessage[]; cursor: string; mais: boolean;
+    }>(
       "GET", `/mudancas${qs({ desde })}`, { token, retry: true }),
   // quem compra (as regras são as do bot: buying.py)
   buyRules: (token: string, programa?: string | null) =>
@@ -130,6 +150,44 @@ export const balcaoApi = {
     request<{ oferta: BalcaoMyOffer; propostas: BalcaoReceivedProposal[] }>("GET", `/minhas-ofertas/${id}`, { token, retry: true }),
   cancelOffer: (token: string, id: number) =>
     request<{ oferta: BalcaoMyOffer }>("DELETE", `/minhas-ofertas/${id}`, { token, retry: true }),
+  // a negociação (as duas partes; as regras são as do bot: dealing.py)
+  deals: (token: string, status: "ativas" | "todas" = "ativas") =>
+    request<{ negociacoes: BalcaoDeal[] }>("GET", `/negociacoes${qs({ status })}`, { token, retry: true }),
+  deal: (token: string, id: number) =>
+    request<{ negociacao: BalcaoDeal; mensagens: BalcaoDealMessage[] }>("GET", `/negociacoes/${id}`, { token, retry: true }),
+  // sem nova tentativa: repetir mandaria a mensagem duas vezes
+  sendMessage: (token: string, id: number, texto: string | null, file?: { data: Buffer; name: string; mime: string }) => {
+    if (!file) return request<{ mensagem: BalcaoDealMessage }>("POST", `/negociacoes/${id}/mensagens`, { token, body: { texto } });
+    const form = new FormData();
+    if (texto) form.set("texto", texto);
+    form.set("arquivo", new Blob([new Uint8Array(file.data)], { type: file.mime }), file.name);
+    return request<{ mensagem: BalcaoDealMessage }>("POST", `/negociacoes/${id}/mensagens`, { token, body: null, form });
+  },
+  dealAction: (token: string, id: number, action: BalcaoDealAction) =>
+    request<{ negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/${action}`, { token }),
+  rate: (token: string, id: number, estrelas: number, comentario?: string | null) =>
+    request<{ negociacao: BalcaoDeal }>("POST", `/negociacoes/${id}/avaliacao`, { token, body: { estrelas, comentario } }),
+  report: (token: string, id: number, texto: string) =>
+    request<{ reclamacao: { id: number; criada_em: string } }>("POST", `/negociacoes/${id}/reclamacao`, { token, body: { texto } }),
   choose: (token: string, id: number, propostaId: number) =>
     request<{ oferta: BalcaoMyOffer }>("POST", `/minhas-ofertas/${id}/escolher`, { token, body: { proposta_id: propostaId } }),
 };
+
+/** Arquivo de uma mensagem da negociação (PDF ou imagem), como veio do Balcão. */
+export async function balcaoDealFile(token: string, id: number, mid: number): Promise<{ data: ArrayBuffer; mime: string; name: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${balcaoApiUrl()}/api/parceiro/v1/negociacoes/${id}/mensagens/${mid}/arquivo`, {
+      headers: { "x-partner-secret": process.env.BALCAO_API_SECRET?.trim() ?? "", authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new BalcaoApiError("O Balcão não respondeu: tente de novo em instantes", 503, "sem_resposta");
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { erro?: { codigo?: string; mensagem?: string } } | null;
+    throw new BalcaoApiError(body?.erro?.mensagem ?? `O Balcão respondeu ${res.status}`, res.status >= 500 ? 502 : res.status, body?.erro?.codigo ?? "erro");
+  }
+  const name = /filename="([^"]*)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "arquivo";
+  return { data: await res.arrayBuffer(), mime: res.headers.get("content-type") ?? "application/octet-stream", name };
+}

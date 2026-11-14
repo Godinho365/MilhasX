@@ -6,7 +6,7 @@
 // no bot do Balcão.
 import type { MilesDealStage } from "@prisma/client";
 import { prisma, DomainError, audit, log } from "../db";
-import { balcaoApi, balcaoEnabled, BalcaoApiError, type BalcaoMember, type BalcaoNewOffer, type BalcaoOffer, type BalcaoProposal } from "../balcao-api";
+import { balcaoApi, balcaoDealFile, balcaoEnabled, BalcaoApiError, type BalcaoDealAction, type BalcaoMember, type BalcaoNewOffer, type BalcaoOffer, type BalcaoProposal } from "../balcao-api";
 import { encrypt, decrypt, credentialsEnabled } from "./accounts";
 import { emissionAccounts } from "./capacity";
 import { archiveDeal, createDeal, moveDeal } from "./miles-deals";
@@ -280,5 +280,68 @@ export async function balcaoChooseProposal(userId: string, actorId: string, offe
     const r = await balcaoApi.choose(token, offerId, proposalId);
     await audit(prisma, actorId, "balcao.offer_choose", "BalcaoOffer", String(offerId), { proposalId, status: r.oferta.status });
     return r.oferta;
+  });
+}
+
+// ---------- A negociação: conversa, emitida, concluída, desistência, avaliação e reclamação ----------
+// A conversa é uma só, guardada no Balcão: o que vai daqui chega no Telegram da outra parte e o que ela responde pelo
+// bot aparece aqui. As regras (quem pode, em que etapa, quando a conversa abre) são as do bot (dealing.py).
+
+const FILE_TYPES: Record<string, (b: Buffer) => boolean> = {
+  "application/pdf": (b) => b.subarray(0, 5).toString("latin1") === "%PDF-",
+  "image/png": (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  "image/jpeg": (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  "image/webp": (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP",
+};
+export const DEAL_FILE_MAX = 10 * 1024 * 1024;
+
+export async function balcaoDeals(userId: string, all = false) {
+  return withLink(userId, async (token) => (await balcaoApi.deals(token, all ? "todas" : "ativas")).negociacoes);
+}
+
+export async function balcaoDeal(userId: string, dealId: number) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.deal(token, dealId);
+    return { deal: r.negociacao, messages: r.mensagens };
+  });
+}
+
+/** Mensagem de texto, ou arquivo (PDF ou imagem, até 10 MB) com texto opcional. O tipo é conferido pelo conteúdo. */
+export async function balcaoSendMessage(userId: string, dealId: number, text: string | null, file?: { data: Buffer; name: string; mime: string }) {
+  const clean = text?.trim().slice(0, 4000) || null;
+  if (!clean && !file) throw new DomainError(400, "Escreva a mensagem ou anexe um arquivo");
+  if (file) {
+    const check = FILE_TYPES[file.mime];
+    if (!check || !check(file.data)) throw new DomainError(400, "Envie PDF ou imagem (JPG, PNG ou WEBP)");
+    if (file.data.length > DEAL_FILE_MAX) throw new DomainError(413, "Arquivo grande demais: até 10 MB");
+  }
+  return withLink(userId, async (token) => (await balcaoApi.sendMessage(token, dealId, clean, file)).mensagem);
+}
+
+export async function balcaoDealFileFor(userId: string, dealId: number, messageId: number) {
+  return withLink(userId, (token) => balcaoDealFile(token, dealId, messageId));
+}
+
+export async function balcaoDealAction(userId: string, actorId: string, dealId: number, action: BalcaoDealAction) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.dealAction(token, dealId, action);
+    await audit(prisma, actorId, `balcao.deal_${action}`, "BalcaoDeal", String(dealId), { status: r.negociacao.status });
+    return r.negociacao;
+  });
+}
+
+export async function balcaoRateDeal(userId: string, actorId: string, dealId: number, stars: number, comment?: string | null) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.rate(token, dealId, stars, comment?.trim() || null);
+    await audit(prisma, actorId, "balcao.deal_rate", "BalcaoDeal", String(dealId), { stars });
+    return r.negociacao;
+  });
+}
+
+export async function balcaoReportDeal(userId: string, actorId: string, dealId: number, text: string) {
+  return withLink(userId, async (token) => {
+    const r = await balcaoApi.report(token, dealId, text);
+    await audit(prisma, actorId, "balcao.deal_report", "BalcaoDeal", String(dealId), { report: r.reclamacao.id });
+    return r.reclamacao;
   });
 }
