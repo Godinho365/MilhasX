@@ -4,8 +4,9 @@ import { balcaoDealAction } from "@/server/services/balcao";
 import type { BalcaoDealAction } from "@/server/balcao-api";
 import { dealId } from "../../../ids";
 
-// Balcão MilhasX: etapas da negociação — emitida (vendedor), concluida (comprador), cancelar (antes da emissão)
-const ACTIONS: BalcaoDealAction[] = ["emitida", "concluida", "cancelar"];
+// Balcão MilhasX: etapas da negociação — emitida (vendedor), concluida (comprador), cancelar (antes da emissão),
+// cancelar-emissao (comprador, intermediada, até o prazo depois da emissão)
+const ACTIONS: BalcaoDealAction[] = ["emitida", "concluida", "cancelar", "cancelar-emissao"];
 
 export const POST = route(async (req, { params }) => {
   const u = await requireUser(req);

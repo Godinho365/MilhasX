@@ -7,7 +7,7 @@ import { realtimeEnabled } from "@/server/realtime/upgrade";
 import { BalcaoClient } from "./client";
 
 // Balcão MilhasX: as ofertas de compra do nosso balcão no Telegram, com a conta que emitiria e o lucro, e a proposta
-// mandada daqui (vira negociação no CRM Milhas). O vínculo é feito com o código do bot (/milhasx).
+// mandada daqui (escolhida pelo comprador, vira negociação no CRM Milhas). O vínculo é feito com o código do bot (/milhasx).
 export default async function BalcaoMilhasXPage() {
   const user = await requirePageUser();
   const status = await balcaoStatus(user.id);

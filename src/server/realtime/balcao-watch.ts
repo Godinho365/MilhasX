@@ -98,7 +98,7 @@ export class BalcaoWatcher {
       for (const [k, t] of st.seen) if (now - t > SEEN_TTL_MS) st.seen.delete(k);
       st.failures = 0;
       if (!offers.length && !proposals.length && !received.length && !deals.length && !messages.length) return;
-      const moved = await applyChanges(row.userId, offers, proposals);
+      const moved = await applyChanges(row.userId, offers, proposals, async (id) => (await balcaoApi.offer(token, id)).oferta);
       await this.publish(row.userId, { type: "balcao", offers: await enrichOffers(row.userId, offers, proposals), proposals, received, deals, messages, moved });
     } catch (e) {
       if (e instanceof BalcaoApiError && e.unlinked) {

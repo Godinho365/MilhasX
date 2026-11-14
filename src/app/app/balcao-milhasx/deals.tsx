@@ -3,21 +3,28 @@
 // recebi, desistir, reclamar, avaliar) e a conversa. A conversa é a mesma do bot do Balcão: o que vai daqui chega no
 // Telegram da outra parte e o que ela responde por lá aparece aqui na hora (WebSocket). As regras são as do bot.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BadgeCheck, Check, CheckCheck, ExternalLink, FileText, Handshake, Paperclip, Plane, Send, Star, X } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Check, CheckCheck, Copy, ExternalLink, MessageCircle, ShieldCheck, QrCode, RefreshCw, Undo2, FileText, Handshake, Paperclip, Plane, Send, Star, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtBRL, fmtPts, fmtDateTime } from "@/lib/format";
 import { Alert, Empty } from "@/components/ui";
 import { toast, confirmDialog } from "@/components/feedback";
 import { useRealtimeEvents } from "@/lib/realtime";
+import QRCode from "qrcode";
 
-type Person = { perfil: string | null; verificado: boolean; negociacoes: number; nota: number | null; avaliacoes: number; nome: string | null; usuario: string | null };
+type Person = { perfil: string | null; verificado: boolean; negociacoes: number; nota: number | null; avaliacoes: number; nome: string | null; usuario: string | null; telegram_id?: number | null; reputacao_url?: string | null };
 export type Deal = {
   id: number; papel: "comprador" | "vendedor"; status: string; programa: string; programa_nome: string; milhas: number; cpfs: number;
   intermediada: boolean; observacao: string | null; milheiro_centavos: number; total_centavos: number; taxa_centavos: number;
   comprador_paga_centavos: number; escolhida_em: string | null; paga_em: string | null; emitida_em: string | null;
   concluida_em: string | null; cancelada_por: "voce" | "outra_parte" | null; outra_parte: Person;
-  acoes: { conversar: boolean; emitida: boolean; concluida: boolean; cancelar: boolean; reclamar: boolean; avaliar: boolean };
+  acoes: { conversar: boolean; emitida: boolean; concluida: boolean; cancelar: boolean; reclamar: boolean; avaliar: boolean; cancelar_emissao?: boolean; pagar?: boolean };
   minha_avaliacao: { estrelas: number; comentario: string | null } | null; link_bot: string | null;
+  pix?: Pix | null;
+  cancelamento_emissao?: { pago_centavos: number; taxa_servico_centavos: number; taxa_intermediacao_centavos: number; estorno_centavos: number; prazo_ate: string | null } | null;
+};
+type Pix = {
+  id: number; valor_centavos: number; automatico: boolean; copia_e_cola: string | null; expira_em: string | null;
+  vencido: boolean; chave_pix: string | null; favorecido: string | null;
 };
 type Msg = {
   id: number; negociacao_id: number; minha: boolean; via: string; texto: string | null; entregue: boolean; criada_em: string;
@@ -102,7 +109,7 @@ export function DealsPanel({ canEdit, realtime, focus }: { canEdit: boolean; rea
           </details>
         )}
       </nav>
-      {open ? <DealDetail key={open.id} summary={open} canEdit={canEdit} incoming={incoming} onChanged={(d) => setDeals((l) => l?.map((x) => (x.id === d.id ? d : x)) ?? l)} />
+      {open ? <DealDetail key={open.id} id={open.id} summary={open} canEdit={canEdit} incoming={incoming} onChanged={(d) => setDeals((l) => l?.map((x) => (x.id === d.id ? d : x)) ?? l)} />
         : <p className="text-sm text-muted">Escolha uma negociação.</p>}
     </div>
   );
@@ -122,10 +129,26 @@ function DealRow({ d, active, unread, onClick }: { d: Deal; active: boolean; unr
   );
 }
 
-function DealDetail({ summary, canEdit, incoming, onChanged }: {
-  summary: Deal; canEdit: boolean; incoming: { deal?: Deal; messages: Msg[]; n: number }; onChanged: (d: Deal) => void;
+type Incoming = { deal?: Deal; messages: Msg[]; n: number };
+
+// A negociação dentro de outro lugar da página (o cartão da compra ou da proposta), com a mesma conversa ao vivo
+export function DealInline({ id, canEdit, realtime }: { id: number; canEdit: boolean; realtime: boolean }) {
+  const [incoming, setIncoming] = useState<Incoming>({ messages: [], n: 0 });
+  useRealtimeEvents(realtime, (e) => {
+    if (e.type !== "balcao") return;
+    const ev = e as unknown as { deals?: Deal[]; messages?: Msg[] };
+    const here = (ev.messages ?? []).filter((m) => m.negociacao_id === id);
+    const deal = (ev.deals ?? []).find((d) => d.id === id);
+    if (here.length || deal) setIncoming((p) => ({ deal, messages: here, n: p.n + 1 }));
+  });
+  return <DealDetail id={id} canEdit={canEdit} incoming={incoming} onChanged={noop} />;
+}
+function noop() {}
+
+function DealDetail({ id, summary, canEdit, incoming, onChanged }: {
+  id: number; summary?: Deal; canEdit: boolean; incoming: Incoming; onChanged: (d: Deal) => void;
 }) {
-  const [deal, setDeal] = useState<Deal>(summary);
+  const [deal, setDeal] = useState<Deal | null>(summary ?? null);
   const [messages, setMessages] = useState<Msg[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -133,11 +156,11 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
 
   const apply = useCallback((d: Deal) => { setDeal(d); onChanged(d); }, [onChanged]);
   const load = useCallback(async () => {
-    const r = await api<{ item: { deal: Deal; messages: Msg[] } }>(`/api/balcao/deals/${summary.id}`);
+    const r = await api<{ item: { deal: Deal; messages: Msg[] } }>(`/api/balcao/deals/${id}`);
     if (!r.ok) return toast(r.erro, "error");
     apply(r.data.item.deal);
     setMessages(r.data.item.messages);
-  }, [summary.id, apply]);
+  }, [id, apply]);
   useEffect(() => { void load(); }, [load]);
 
   // ao vivo: mensagem nova ou etapa mudou nesta negociação
@@ -151,10 +174,18 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
   }, [incoming]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages?.length]);
 
-  async function act(action: "emitida" | "concluida" | "cancelar") {
+  async function act(action: "emitida" | "concluida" | "cancelar" | "cancelar-emissao") {
+    if (!deal) return;
     const confirm = {
       emitida: { title: "Informar que a passagem foi emitida?", body: "O comprador é avisado para conferir a reserva na companhia.", confirmLabel: "Passagem emitida" },
       concluida: { title: "Confirmar que recebeu a passagem?", body: deal.intermediada ? "A negociação é concluída e o Balcão repassa o pagamento ao vendedor." : "Confirme só depois de conferir a reserva e pagar o vendedor.", confirmLabel: "Confirmar" },
+      "cancelar-emissao": {
+        title: "Cancelar a emissão?",
+        body: deal.cancelamento_emissao
+          ? `Valor pago: ${fmtBRL(deal.cancelamento_emissao.pago_centavos)}. Taxa de serviço (fica com o vendedor): ${fmtBRL(deal.cancelamento_emissao.taxa_servico_centavos)}. Taxa de intermediação: ${fmtBRL(deal.cancelamento_emissao.taxa_intermediacao_centavos)}. Você recebe de volta ${fmtBRL(deal.cancelamento_emissao.estorno_centavos)}, na conta que pagou. O vendedor cancela a reserva na companhia.`
+          : "O vendedor é avisado e cancela a reserva na companhia.",
+        confirmLabel: "Cancelar a emissão", danger: true,
+      },
       cancelar: { title: "Desistir da negociação?", body: deal.paga_em ? "O valor pago à intermediação é estornado ao comprador. A outra parte é avisada." : "A outra parte é avisada no bot.", confirmLabel: "Desistir", danger: true },
     }[action];
     if (!(await confirmDialog(confirm))) return;
@@ -163,9 +194,10 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
     setBusy(false);
     if (!r.ok) return toast(r.erro, "error");
     apply(r.data.item);
-    toast({ emitida: "Comprador avisado", concluida: "Negociação concluída", cancelar: "Negociação cancelada" }[action]);
+    toast({ emitida: "Comprador avisado", concluida: "Negociação concluída", cancelar: "Negociação cancelada", "cancelar-emissao": "Emissão cancelada: o estorno foi pedido" }[action]);
   }
 
+  if (!deal) return <p className="text-sm text-muted">Carregando a conversa…</p>;
   const o = deal.outra_parte;
   const [label, tone] = STATUS[deal.status] ?? [deal.status, ""];
   const isBuyer = deal.papel === "comprador";
@@ -186,9 +218,21 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
         {o.nota != null ? <span className="flex items-center gap-1 text-xs text-muted"><Star className="h-3 w-3" />{o.nota.toFixed(1)} ({o.avaliacoes})</span> : <span className="text-xs text-muted">sem avaliações</span>}
         <span className="text-xs text-muted">{o.negociacoes} negociação(ões)</span>
       </p>
+      {(o.reputacao_url || o.usuario || o.telegram_id) && (
+        <p className="mt-1 flex flex-wrap gap-2">
+          {o.reputacao_url && <a className="btn-ghost" href={o.reputacao_url} target="_blank" rel="noreferrer"><ShieldCheck className="h-4 w-4" />Ver reputação</a>}
+          {(o.usuario || o.telegram_id) && (
+            <a className="btn-ghost" href={o.usuario ? `https://t.me/${o.usuario}` : `tg://user?id=${o.telegram_id}`} target="_blank" rel="noreferrer"
+              title="Conversa direta no Telegram (fica só lá, não aparece aqui nem no Balcão)">
+              <MessageCircle className="h-4 w-4" />Mensagem privada no Telegram
+            </a>
+          )}
+        </p>
+      )}
 
       <Steps d={deal} />
       <Guidance d={deal} />
+      {isBuyer && deal.pix && <PixBox dealId={deal.id} pix={deal.pix} canEdit={canEdit} onChanged={apply} />}
 
       {canEdit && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -196,6 +240,12 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
           {deal.acoes.concluida && <button type="button" className="btn-primary" disabled={busy} onClick={() => void act("concluida")}><CheckCheck className="h-4 w-4" />{deal.intermediada ? "Recebi a passagem" : "Recebi a passagem e paguei"}</button>}
           {deal.acoes.reclamar && <button type="button" className="btn-ghost" onClick={() => setReporting((v) => !v)}><AlertTriangle className="h-4 w-4" />Reportar problema</button>}
           {deal.acoes.cancelar && <button type="button" className="btn-ghost text-red-300" disabled={busy} onClick={() => void act("cancelar")}><X className="h-4 w-4" />Desistir</button>}
+          {deal.acoes.cancelar_emissao && deal.cancelamento_emissao && (
+            <button type="button" className="btn-ghost text-red-300" disabled={busy} onClick={() => void act("cancelar-emissao")}
+              title={deal.cancelamento_emissao.prazo_ate ? `Até ${fmtDateTime(deal.cancelamento_emissao.prazo_ate)}` : undefined}>
+              <Undo2 className="h-4 w-4" />Cancelar a emissão
+            </button>
+          )}
           {deal.link_bot && <a className="btn-ghost ml-auto" href={deal.link_bot} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" />Abrir o bot</a>}
         </div>
       )}
@@ -206,6 +256,86 @@ function DealDetail({ summary, canEdit, incoming, onChanged }: {
       <Chat deal={deal} messages={messages} canEdit={canEdit} endRef={endRef}
         onSent={(m) => setMessages((l) => (l?.some((x) => x.id === m.id) ? l : [...(l ?? []), m]))} />
     </section>
+  );
+}
+
+function PixBox({ dealId, pix, canEdit, onChanged }: { dealId: number; pix: Pix; canEdit: boolean; onChanged: (d: Deal) => void }) {
+  const [qr, setQr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!pix.copia_e_cola) return setQr(null);
+    let on = true;
+    QRCode.toDataURL(pix.copia_e_cola, { margin: 1, width: 220 }).then((u) => on && setQr(u)).catch(() => on && setQr(null));
+    return () => { on = false; };
+  }, [pix.copia_e_cola]);
+
+  async function copy(text: string) {
+    try { await navigator.clipboard.writeText(text); toast("Copiado"); } catch { toast("Não deu para copiar: selecione o código", "error"); }
+  }
+  async function check() {
+    setBusy(true);
+    const r = await api<{ item: { result: "pago" | "pendente" | "novo" | "manual"; deal: Deal } }>(`/api/balcao/deals/${dealId}/pix`, "POST");
+    setBusy(false);
+    if (!r.ok) return toast(r.erro, "error");
+    onChanged(r.data.item.deal);
+    toast({ pago: "Pagamento confirmado: negociação liberada", pendente: "Ainda não identificamos o pagamento. Assim que cair, a negociação libera sozinha.", novo: "O código tinha vencido: geramos um PIX novo", manual: "Envie o comprovante para a equipe conferir" }[r.data.item.result], r.data.item.result === "pendente" ? "error" : "ok");
+  }
+  async function proof(file: File) {
+    if (!FILE_TYPES.includes(file.type)) return toast("Envie o comprovante em PDF ou imagem (JPG, PNG ou WEBP)", "error");
+    if (file.size > 10 * 1024 * 1024) return toast("Arquivo grande demais: até 10 MB", "error");
+    setBusy(true);
+    const res = await fetch(`/api/balcao/deals/${dealId}/pix/proof?nome=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "content-type": file.type }, body: file });
+    setBusy(false);
+    const body = await res.json().catch(() => null) as { ok?: boolean; item?: Deal; erro?: string } | null;
+    if (!res.ok || !body?.ok || !body.item) return toast(body?.erro ?? "Não foi possível enviar o comprovante", "error");
+    onChanged(body.item);
+    toast("Comprovante enviado: avisamos quando a equipe confirmar");
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-line p-3">
+      <p className="flex items-center gap-2 font-medium"><QrCode className="h-4 w-4" />PIX da intermediação · {fmtBRL(pix.valor_centavos)}</p>
+      {pix.automatico ? (
+        pix.vencido ? (
+          <p className="mt-2 text-sm text-amber-300">Este código venceu. Toque em Gerar PIX novo.</p>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-start gap-4">
+            {qr && <img src={qr} alt="QR Code do PIX" className="h-40 w-40 rounded bg-white p-1" />}
+            <div className="min-w-0 flex-1 space-y-2 text-sm">
+              <p className="text-muted">Pague pelo QR Code ou pelo PIX copia e cola. A confirmação é automática em instantes{pix.expira_em ? `; o código vale até ${fmtDateTime(pix.expira_em)}` : ""}.</p>
+              {pix.copia_e_cola && (
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded bg-panel2 px-2 py-1 text-xs">{pix.copia_e_cola}</code>
+                  <button type="button" className="btn-ghost" onClick={() => void copy(pix.copia_e_cola!)}><Copy className="h-4 w-4" />Copiar</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      ) : (
+        <div className="mt-2 space-y-1 text-sm">
+          <p>Chave PIX do balcão: {pix.chave_pix ? <><code className="rounded bg-panel2 px-1">{pix.chave_pix}</code> <button type="button" className="underline" onClick={() => void copy(pix.chave_pix!)}>copiar</button></> : <i>fale com o suporte</i>}</p>
+          {pix.favorecido && <p className="text-muted">Favorecido: {pix.favorecido}</p>}
+          <p className="text-muted">Depois de pagar, envie a foto ou o PDF do comprovante para a equipe conferir.</p>
+        </div>
+      )}
+      {canEdit && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {pix.automatico ? (
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => void check()}>
+              <RefreshCw className="h-4 w-4" />{pix.vencido ? "Gerar PIX novo" : "Já paguei"}
+            </button>
+          ) : (
+            <>
+              <input ref={fileRef} type="file" accept={FILE_TYPES.join(",")} className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void proof(f); }} />
+              <button type="button" className="btn-primary" disabled={busy} onClick={() => fileRef.current?.click()}><Paperclip className="h-4 w-4" />Enviar comprovante</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -227,7 +357,7 @@ function Guidance({ d }: { d: Deal }) {
   let text: string | null = null;
   if (d.status === "awaiting_payment") {
     text = buyer
-      ? `Pague o PIX de ${fmtBRL(d.comprador_paga_centavos)} que o bot do Balcão te mandou no Telegram. A conversa e o contato do vendedor liberam quando o pagamento cair.`
+      ? `Pague o PIX de ${fmtBRL(d.comprador_paga_centavos)} aqui embaixo (é o mesmo que o bot te mandou no Telegram). A conversa e o contato do vendedor liberam quando o pagamento cair.`
       : "Aguardando o comprador pagar a intermediação. Não emita nada antes disso: a conversa e o contato liberam quando o pagamento cair.";
   } else if (d.status === "matched" && !d.emitida_em) {
     text = buyer ? "Mande ao vendedor o voo (trecho, data e horário) e os dados dos passageiros: nome completo, CPF e data de nascimento."
@@ -239,6 +369,12 @@ function Guidance({ d }: { d: Deal }) {
       : "Passagem informada como emitida. Aguardando o comprador confirmar.";
   } else if (d.status === "cancelled") {
     text = d.cancelada_por === "voce" ? "Você desistiu desta negociação." : "A outra parte desistiu desta negociação.";
+    if (d.emitida_em) text = buyer && d.cancelada_por === "voce" ? "Você cancelou a emissão. O estorno vai para a conta que pagou o PIX." : "A emissão foi cancelada pelo comprador. Cancele a reserva na companhia aérea para recuperar as milhas.";
+  }
+  if (buyer && d.cancelamento_emissao && d.status !== "cancelled") {
+    const q = d.cancelamento_emissao;
+    const extra = `Se precisar cancelar a emissão${q.prazo_ate ? ` (até ${fmtDateTime(q.prazo_ate)})` : ""}, você recebe de volta ${fmtBRL(q.estorno_centavos)}.`;
+    text = text ? `${text} ${extra}` : extra;
   }
   return text ? <Alert kind="info">{text}</Alert> : null;
 }
