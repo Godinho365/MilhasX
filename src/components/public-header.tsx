@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Instagram } from "lucide-react";
 import { BrandMark } from "@/components/brand";
 import { CookiePreferencesLink } from "@/components/consent/link";
 
@@ -36,6 +37,16 @@ export function PublicFooter({ name }: { name: string }) {
         <div>
           <BrandMark name={name} size={28} />
           <p className="mt-3 text-sm text-muted">Gestão de milhas e pontos para quem acumula, compra e vende.</p>
+          <a
+            href="https://www.instagram.com/gomilhasx/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram do MilhasX (abre em nova aba)"
+            className="mt-4 inline-flex items-center gap-2 text-sm text-muted hover:text-accent-light"
+          >
+            <Instagram size={18} aria-hidden="true" />
+            @gomilhasx
+          </a>
         </div>
         {cols.map((c) => (
           <nav key={c.title} aria-label={c.title}>
